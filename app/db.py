@@ -1,0 +1,418 @@
+"""SQLite-Speicher der Fitness-App. Aufbau bewusst wie beim Studienplaner:
+ein SCHEMA-Skript, additive Migrationen und generische CRUD-Helfer mit Spalten-Whitelist."""
+import logging
+import os
+import sqlite3
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+log = logging.getLogger(__name__)
+DB_PATH = Path(os.environ.get("FITNESS_DB", Path(__file__).parent.parent / "fitness.db"))
+BACKUP_DIR = Path(os.environ.get("BACKUP_DIR", DB_PATH.parent / "backups"))
+BACKUP_KEEP_DAYS = 14
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    color TEXT,
+    created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS exercises (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    muscle_group TEXT,                 -- brust | ruecken | beine | schultern | arme | rumpf
+    unit TEXT DEFAULT 'kg',            -- kg | koerper (Klimmzuege o. ae.)
+    archived INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS splits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    active INTEGER DEFAULT 0,
+    created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS split_days (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    split_id INTEGER NOT NULL,
+    position INTEGER DEFAULT 0,
+    label TEXT NOT NULL,               -- "Push", "Pull", "Beine"
+    weekday INTEGER                    -- 0 = Montag; NULL = kein fester Tag
+);
+CREATE TABLE IF NOT EXISTS split_exercises (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    split_day_id INTEGER NOT NULL,
+    exercise_id INTEGER NOT NULL,
+    position INTEGER DEFAULT 0,
+    target_sets INTEGER DEFAULT 3,
+    target_reps_min INTEGER DEFAULT 8,   -- Wiederholungs-Bereich: unten einsteigen,
+    target_reps_max INTEGER DEFAULT 12,  -- oben angekommen -> Gewicht erhoehen
+    target_weight REAL,
+    notes TEXT
+);
+CREATE TABLE IF NOT EXISTS workouts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    split_day_id INTEGER,
+    title TEXT,                        -- Beschriftung, falls ohne Split-Tag trainiert wurde
+    started_at TEXT,
+    finished_at TEXT,
+    notes TEXT,
+    client_id TEXT UNIQUE               -- macht das Nachsenden aus dem Ausgang idempotent
+);
+CREATE TABLE IF NOT EXISTS sets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workout_id INTEGER NOT NULL,
+    exercise_id INTEGER NOT NULL,
+    set_no INTEGER DEFAULT 1,
+    reps INTEGER,
+    weight REAL,
+    rpe REAL
+);
+CREATE TABLE IF NOT EXISTS bodyweight (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    date TEXT NOT NULL,                -- YYYY-MM-DD
+    kg REAL NOT NULL,
+    UNIQUE(profile_id, date)
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY, value TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sets_workout ON sets(workout_id);
+CREATE INDEX IF NOT EXISTS idx_sets_exercise ON sets(exercise_id);
+CREATE INDEX IF NOT EXISTS idx_workouts_profile ON workouts(profile_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_split_days_split ON split_days(split_id, position);
+CREATE INDEX IF NOT EXISTS idx_split_ex_day ON split_exercises(split_day_id, position);
+"""
+
+# Spalten, die nach dem ersten Release dazugekommen sind – bestehende DBs bekommen sie
+# per ALTER TABLE. Neue Spalten immer in BEIDE Stellen (SCHEMA oben und hier).
+MIGRATIONS = {}
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+@contextmanager
+def connect():
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _migrate(c):
+    for table, cols in MIGRATIONS.items():
+        have = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+        for col, decl in cols.items():
+            if col not in have:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+
+# Uebungs-Katalog fuer den ersten Start: Name, Muskelgruppe, Einheit
+STARTER_EXERCISES = [
+    ("Bankdrücken", "brust", "kg"),
+    ("Schrägbankdrücken Kurzhantel", "brust", "kg"),
+    ("Brustpresse", "brust", "kg"),
+    ("Butterfly", "brust", "kg"),
+    ("Liegestütze", "brust", "koerper"),
+    ("Dips", "brust", "koerper"),
+    ("Klimmzüge", "ruecken", "koerper"),
+    ("Latzug", "ruecken", "kg"),
+    ("Rudern Kabel", "ruecken", "kg"),
+    ("Langhantelrudern", "ruecken", "kg"),
+    ("Kreuzheben", "ruecken", "kg"),
+    ("Hyperextension", "ruecken", "koerper"),
+    ("Kniebeuge", "beine", "kg"),
+    ("Beinpresse", "beine", "kg"),
+    ("Ausfallschritte", "beine", "kg"),
+    ("Beinstrecker", "beine", "kg"),
+    ("Beinbeuger", "beine", "kg"),
+    ("Rumänisches Kreuzheben", "beine", "kg"),
+    ("Wadenheben", "beine", "kg"),
+    ("Hip Thrust", "beine", "kg"),
+    ("Schulterdrücken", "schultern", "kg"),
+    ("Seitheben", "schultern", "kg"),
+    ("Frontheben", "schultern", "kg"),
+    ("Reverse Butterfly", "schultern", "kg"),
+    ("Face Pulls", "schultern", "kg"),
+    ("Bizepscurls Kurzhantel", "arme", "kg"),
+    ("Hammercurls", "arme", "kg"),
+    ("SZ-Curls", "arme", "kg"),
+    ("Trizepsdrücken Kabel", "arme", "kg"),
+    ("Trizeps über Kopf", "arme", "kg"),
+    ("Enges Bankdrücken", "arme", "kg"),
+    ("Unterarmstütz (Plank)", "rumpf", "koerper"),
+    ("Crunches", "rumpf", "koerper"),
+    ("Beinheben hängend", "rumpf", "koerper"),
+    ("Russian Twist", "rumpf", "kg"),
+    ("Käfer (Dead Bug)", "rumpf", "koerper"),
+    ("Rudergerät", "rumpf", "koerper"),
+    ("Laufband", "beine", "koerper"),
+]
+
+# Beispiel-Split: Tag -> [(Uebung, Saetze, min, max)]
+STARTER_SPLIT = [
+    ("Push", 0, [("Bankdrücken", 4, 6, 8), ("Schulterdrücken", 3, 8, 12),
+                 ("Schrägbankdrücken Kurzhantel", 3, 8, 12), ("Seitheben", 3, 12, 15),
+                 ("Trizepsdrücken Kabel", 3, 10, 15)]),
+    ("Pull", 2, [("Klimmzüge", 4, 5, 8), ("Langhantelrudern", 4, 6, 8),
+                 ("Latzug", 3, 8, 12), ("Face Pulls", 3, 12, 20),
+                 ("Bizepscurls Kurzhantel", 3, 10, 15)]),
+    ("Beine", 4, [("Kniebeuge", 4, 5, 8), ("Rumänisches Kreuzheben", 3, 8, 12),
+                  ("Beinpresse", 3, 10, 15), ("Beinbeuger", 3, 10, 15),
+                  ("Wadenheben", 4, 12, 20)]),
+]
+
+
+def _seed(c):
+    """Erster Start: Profil, Uebungs-Katalog und ein Beispiel-Split. Laeuft nur, solange
+    noch nichts da ist – ein leer geraeumter Katalog wird nicht wieder aufgefuellt."""
+    if c.execute("SELECT 1 FROM settings WHERE key='seeded'").fetchone():
+        return
+    c.execute("INSERT OR IGNORE INTO profiles (name, color, created_at) VALUES (?,?,?)",
+              ("Luca", "#3a63d8", now()))
+    for name, group, unit in STARTER_EXERCISES:
+        c.execute("INSERT OR IGNORE INTO exercises (name, muscle_group, unit) VALUES (?,?,?)",
+                  (name, group, unit))
+    profile_id = c.execute("SELECT id FROM profiles ORDER BY id LIMIT 1").fetchone()[0]
+    if not c.execute("SELECT 1 FROM splits WHERE profile_id=?", (profile_id,)).fetchone():
+        cur = c.execute("INSERT INTO splits (profile_id, name, active, created_at) VALUES (?,?,1,?)",
+                        (profile_id, "Push / Pull / Beine", now()))
+        split_id = cur.lastrowid
+        for pos, (label, weekday, items) in enumerate(STARTER_SPLIT):
+            day = c.execute("INSERT INTO split_days (split_id, position, label, weekday) VALUES (?,?,?,?)",
+                            (split_id, pos, label, weekday)).lastrowid
+            for ex_pos, (ex_name, sets, lo, hi) in enumerate(items):
+                row = c.execute("SELECT id FROM exercises WHERE name=?", (ex_name,)).fetchone()
+                if row:
+                    c.execute("INSERT INTO split_exercises (split_day_id, exercise_id, position,"
+                              " target_sets, target_reps_min, target_reps_max) VALUES (?,?,?,?,?,?)",
+                              (day, row[0], ex_pos, sets, lo, hi))
+    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('seeded', ?)", (now(),))
+    log.info("Startdaten angelegt")
+
+
+def init():
+    with connect() as c:
+        c.executescript(SCHEMA)
+        _migrate(c)
+        _seed(c)
+    with sqlite3.connect(DB_PATH, timeout=30) as c:
+        # WAL: Lesen blockiert nicht, waehrend geschrieben wird – wichtig, wenn zwei
+        # Leute gleichzeitig eine Einheit hochladen.
+        c.execute("PRAGMA journal_mode=WAL")
+
+
+def rows(sql, params=()):
+    with connect() as c:
+        return [dict(r) for r in c.execute(sql, params).fetchall()]
+
+
+def one(sql, params=()):
+    r = rows(sql, params)
+    return r[0] if r else None
+
+
+def get_setting(key, default=None):
+    r = one("SELECT value FROM settings WHERE key=?", (key,))
+    return r["value"] if r else default
+
+
+def set_setting(key, value):
+    with connect() as c:
+        if value is None:
+            c.execute("DELETE FROM settings WHERE key=?", (key,))
+        else:
+            c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", (key, value))
+
+
+def backup(tag=None):
+    """Konsistente Kopie der DB (auch waehrend geschrieben wird). Taegliche Kopien werden
+    nach BACKUP_KEEP_DAYS geloescht, getaggte nie."""
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    name = f"fitness-{stamp}-{tag}.db" if tag else f"fitness-{stamp}.db"
+    target = BACKUP_DIR / name
+    if target.exists():
+        target.unlink()
+    with sqlite3.connect(DB_PATH, timeout=30) as c:
+        c.execute("VACUUM INTO ?", (str(target),))
+    cutoff = datetime.now() - timedelta(days=BACKUP_KEEP_DAYS)
+    for old in BACKUP_DIR.glob("fitness-????-??-??.db"):
+        try:
+            if datetime.strptime(old.stem[8:], "%Y-%m-%d") < cutoff:
+                old.unlink()
+        except ValueError:
+            continue
+    log.info("Backup geschrieben: %s", target)
+    return target
+
+
+# ---------------------------------------------------------------- CRUD
+# Whitelist je Tabelle: nur diese Spalten duerfen ueber die API geschrieben werden,
+# damit Spaltennamen nie ungeprueft aus dem Request in SQL landen.
+WRITABLE = {
+    "profiles": ("name", "color"),
+    "exercises": ("name", "muscle_group", "unit", "archived"),
+    "splits": ("profile_id", "name", "active"),
+    "split_days": ("split_id", "position", "label", "weekday"),
+    "split_exercises": ("split_day_id", "exercise_id", "position", "target_sets",
+                        "target_reps_min", "target_reps_max", "target_weight", "notes"),
+    "workouts": ("profile_id", "split_day_id", "title", "started_at", "finished_at", "notes"),
+    "bodyweight": ("profile_id", "date", "kg"),
+}
+
+
+def list_rows(table, order="id"):
+    return rows(f"SELECT * FROM {table} ORDER BY {order}")
+
+
+def get_row(table, row_id):
+    return one(f"SELECT * FROM {table} WHERE id=?", (row_id,))
+
+
+def insert_row(table, data):
+    data = {k: v for k, v in data.items() if k in WRITABLE[table]}
+    with connect() as c:
+        cur = c.execute(f"INSERT INTO {table} ({','.join(data)}) VALUES "
+                        f"({','.join('?' * len(data))})", list(data.values()))
+        row_id = cur.lastrowid
+    return get_row(table, row_id)
+
+
+def update_row(table, row_id, data):
+    data = {k: v for k, v in data.items() if k in WRITABLE[table]}
+    if data:
+        with connect() as c:
+            c.execute(f"UPDATE {table} SET {', '.join(f'{k}=?' for k in data)} WHERE id=?",
+                      [*data.values(), row_id])
+    return get_row(table, row_id)
+
+
+def delete_row(table, row_id):
+    """Loescht die Zeile samt allem, was ohne sie keinen Sinn mehr ergibt."""
+    with connect() as c:
+        if table == "splits":
+            days = [r[0] for r in c.execute("SELECT id FROM split_days WHERE split_id=?", (row_id,))]
+            for day in days:
+                c.execute("DELETE FROM split_exercises WHERE split_day_id=?", (day,))
+                # Absolvierte Einheiten bleiben erhalten, verlieren nur die Zuordnung
+                c.execute("UPDATE workouts SET split_day_id=NULL WHERE split_day_id=?", (day,))
+            c.execute("DELETE FROM split_days WHERE split_id=?", (row_id,))
+        elif table == "split_days":
+            c.execute("DELETE FROM split_exercises WHERE split_day_id=?", (row_id,))
+            c.execute("UPDATE workouts SET split_day_id=NULL WHERE split_day_id=?", (row_id,))
+        elif table == "workouts":
+            c.execute("DELETE FROM sets WHERE workout_id=?", (row_id,))
+        elif table == "profiles":
+            raise ValueError("Profile werden nicht geloescht")
+        c.execute(f"DELETE FROM {table} WHERE id=?", (row_id,))
+
+
+def exists(table, row_id):
+    return bool(one(f"SELECT 1 AS x FROM {table} WHERE id=?", (row_id,)))
+
+
+# ------------------------------------------------------------ Workouts
+def save_workout(payload):
+    """Komplette Einheit in einem Rutsch. Idempotent ueber client_id: kommt derselbe
+    Entwurf aus dem Ausgang ein zweites Mal, wird der vorhandene Datensatz zurueckgegeben."""
+    client_id = payload.get("client_id")
+    with connect() as c:
+        if client_id:
+            have = c.execute("SELECT id FROM workouts WHERE client_id=?", (client_id,)).fetchone()
+            if have:
+                log.info("Einheit %s war schon da – nicht doppelt angelegt", client_id)
+                return get_workout(have[0]), False
+        cur = c.execute(
+            "INSERT INTO workouts (profile_id, split_day_id, title, started_at, finished_at,"
+            " notes, client_id) VALUES (?,?,?,?,?,?,?)",
+            (payload["profile_id"], payload.get("split_day_id"), payload.get("title"),
+             payload.get("started_at") or now(), payload.get("finished_at") or now(),
+             payload.get("notes"), client_id))
+        workout_id = cur.lastrowid
+        for s in payload.get("sets", []):
+            c.execute("INSERT INTO sets (workout_id, exercise_id, set_no, reps, weight, rpe)"
+                      " VALUES (?,?,?,?,?,?)",
+                      (workout_id, s["exercise_id"], s.get("set_no") or 1,
+                       s.get("reps"), s.get("weight"), s.get("rpe")))
+    return get_workout(workout_id), True
+
+
+def get_workout(workout_id):
+    w = get_row("workouts", workout_id)
+    if not w:
+        return None
+    w["sets"] = rows("SELECT s.*, e.name AS exercise, e.muscle_group, e.unit FROM sets s"
+                     " JOIN exercises e ON e.id = s.exercise_id"
+                     " WHERE s.workout_id=? ORDER BY s.id", (workout_id,))
+    if w.get("split_day_id"):
+        day = get_row("split_days", w["split_day_id"])
+        w["day_label"] = day["label"] if day else None
+    else:
+        w["day_label"] = w.get("title")
+    return w
+
+
+def list_workouts(profile_id, limit=30):
+    out = rows("SELECT w.*, d.label AS day_label FROM workouts w"
+               " LEFT JOIN split_days d ON d.id = w.split_day_id"
+               " WHERE w.profile_id=?"
+               " ORDER BY COALESCE(w.started_at, w.finished_at) DESC, w.id DESC"
+               " LIMIT ?", (profile_id, limit))
+    for w in out:
+        w["sets"] = rows("SELECT s.*, e.name AS exercise, e.unit FROM sets s"
+                         " JOIN exercises e ON e.id = s.exercise_id"
+                         " WHERE s.workout_id=? ORDER BY s.id", (w["id"],))
+        if not w["day_label"]:
+            w["day_label"] = w.get("title")
+    return out
+
+
+def set_bodyweight(profile_id, date, kg):
+    with connect() as c:
+        c.execute("INSERT INTO bodyweight (profile_id, date, kg) VALUES (?,?,?)"
+                  " ON CONFLICT(profile_id, date) DO UPDATE SET kg=excluded.kg",
+                  (profile_id, date, kg))
+    return one("SELECT * FROM bodyweight WHERE profile_id=? AND date=?", (profile_id, date))
+
+
+# ------------------------------------------------------------- Splits
+def split_detail(split_id):
+    split = get_row("splits", split_id)
+    if not split:
+        return None
+    split["days"] = list_rows_where("split_days", "split_id", split_id, "position, id")
+    for day in split["days"]:
+        day["exercises"] = rows(
+            "SELECT se.*, e.name, e.muscle_group, e.unit FROM split_exercises se"
+            " JOIN exercises e ON e.id = se.exercise_id"
+            " WHERE se.split_day_id=? ORDER BY se.position, se.id", (day["id"],))
+    return split
+
+
+def list_rows_where(table, column, value, order="id"):
+    return rows(f"SELECT * FROM {table} WHERE {column}=? ORDER BY {order}", (value,))
+
+
+def active_split(profile_id):
+    row = one("SELECT * FROM splits WHERE profile_id=? AND active=1 ORDER BY id LIMIT 1",
+              (profile_id,))
+    if not row:
+        row = one("SELECT * FROM splits WHERE profile_id=? ORDER BY id LIMIT 1", (profile_id,))
+    return split_detail(row["id"]) if row else None
+
+
+def activate_split(split_id, profile_id):
+    with connect() as c:
+        c.execute("UPDATE splits SET active=0 WHERE profile_id=?", (profile_id,))
+        c.execute("UPDATE splits SET active=1 WHERE id=? AND profile_id=?", (split_id, profile_id))

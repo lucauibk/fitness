@@ -1,0 +1,404 @@
+/** Plan: Splits anlegen und wechseln, Trainingstage und Übungen samt Wiederholungs-Bereich. */
+import { $, api, armDelete, closeSheet, deleteLater, empty, esc, formData, formError, icon,
+  isPendingDelete, openSheet, prefs, skeleton, submitOnce, toast, WEEKDAYS,
+  WEEKDAYS_LONG } from "./util.js";
+
+let root;
+let splits = null;
+let detail = null;      // der gerade geöffnete Split
+let openSplitId = null;
+let sortingDay = null;   // Pfeile nur in dem Tag zeigen, den man gerade sortiert
+let exercises = null;
+
+const changed = () => window.dispatchEvent(new CustomEvent("data-changed"));
+const range = (lo, hi) => (lo === hi ? `${lo}` : `${lo}–${hi}`);
+
+// -------------------------------------------------------------- Anzeige
+function exerciseRow(item) {
+  return `<div class="row-item" role="button" tabindex="0" data-edit-item="${item.id}">
+    <div class="row-main">
+      <div class="row-title">${esc(item.name)}</div>
+      <div class="row-meta">
+        <span>${item.target_sets} × ${range(item.target_reps_min, item.target_reps_max)} Whd.</span>
+        ${item.target_weight != null ? `<span>${String(item.target_weight).replace(".", ",")} kg</span>` : ""}
+        ${item.notes ? `<span>${esc(item.notes)}</span>` : ""}
+      </div>
+    </div>
+    <span class="order-btns" aria-hidden="true">
+      <button type="button" class="icon-btn" data-move="${item.id}" data-dir="-1" aria-label="${esc(item.name)} nach oben" tabindex="-1">${icon("up")}</button>
+      <button type="button" class="icon-btn" data-move="${item.id}" data-dir="1" aria-label="${esc(item.name)} nach unten" tabindex="-1">${icon("down")}</button>
+    </span>
+  </div>`;
+}
+
+function dayCard(day) {
+  return `<div class="card ${sortingDay === day.id ? "sorting" : ""}">
+    <div class="ex-head">
+      <div>
+        <div class="card-title">${esc(day.label)}</div>
+        <div class="row-meta"><span>${day.weekday != null ? WEEKDAYS_LONG[day.weekday] : "kein fester Tag"}</span>
+          <span>${day.exercises.length} Übungen</span></div>
+      </div>
+      <button type="button" class="icon-btn" data-edit-day="${day.id}" aria-label="Trainingstag bearbeiten">${icon("edit")}</button>
+    </div>
+    <div class="list flush">${day.exercises.map(exerciseRow).join("")
+      || `<p class="hint pad">Noch keine Übungen.</p>`}</div>
+    <div class="btn-row">
+      <button type="button" class="btn small ghost" data-add-item="${day.id}">${icon("plus")} Übung</button>
+      ${day.exercises.length > 1 ? `<button type="button" class="btn small ghost" data-sort="${day.id}">${
+        sortingDay === day.id ? "Fertig" : "Reihenfolge"}</button>` : ""}
+    </div>
+  </div>`;
+}
+
+function render() {
+  if (!splits?.length) {
+    root.innerHTML = `${empty("Noch kein Split", "Ein Split ist dein Trainingsplan – zum Beispiel Push, Pull und Beine.",
+        { label: "Split anlegen", attrs: "data-add-split" })}`;
+    return;
+  }
+  const visible = splits.filter((s) => !isPendingDelete(`splits/${s.id}`));
+  const open = detail && visible.some((s) => s.id === detail.id) ? detail : null;
+
+  root.innerHTML = `<div class="list">${visible.map((s) => `
+      <div class="row-item" role="button" tabindex="0" data-open-split="${s.id}">
+        <div class="row-main">
+          <div class="row-title">${esc(s.name)}</div>
+          <div class="row-meta"><span>${s.days.length} Tage</span>
+            <span>${s.days.map((d) => esc(d.label)).join(" · ") || "noch leer"}</span></div>
+        </div>
+        ${s.active ? `<span class="pill ok">aktiv</span>` : `<button type="button" class="btn small tonal" data-activate="${s.id}">Wechseln</button>`}
+      </div>`).join("")}</div>
+    <div class="btn-row">
+      <button type="button" class="btn ghost" data-add-split>${icon("plus")} Split</button>
+      <button type="button" class="btn ghost" data-exercises>Übungen verwalten</button>
+    </div>
+    ${open ? `<h3 class="group-title">${esc(open.name)}
+        <button type="button" class="link-btn" data-edit-split="${open.id}">Umbenennen</button></h3>
+      ${open.days.map(dayCard).join("")}
+      <div class="btn-row">
+        <button type="button" class="btn ghost" data-add-day="${open.id}">${icon("plus")} Trainingstag</button>
+      </div>` : `<p class="hint pad">Tippe auf einen Split, um seine Tage und Übungen zu sehen.</p>`}`;
+}
+
+export async function load() {
+  if (!splits) root.innerHTML = skeleton(4);
+  splits = await api("splits");
+  const wanted = openSplitId ?? splits.find((s) => s.active)?.id ?? splits[0]?.id;
+  if (wanted) {
+    openSplitId = wanted;
+    try {
+      detail = await api(`splits/${wanted}`);
+    } catch { detail = null; openSplitId = null; }
+  } else {
+    detail = null;
+  }
+  render();
+}
+
+// ------------------------------------------------------------ Formulare
+const footer = (formId, deletable) => `
+  ${deletable ? `<button type="button" class="btn danger ghost" data-delete>${icon("trash")} Löschen</button>` : ""}
+  <span class="grow"></span>
+  <button type="button" class="btn ghost" data-close>Abbrechen</button>
+  <button type="submit" class="btn primary" form="${formId}">Speichern</button>`;
+
+function editSplit(split) {
+  const isNew = !split;
+  const sheet = openSheet({
+    title: isNew ? "Neuer Split" : "Split",
+    body: `<form id="splitForm" class="form">
+      <label class="field">Name<input name="name" maxlength="80" required autofocus
+        value="${esc(split?.name || "")}" placeholder="z. B. Push / Pull / Beine"></label>
+    </form>`,
+    footer: footer("splitForm", !isNew),
+  });
+  const form = $("#splitForm", sheet);
+  submitOnce(form, async () => {
+    try {
+      const body = formData(form);
+      if (isNew) {
+        const created = await api("splits", { method: "POST", body });
+        openSplitId = created.id;
+      } else {
+        await api(`splits/${split.id}`, { method: "PATCH", body });
+      }
+      closeSheet();
+      toast("Split gespeichert");
+      splits = null;
+      changed();
+    } catch (e) { formError(form, e); }
+  });
+  if (!isNew) {
+    armDelete($("[data-delete]", sheet), () => {
+      closeSheet();
+      if (openSplitId === split.id) { openSplitId = null; detail = null; }
+      deleteLater(`splits/${split.id}`, `„${split.name}“ gelöscht`, {
+        onDone: () => { splits = null; },
+      });
+      splits = null;
+    }, "Löschen", "Split mit allen Tagen löschen? Absolvierte Einheiten bleiben erhalten.");
+  }
+}
+
+function editDay(day, splitId) {
+  const isNew = !day;
+  const sheet = openSheet({
+    title: isNew ? "Neuer Trainingstag" : "Trainingstag",
+    body: `<form id="dayForm" class="form">
+      <label class="field">Bezeichnung<input name="label" maxlength="40" required autofocus
+        value="${esc(day?.label || "")}" placeholder="z. B. Push"></label>
+      <fieldset class="field"><legend>Fester Wochentag</legend>
+        <div class="chips">
+          <label class="chip"><input type="radio" name="weekday" value=""
+            ${day?.weekday == null ? "checked" : ""}>keiner</label>
+          ${WEEKDAYS.map((w, i) => `<label class="chip"><input type="radio" name="weekday" value="${i}"
+            ${day?.weekday === i ? "checked" : ""}>${w}</label>`).join("")}
+        </div>
+      </fieldset>
+      <p class="hint">Ohne festen Tag schlägt „Heute“ einfach den nächsten Teil der Reihe vor.</p>
+    </form>`,
+    footer: footer("dayForm", !isNew),
+  });
+  const form = $("#dayForm", sheet);
+  submitOnce(form, async () => {
+    try {
+      const data = formData(form);
+      const body = { label: data.label, weekday: data.weekday === null ? null : Number(data.weekday) };
+      if (isNew) await api("split-days", { method: "POST", body: { ...body, split_id: splitId } });
+      else await api(`split-days/${day.id}`, { method: "PATCH", body });
+      closeSheet();
+      toast("Trainingstag gespeichert");
+      changed();
+    } catch (e) { formError(form, e); }
+  });
+  if (!isNew) {
+    armDelete($("[data-delete]", sheet), async () => {
+      closeSheet();
+      try {
+        await api(`split-days/${day.id}`, { method: "DELETE" });
+        toast(`„${day.label}“ gelöscht`);
+        changed();
+      } catch (e) { toast(e.message, { error: true }); }
+    }, "Löschen", "Trainingstag löschen?");
+  }
+}
+
+function itemFields(item, exList, dayId) {
+  const chosen = item?.exercise_id;
+  const byGroup = {};
+  for (const e of exList.filter((x) => !x.archived || x.id === chosen)) {
+    (byGroup[e.muscle_group || "sonstige"] ||= []).push(e);
+  }
+  const labels = { brust: "Brust", ruecken: "Rücken", beine: "Beine", schultern: "Schultern",
+    arme: "Arme", rumpf: "Rumpf", sonstige: "Sonstige" };
+  return `<label class="field">Übung
+      <select name="exercise_id" required ${item ? "disabled" : ""}>
+        ${item ? "" : `<option value="">Bitte wählen…</option>`}
+        ${Object.entries(byGroup).map(([g, list]) => `<optgroup label="${labels[g] || g}">${
+          list.map((e) => `<option value="${e.id}"${e.id === chosen ? " selected" : ""}>${esc(e.name)}</option>`).join("")
+        }</optgroup>`).join("")}
+      </select>
+    </label>
+    <div class="field-row">
+      <label class="field narrow">Sätze<input name="target_sets" type="number" inputmode="numeric"
+        min="1" max="20" required value="${item?.target_sets ?? 3}"></label>
+      <label class="field narrow">Whd. von<input name="target_reps_min" type="number" inputmode="numeric"
+        min="1" max="100" required value="${item?.target_reps_min ?? 8}"></label>
+      <label class="field narrow">Whd. bis<input name="target_reps_max" type="number" inputmode="numeric"
+        min="1" max="100" required value="${item?.target_reps_max ?? 12}"></label>
+    </div>
+    <p class="hint">Schaffst du in <b>allen</b> Sätzen die obere Zahl, schlägt die App beim
+      nächsten Mal mehr Gewicht vor und startet wieder bei der unteren.</p>
+    <details class="field-more">
+      <summary>Startgewicht und Notiz</summary>
+      <label class="field">Gewicht<input name="target_weight" type="number" inputmode="decimal"
+        min="0" max="1000" step="0.5" value="${item?.target_weight ?? ""}" placeholder="optional"></label>
+      <label class="field">Notiz<input name="notes" maxlength="200"
+        value="${esc(item?.notes || "")}" placeholder="z. B. langsam ablassen"></label>
+    </details>
+    <input type="hidden" name="split_day_id" value="${dayId}">`;
+}
+
+async function editItem(item, dayId) {
+  if (!exercises) exercises = await api("exercises");
+  const isNew = !item;
+  const sheet = openSheet({
+    title: isNew ? "Übung hinzufügen" : esc(item.name),
+    body: `<form id="itemForm" class="form">${itemFields(item, exercises, dayId ?? item.split_day_id)}</form>`,
+    footer: footer("itemForm", !isNew),
+  });
+  const form = $("#itemForm", sheet);
+  submitOnce(form, async () => {
+    try {
+      const data = formData(form);
+      if (data.target_reps_min > data.target_reps_max) {
+        throw new Error("Wiederholungen: „von“ darf nicht größer als „bis“ sein.");
+      }
+      if (isNew) {
+        await api("split-exercises", { method: "POST", body: data });
+      } else {
+        delete data.exercise_id;   // Feld ist gesperrt, kommt gar nicht erst mit
+        delete data.split_day_id;
+        await api(`split-exercises/${item.id}`, { method: "PATCH", body: data });
+      }
+      closeSheet();
+      toast("Gespeichert");
+      changed();
+    } catch (e) { formError(form, e); }
+  });
+  if (!isNew) {
+    armDelete($("[data-delete]", sheet), async () => {
+      closeSheet();
+      try {
+        await api(`split-exercises/${item.id}`, { method: "DELETE" });
+        toast("Übung aus dem Plan entfernt");
+        changed();
+      } catch (e) { toast(e.message, { error: true }); }
+    }, "Löschen", "Aus dem Plan entfernen?");
+  }
+}
+
+/** Reihenfolge per Hoch/Runter – am Handy zuverlässiger als Ziehen. */
+async function move(itemId, dir) {
+  const day = detail?.days.find((d) => d.exercises.some((e) => e.id === itemId));
+  if (!day) return;
+  const list = [...day.exercises];
+  const i = list.findIndex((e) => e.id === itemId);
+  const j = i + dir;
+  if (j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  try {
+    await Promise.all(list.map((e, pos) => (e.position === pos ? null
+      : api(`split-exercises/${e.id}`, { method: "PATCH", body: { position: pos } }))));
+    changed();
+  } catch (e) { toast(e.message, { error: true }); }
+}
+
+// ------------------------------------------------------- Übungs-Katalog
+async function manageExercises() {
+  exercises = await api("exercises");
+  const labels = { brust: "Brust", ruecken: "Rücken", beine: "Beine", schultern: "Schultern",
+    arme: "Arme", rumpf: "Rumpf" };
+  const listHtml = (q = "") => {
+    const ms = exercises.filter((e) => !e.archived && e.name.toLowerCase().includes(q));
+    return ms.map((e) => `<div class="row-item" role="button" tabindex="0" data-ex="${e.id}">
+      <div class="row-main"><div class="row-title">${esc(e.name)}</div>
+        <div class="row-meta"><span>${labels[e.muscle_group] || "–"}</span>
+          ${e.unit === "koerper" ? `<span>ohne Zusatzgewicht</span>` : ""}</div>
+      </div>${icon("edit", "chev")}</div>`).join("")
+      || `<p class="hint pad">Keine Übung passt.</p>`;
+  };
+  const sheet = openSheet({
+    title: "Übungen",
+    body: `<label class="search">${icon("search")}<input type="search" data-q
+        placeholder="Übung suchen…" aria-label="Übung suchen"></label>
+      <div class="btn-row"><button type="button" class="btn small tonal" data-new-ex>${icon("plus")} Neue Übung</button></div>
+      <div class="list" data-list>${listHtml()}</div>`,
+    wide: true,
+  });
+  const q = $("[data-q]", sheet);
+  q.addEventListener("input", () => { $("[data-list]", sheet).innerHTML = listHtml(q.value.trim().toLowerCase()); });
+  sheet.addEventListener("click", (ev) => {
+    if (ev.target.closest("[data-new-ex]")) return editExercise(null);
+    const row = ev.target.closest("[data-ex]");
+    if (row) editExercise(exercises.find((e) => e.id === Number(row.dataset.ex)));
+  });
+}
+
+function editExercise(ex) {
+  const isNew = !ex;
+  const groups = { brust: "Brust", ruecken: "Rücken", beine: "Beine", schultern: "Schultern",
+    arme: "Arme", rumpf: "Rumpf" };
+  const sheet = openSheet({
+    title: isNew ? "Neue Übung" : "Übung",
+    body: `<form id="exForm" class="form">
+      <label class="field">Name<input name="name" maxlength="80" required autofocus
+        value="${esc(ex?.name || "")}"></label>
+      <fieldset class="field"><legend>Muskelgruppe</legend><div class="chips">
+        ${Object.entries(groups).map(([k, label]) => `<label class="chip">
+          <input type="radio" name="muscle_group" value="${k}" ${ex?.muscle_group === k ? "checked" : ""}>${label}</label>`).join("")}
+      </div></fieldset>
+      <fieldset class="field"><legend>Gewicht</legend><div class="segmented">
+        <label><input type="radio" name="unit" value="kg" ${ex?.unit !== "koerper" ? "checked" : ""}><span>mit Gewicht</span></label>
+        <label><input type="radio" name="unit" value="koerper" ${ex?.unit === "koerper" ? "checked" : ""}><span>Körpergewicht</span></label>
+      </div></fieldset>
+    </form>`,
+    footer: footer("exForm", !isNew),
+  });
+  const form = $("#exForm", sheet);
+  submitOnce(form, async () => {
+    try {
+      const body = formData(form);
+      if (isNew) await api("exercises", { method: "POST", body });
+      else await api(`exercises/${ex.id}`, { method: "PATCH", body });
+      closeSheet();
+      exercises = null;
+      toast("Übung gespeichert");
+      changed();
+    } catch (e) { formError(form, e); }
+  });
+  if (!isNew) {
+    armDelete($("[data-delete]", sheet), async () => {
+      closeSheet();
+      try {
+        const res = await api(`exercises/${ex.id}`, { method: "DELETE" });
+        exercises = null;
+        toast(res.archived
+          ? "Übung ausgeblendet – deine bisherigen Sätze bleiben erhalten"
+          : "Übung gelöscht");
+        changed();
+      } catch (e) { toast(e.message, { error: true }); }
+    }, "Löschen", "Übung löschen?");
+  }
+}
+
+// --------------------------------------------------------------- Mount
+export async function mount(el) {
+  root = el;
+  el.addEventListener("click", async (ev) => {
+    const t = (sel) => ev.target.closest(sel);
+    const act = t("[data-activate]");
+    if (act) {
+      ev.stopPropagation();
+      try {
+        await api(`splits/${act.dataset.activate}/activate`, { method: "POST" });
+        toast("Split gewechselt");
+        splits = null;
+        changed();
+      } catch (e) { toast(e.message, { error: true }); }
+      return;
+    }
+    const sort = t("[data-sort]");
+    if (sort) {
+      ev.stopPropagation();
+      const id = Number(sort.dataset.sort);
+      sortingDay = sortingDay === id ? null : id;
+      return render();
+    }
+    const move_ = t("[data-move]");
+    if (move_) { ev.stopPropagation(); return move(Number(move_.dataset.move), Number(move_.dataset.dir)); }
+    if (t("[data-add-split]")) return editSplit(null);
+    const editS = t("[data-edit-split]");
+    if (editS) return editSplit(splits.find((s) => s.id === Number(editS.dataset.editSplit)));
+    const openS = t("[data-open-split]");
+    if (openS) {
+      openSplitId = Number(openS.dataset.openSplit);
+      detail = await api(`splits/${openSplitId}`);
+      return render();
+    }
+    const addDay = t("[data-add-day]");
+    if (addDay) return editDay(null, Number(addDay.dataset.addDay));
+    const editD = t("[data-edit-day]");
+    if (editD) return editDay(detail.days.find((d) => d.id === Number(editD.dataset.editDay)));
+    const addItem = t("[data-add-item]");
+    if (addItem) return editItem(null, Number(addItem.dataset.addItem));
+    const editI = t("[data-edit-item]");
+    if (editI) {
+      const id = Number(editI.dataset.editItem);
+      const item = detail.days.flatMap((d) => d.exercises).find((e) => e.id === id);
+      if (item) return editItem(item);
+    }
+    if (t("[data-exercises]")) return manageExercises();
+  });
+}
