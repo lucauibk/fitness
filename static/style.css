@@ -588,3 +588,10 @@ input:not([type=checkbox]):not([type=radio]):focus, select:focus, textarea:focus
 .wiz-ex .icon-btn { flex: none; }
 .swap-list { display: flex; flex-wrap: wrap; gap: var(--s2); padding: 0 var(--s4) var(--s3); }
 ul.plain { margin: var(--s2) 0 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.choices.row.days { grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.choices.row.days .choice { padding-inline: 0; }
+.chips.focus { margin: var(--s3) 0; }
+.chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+button.chip { border: 0; font-family: inherit; }
+.chips.focus .chip { min-height: var(--tap); padding: 0 16px; }
+@media (max-width: 359px) { .choices.row.days { grid-template-columns: repeat(4, 1fr); } }

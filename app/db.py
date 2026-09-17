@@ -96,7 +96,9 @@ MIGRATIONS = {
     # Angaben fuer den Plan-Assistenten
     "profiles": {"birth_year": "INTEGER", "sex": "TEXT", "height_cm": "REAL",
                  "goal": "TEXT", "experience": "TEXT", "days_per_week": "INTEGER",
-                 "session_minutes": "INTEGER", "limitations": "TEXT"},
+                 "session_minutes": "INTEGER", "limitations": "TEXT",
+                 # Wochentage, an denen trainiert werden kann ("0,2,4"), und Muskel-Fokus ("arme,po")
+                 "train_weekdays": "TEXT", "focus": "TEXT"},
     # Bewegungsmuster: danach waehlt der Assistent Uebungen aus
     "exercises": {"pattern": "TEXT", "kind": "TEXT"},
 }
@@ -147,6 +149,23 @@ def format_weekdays(days):
     """[4, 2, 2] -> "2,4". Leere Liste -> NULL (kein fester Tag)."""
     days = sorted({int(d) for d in (days or []) if 0 <= int(d) <= 6})
     return ",".join(str(d) for d in days) or None
+
+
+FOCUS = ("brust", "ruecken", "schultern", "arme", "beine", "po", "rumpf")
+
+
+def parse_focus(value):
+    return [f for f in str(value or "").split(",") if f in FOCUS]
+
+
+def profile_out(row):
+    """Profil fuer die API: Wochentage und Fokus als Listen."""
+    if row is None:
+        return None
+    row = dict(row)
+    row["train_weekdays"] = parse_weekdays(row.get("train_weekdays"))
+    row["focus"] = parse_focus(row.get("focus"))
+    return row
 
 
 def day_out(row):
@@ -356,7 +375,7 @@ def backup(tag=None):
 # damit Spaltennamen nie ungeprueft aus dem Request in SQL landen.
 WRITABLE = {
     "profiles": ("name", "color", "birth_year", "sex", "height_cm", "goal", "experience",
-                 "days_per_week", "session_minutes", "limitations"),
+                 "days_per_week", "session_minutes", "limitations", "train_weekdays", "focus"),
     "exercises": ("name", "muscle_group", "unit", "archived", "pattern", "kind"),
     "splits": ("profile_id", "name", "active"),
     "split_days": ("split_id", "position", "label", "weekdays"),

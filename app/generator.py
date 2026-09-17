@@ -38,6 +38,29 @@ TEMPLATES = {
     "Unterkörper": ["squat", "hinge", "lunge", "core", "calves", "leg_iso_back", "leg_iso_front", "glutes"],
 }
 
+# Fokus -> Bewegungsmuster, die mehr Saetze und ggf. eine Zusatzuebung bekommen
+FOCUS_PATTERNS = {
+    "brust": ["h_push", "chest_iso"],
+    "ruecken": ["v_pull", "h_pull"],
+    "schultern": ["lateral", "rear_delt", "v_push"],
+    "arme": ["biceps", "triceps"],
+    "beine": ["squat", "leg_iso_front", "leg_iso_back", "lunge"],
+    "po": ["glutes", "hinge"],
+    "rumpf": ["core"],
+}
+FOCUS_LABEL = {"brust": "Brust", "ruecken": "Rücken", "schultern": "Schultern", "arme": "Arme",
+               "beine": "Beine", "po": "Po", "rumpf": "Rumpf"}
+# Welche Fokus-Muster ein Tagestyp zusaetzlich aufnehmen darf (Ganzkoerper: alles)
+DAY_FOCUS = {
+    "Push": {"h_push", "chest_iso", "lateral", "v_push", "triceps"},
+    "Pull": {"v_pull", "h_pull", "rear_delt", "biceps", "core"},
+    "Beine": {"squat", "leg_iso_front", "leg_iso_back", "lunge", "glutes", "hinge", "core"},
+    "Oberkörper": {"h_push", "chest_iso", "v_pull", "h_pull", "lateral", "rear_delt", "v_push",
+                   "biceps", "triceps"},
+    "Unterkörper": {"squat", "leg_iso_front", "leg_iso_back", "lunge", "glutes", "hinge", "core"},
+}
+WD_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
 # Split-Optionen je Anzahl Trainingstage: (key, Name, Begruendung, [(Tag, [Wochentage])])
 OPTIONS = {
     2: [("gk2", "Ganzkörper A/B", "Zwei Einheiten, jede trainiert den ganzen Körper – "
@@ -79,13 +102,41 @@ def _recommended(days, experience):
     return OPTIONS[days][0][0]
 
 
-def split_options(days, experience):
+def back_to_back(weekdays):
+    """Liegen zwei Trainingstage direkt hintereinander (auch So -> Mo)?"""
+    wd = sorted(set(weekdays or []))
+    return any((b - a) == 1 for a, b in zip(wd, wd[1:])) or (0 in wd and 6 in wd)
+
+
+def assign_weekdays(layout, weekdays=None):
+    """Die Tages-Folge des Splits (z. B. OK, UK, OK, UK) der Reihe nach auf die gewaehlten
+    Wochentage legen. Ohne passende Auswahl bleiben die Standard-Tage."""
+    seq = sorted((wd, label) for label, wds in layout for wd in wds)
+    order = [label for _, label in seq]
+    chosen = sorted(set(weekdays or []))
+    if len(chosen) != len(order):
+        chosen = [wd for wd, _ in seq]
+    out = []
+    for label, _ in layout:
+        out.append((label, [chosen[i] for i, lab in enumerate(order) if lab == label]))
+    return out
+
+
+def split_options(days, experience, weekdays=None):
     days = min(max(int(days or 3), 2), 6)
     rec = _recommended(days, experience)
+    tight = back_to_back(weekdays)
+    # Ganzkoerper an direkt aufeinanderfolgenden Tagen ist hart – dann lieber geteilt
+    if tight and rec.startswith("gk"):
+        rec = next((k for k, *_ in OPTIONS[days] if not k.startswith("gk")), rec)
     out = []
     for key, name, reason, layout in OPTIONS[days]:
+        if tight and key.startswith("gk"):
+            reason += (" Achtung: Bei direkt aufeinanderfolgenden Tagen wird dieselbe Muskulatur "
+                       "ohne Pause belastet.")
         out.append({"key": key, "name": name, "reason": reason, "recommended": key == rec,
-                    "days": [{"label": label, "weekdays": wd} for label, wd in layout]})
+                    "days": [{"label": label, "weekdays": wd}
+                             for label, wd in assign_weekdays(layout, weekdays)]})
     out.sort(key=lambda o: not o["recommended"])
     return out
 
@@ -113,7 +164,11 @@ def settings_from(profile, overrides=None):
     s = {"goal": profile.get("goal") or "aufbau",
          "experience": profile.get("experience") or "einsteiger",
          "days": profile.get("days_per_week") or 3,
-         "minutes": profile.get("session_minutes") or 60}
+         "minutes": profile.get("session_minutes") or 60,
+         "weekdays": db.parse_weekdays(profile.get("train_weekdays"))
+         if isinstance(profile.get("train_weekdays"), str) else (profile.get("train_weekdays") or []),
+         "focus": db.parse_focus(profile.get("focus"))
+         if isinstance(profile.get("focus"), str) else (profile.get("focus") or [])}
     for k, v in (overrides or {}).items():
         if v is not None:
             s[k] = v
@@ -132,17 +187,31 @@ def generate(profile, option_key, overrides=None):
     c_sets, i_sets, extra = SETS[exp]
     count = PER_MINUTES[_minutes_key(s["minutes"])] + extra
 
+    focus = [f for f in (s.get("focus") or []) if f in FOCUS_PATTERNS][:3]
+    focus_patterns = {pat for f in focus for pat in FOCUS_PATTERNS[f]}
+
     by_pattern = {}
     for ex in catalog():
         by_pattern.setdefault(ex["pattern"], []).append(ex)
     used = {}   # Muster -> wie oft schon vergeben (fuer Abwechslung zwischen A/B-Tagen)
 
     days = []
-    for label, weekdays in layout:
+    for label, weekdays in assign_weekdays(layout, s.get("weekdays")):
+        template = list(TEMPLATES[label])
+        allowed = DAY_FOCUS.get(label)  # None = Ganzkoerper, alles erlaubt
+        day_focus = [pat for f in focus for pat in FOCUS_PATTERNS[f]
+                     if allowed is None or pat in allowed]
+        slots = template[:count]
+        if day_focus:
+            # Fokus-Muster, die weggekuerzt wurden oder fehlen, nach vorn holen
+            # (hinter die ersten beiden Grunduebungen) und eine Zusatzuebung erlauben
+            # Grunduebungen bleiben immer drin, Fokus kommt direkt dahinter, Isolation zuletzt.
+            missing = [pat for pat in dict.fromkeys(day_focus) if pat not in slots]
+            base = [pat for pat in slots if pat in db.COMPOUND_PATTERNS]
+            rest = [pat for pat in slots if pat not in db.COMPOUND_PATTERNS]
+            slots = (base + missing[:2] + rest)[:max(count + 1, len(base))]
         chosen, taken = [], set()
-        for pattern in TEMPLATES[label]:
-            if len(chosen) >= count:
-                break
+        for pattern in slots:
             candidates = [e for e in by_pattern.get(pattern, []) if e["id"] not in taken]
             if not candidates:
                 continue
@@ -150,13 +219,20 @@ def generate(profile, option_key, overrides=None):
             used[pattern] = used.get(pattern, 0) + 1
             taken.add(ex["id"])
             compound = ex["kind"] == "compound"
+            sets = c_sets if compound else i_sets
+            if pattern in focus_patterns:
+                sets = min(sets + 1, 5)
             chosen.append({
                 "exercise_id": ex["id"], "name": ex["name"], "pattern": pattern,
                 "muscle_group": ex["muscle_group"], "unit": ex["unit"],
-                "target_sets": c_sets if compound else i_sets,
+                "target_sets": sets,
                 "target_reps_min": c_lo if compound else i_lo,
                 "target_reps_max": c_hi if compound else i_hi,
+                "focus": pattern in focus_patterns,
+                "_compound": compound,
             })
+        # Grunduebungen zuerst – so bleibt die Reihenfolge auch mit Fokus sinnvoll
+        chosen.sort(key=lambda e: not e.pop("_compound"))
         days.append({"label": label, "weekdays": list(weekdays), "exercises": chosen})
 
     today = date.today()
@@ -165,6 +241,8 @@ def generate(profile, option_key, overrides=None):
         "name": f"{GOALS.get(goal, goal)} · {name} · {MONTHS[today.month - 1]} {today.year}",
         "goal": goal, "experience": exp, "minutes": _minutes_key(s["minutes"]),
         "reason": reason,
+        "focus": focus,
+        "weekdays_chosen": sorted(set(s.get("weekdays") or [])),
         "days": days,
         "notes": [],
     }

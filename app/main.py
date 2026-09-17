@@ -85,7 +85,8 @@ FIELD_NAMES = {"name": "Name", "label": "Bezeichnung", "reps": "Wiederholungen",
                "birth_year": "Geburtsjahr", "sex": "Geschlecht", "height_cm": "Größe",
                "goal": "Ziel", "experience": "Erfahrung", "days_per_week": "Trainingstage",
                "session_minutes": "Dauer", "limitations": "Einschränkungen",
-               "pattern": "Bewegungsmuster", "option": "Split"}
+               "pattern": "Bewegungsmuster", "option": "Split",
+               "train_weekdays": "Trainingstage", "focus": "Fokus"}
 # Felder, die per PATCH vorhanden sein duerfen, aber nie null werden
 NOT_NULL = ("name", "label", "kg", "date", "exercise_id", "split_id", "split_day_id",
             "profile_id")
@@ -187,6 +188,7 @@ Unit = Literal["kg", "koerper"]
 
 Goal = Literal["aufbau", "kraft", "abnehmen", "fitness"]
 Experience = Literal["einsteiger", "fortgeschritten", "erfahren"]
+Focus = Literal["brust", "ruecken", "schultern", "arme", "beine", "po", "rumpf"]
 Pattern = Literal["h_push", "v_push", "chest_iso", "h_pull", "v_pull", "rear_delt", "lateral",
                   "squat", "hinge", "lunge", "leg_iso_front", "leg_iso_back", "glutes",
                   "calves", "biceps", "triceps", "core"]
@@ -203,6 +205,8 @@ class ProfileIn(BaseModel):
     days_per_week: Optional[int] = Field(None, ge=2, le=6)
     session_minutes: Optional[int] = Field(None, ge=30, le=120)
     limitations: Optional[str] = Field(None, max_length=500)
+    train_weekdays: Optional[List[Annotated[int, Field(ge=0, le=6)]]] = Field(None, max_length=7)
+    focus: Optional[List[Focus]] = Field(None, max_length=3)
 
 
 class ExerciseIn(BaseModel):
@@ -262,9 +266,23 @@ class BodyweightIn(BaseModel):
 
 
 # ------------------------------------------------------------- Profile
+def _profile_in(data):
+    """Listen aus dem Formular in Text fuer die Datenbank."""
+    if "train_weekdays" in data:
+        wd = data["train_weekdays"]
+        if wd is not None and wd and not 2 <= len(set(wd)) <= 6:
+            raise HTTPException(400, "Trainingstage: bitte 2 bis 6 Tage wählen.")
+        data["train_weekdays"] = db.format_weekdays(wd)
+        if wd:
+            data["days_per_week"] = len(set(wd))
+    if "focus" in data:
+        data["focus"] = ",".join(dict.fromkeys(data["focus"] or [])) or None
+    return data
+
+
 @app.get("/api/profiles")
 def api_profiles():
-    return db.list_rows("profiles")
+    return [db.profile_out(p) for p in db.list_rows("profiles")]
 
 
 @app.post("/api/profiles")
@@ -276,18 +294,18 @@ def api_add_profile(body: ProfileIn):
         cur = c.execute("INSERT INTO profiles (name, color, created_at) VALUES (?,?,?)",
                         (data["name"], data["color"], data["created_at"]))
         new_id = cur.lastrowid
-    return db.get_row("profiles", new_id)
+    return db.profile_out(db.get_row("profiles", new_id))
 
 
 @app.get("/api/profiles/{profile_id}")
 def api_profile(profile_id: int):
-    return _found(db.get_row("profiles", profile_id))
+    return db.profile_out(_found(db.get_row("profiles", profile_id)))
 
 
 @app.patch("/api/profiles/{profile_id}")
 def api_update_profile(profile_id: int, body: ProfileIn):
     _found(db.get_row("profiles", profile_id))
-    return _found(db.update_row("profiles", profile_id, _data(body)))
+    return db.profile_out(_found(db.update_row("profiles", profile_id, _profile_in(_data(body)))))
 
 
 # -------------------------------------------------------------- Übungen
@@ -550,6 +568,8 @@ class WizardIn(BaseModel):
     experience: Optional[Experience] = None
     days: Optional[int] = Field(None, ge=2, le=6)
     minutes: Optional[int] = Field(None, ge=30, le=120)
+    weekdays: Optional[List[Annotated[int, Field(ge=0, le=6)]]] = Field(None, max_length=7)
+    focus: Optional[List[Focus]] = Field(None, max_length=3)
 
 
 class PlanExerciseIn(BaseModel):
@@ -567,6 +587,7 @@ class PlanDayIn(BaseModel):
 
 class PlanIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
+    focus: List[str] = Field(default_factory=list)
     option: Optional[str] = None
     goal: Optional[str] = None
     experience: Optional[str] = None
@@ -582,7 +603,7 @@ class SaveIn(BaseModel):
 
 
 def _profile(profile_id):
-    return _found(db.get_row("profiles", profile_id))
+    return db.profile_out(_found(db.get_row("profiles", profile_id)))
 
 
 def _with_check(preview):
@@ -592,10 +613,15 @@ def _with_check(preview):
 @app.get("/api/wizard/options")
 def api_wizard_options(profile_id: int = Depends(current_profile),
                        days: Optional[int] = Query(None, ge=2, le=6),
-                       experience: Optional[Experience] = None):
+                       experience: Optional[Experience] = None,
+                       weekdays: str = Query("", max_length=20)):
     p = _profile(profile_id)
-    return {"options": generator.split_options(days or p.get("days_per_week") or 3,
-                                               experience or p.get("experience") or "einsteiger"),
+    wd = db.parse_weekdays(weekdays) or db.parse_weekdays(p.get("train_weekdays"))
+    if wd and not 2 <= len(wd) <= 6:
+        raise HTTPException(400, "Trainingstage: bitte 2 bis 6 Tage wählen.")
+    return {"options": generator.split_options(len(wd) if wd else (days or p.get("days_per_week") or 3),
+                                               experience or p.get("experience") or "einsteiger",
+                                               wd or None),
             "ai_available": ai.available()}
 
 

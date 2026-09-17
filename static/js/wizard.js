@@ -15,8 +15,13 @@ export const EXPERIENCE = {
   fortgeschritten: { label: "Fortgeschritten", text: "Etwa 6 Monate bis 2 Jahre." },
   erfahren: { label: "Erfahren", text: "Mehr als 2 Jahre, Technik sitzt." },
 };
-const STEPS = ["Deine Daten", "Ziel", "Zeit", "Erfahrung", "Split", "Vorschau"];
-const DAYS = [2, 3, 4, 5, 6];
+const STEPS = ["Deine Daten", "Ziel", "Zeit", "Erfahrung", "Fokus", "Split", "Vorschau"];
+const WEEKDAYS_LONG_LOCAL = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
+export const FOCUS = {
+  brust: "Brust", ruecken: "Rücken", schultern: "Schultern", arme: "Arme",
+  beine: "Beine", po: "Po", rumpf: "Bauch & Rumpf",
+};
+const MAX_FOCUS = 3;
 const MINUTES = [45, 60, 75, 90];
 
 let st = null;       // Entwurf
@@ -24,7 +29,7 @@ let sheet = null;
 
 export const hasWizardDraft = () => {
   const d = prefs.get("wizard");
-  return Boolean(d && d.profileId === getProfile());
+  return Boolean(d && d.profileId === getProfile() && Array.isArray(d.weekdays));
 };
 const save = () => {
   prefs.set("wizard", st);
@@ -40,7 +45,7 @@ const daysLabel = (d) => (d?.length ? d.map((i) => WEEKDAYS[i]).join(" · ") : "
 
 export function openWizard(profile) {
   const draft = prefs.get("wizard");
-  if (draft && draft.profileId === getProfile()) {
+  if (draft && draft.profileId === getProfile() && Array.isArray(draft.weekdays)) {
     st = draft;
   } else {
     const p = profile || {};
@@ -48,7 +53,8 @@ export function openWizard(profile) {
       profileId: getProfile(), step: 0,
       data: { birth_year: p.birth_year ?? null, height_cm: p.height_cm ?? null,
         sex: p.sex ?? null, limitations: p.limitations ?? "" },
-      goal: p.goal || null, days: p.days_per_week || null, minutes: p.session_minutes || null,
+      goal: p.goal || null, minutes: p.session_minutes || null,
+      weekdays: p.train_weekdays || [], focus: p.focus || [],
       experience: p.experience || null,
       option: null, options: null, aiAvailable: false,
       preview: null, check: null, activate: true, swapping: null, alternatives: null,
@@ -96,17 +102,36 @@ function stepData() {
 const stepGoal = () => `<p class="hint">Was willst du vor allem erreichen?</p>
   <div class="choices">${Object.entries(GOALS).map(([k, g]) => choice("goal", k, g.label, g.text, st.goal === k)).join("")}</div>`;
 
-const stepTime = () => `<h3 class="form-section">Wie viele Tage pro Woche?</h3>
-  <div class="choices row">${DAYS.map((d) => choice("days", d, `${d}`, "", st.days === d)).join("")}</div>
+const stepTime = () => `<h3 class="form-section">An welchen Tagen kannst du trainieren?</h3>
+  <div class="choices row days">${WEEKDAYS.map((w, i) => `<button type="button"
+      class="choice ${st.weekdays.includes(i) ? "active" : ""}" data-weekday="${i}"
+      aria-pressed="${st.weekdays.includes(i)}" aria-label="${WEEKDAYS_LONG_LOCAL[i]}">
+      <span class="choice-title">${w}</span></button>`).join("")}</div>
+  <p class="hint">${st.weekdays.length < 2 ? "Wähle 2 bis 6 Tage."
+    : st.weekdays.length > 6 ? "Höchstens 6 Tage – ein Ruhetag pro Woche muss sein."
+    : `${st.weekdays.length} Tage pro Woche${backToBack(st.weekdays) ? " · einige direkt hintereinander – das berücksichtigt der Vorschlag" : ""}.`}</p>
   <h3 class="form-section">Wie lange pro Einheit?</h3>
   <div class="choices row">${MINUTES.map((m) => choice("minutes", m, `${m} min`, "", st.minutes === m)).join("")}</div>`;
+
+const backToBack = (wd) => {
+  const d = [...wd].sort();
+  return d.some((x, i) => i && x - d[i - 1] === 1) || (d.includes(0) && d.includes(6));
+};
+
+const stepFocus = () => `<p class="hint">Welche Muskeln sollen mehr Aufmerksamkeit bekommen?
+    Bis zu ${MAX_FOCUS} – oder keine für einen ausgewogenen Plan.</p>
+  <div class="chips focus">${Object.entries(FOCUS).map(([k, l]) => `<button type="button"
+      class="chip ${st.focus.includes(k) ? "active" : ""}" data-focus="${k}"
+      aria-pressed="${st.focus.includes(k)}">${l}</button>`).join("")}</div>
+  <p class="hint">${st.focus.length ? `Fokus: ${st.focus.map((f) => FOCUS[f]).join(", ")} – dafür gibt es mehr Sätze und bei Bedarf eine Zusatzübung.`
+    : "Kein Fokus: alle Muskelgruppen gleichmäßig."}</p>`;
 
 const stepExperience = () => `<p class="hint">Wie lange trainierst du schon im Studio?</p>
   <div class="choices">${Object.entries(EXPERIENCE).map(([k, e]) => choice("experience", k, e.label, e.text, st.experience === k)).join("")}</div>`;
 
 function stepSplit() {
   if (!st.options) return `<p class="hint">Lade Vorschläge …</p>`;
-  return `<p class="hint">Passend zu ${st.days} Tagen pro Woche:</p>
+  return `<p class="hint">Passend zu deinen ${st.weekdays.length} Tagen (${daysLabel([...st.weekdays].sort())}):</p>
     <div class="choices">${st.options.map((o) => `
       <button type="button" class="choice ${st.option === o.key ? "active" : ""}" data-pick="option"
         data-value="${o.key}" aria-pressed="${st.option === o.key}">
@@ -122,7 +147,8 @@ function exerciseRow(ex, di, ei, day) {
   return `<div class="row-item wiz-ex">
       <div class="row-main">
         <div class="row-title">${esc(ex.name)}</div>
-        <div class="row-meta"><span>${ex.target_sets} × ${range(ex.target_reps_min, ex.target_reps_max)} Whd.</span></div>
+        <div class="row-meta"><span>${ex.target_sets} × ${range(ex.target_reps_min, ex.target_reps_max)} Whd.</span>
+          ${ex.focus ? `<span class="pill">Fokus</span>` : ""}</div>
       </div>
       <button type="button" class="icon-btn" data-swap="${key}" aria-label="${esc(ex.name)} tauschen"
         aria-expanded="${open}">${icon("swap")}</button>
@@ -163,15 +189,16 @@ function stepPreview() {
 }
 
 function canNext() {
-  return [true, Boolean(st.goal), Boolean(st.days && st.minutes), Boolean(st.experience),
-    Boolean(st.option), Boolean(st.preview)][st.step];
+  const wd = st.weekdays.length;
+  return [true, Boolean(st.goal), Boolean(wd >= 2 && wd <= 6 && st.minutes), Boolean(st.experience),
+    true, Boolean(st.option), Boolean(st.preview)][st.step];
 }
 
 function render() {
   if (!sheet?.isConnected) return;
   $("#sheetTitle", sheet).textContent = `Plan-Assistent · ${STEPS[st.step]}`;
   const body = $(".sheet-body", sheet);
-  const views = [stepData, stepGoal, stepTime, stepExperience, stepSplit, stepPreview];
+  const views = [stepData, stepGoal, stepTime, stepExperience, stepFocus, stepSplit, stepPreview];
   body.innerHTML = `<div class="steps-bar" aria-label="Schritt ${st.step + 1} von ${STEPS.length}">
       ${STEPS.map((_, i) => `<i class="${i <= st.step ? "on" : ""}"></i>`).join("")}</div>
     <p class="eyebrow">Schritt ${st.step + 1} von ${STEPS.length}</p>
@@ -213,10 +240,12 @@ async function next() {
       const body = { ...st.data, limitations: (st.data.limitations || "").trim() || null };
       await api(`profiles/${getProfile()}`, { method: "PATCH", body });
     }
-    if (st.step === 3) {
+    if (st.step === 4) {
+      const weekdays = [...st.weekdays].sort();
       await api(`profiles/${getProfile()}`, { method: "PATCH", body: {
-        goal: st.goal, days_per_week: st.days, session_minutes: st.minutes, experience: st.experience } });
-      const res = await api(`wizard/options?days=${st.days}&experience=${st.experience}`);
+        goal: st.goal, train_weekdays: weekdays, session_minutes: st.minutes,
+        experience: st.experience, focus: st.focus } });
+      const res = await api(`wizard/options?weekdays=${weekdays.join(",")}&experience=${st.experience}`);
       st.options = res.options;
       st.aiAvailable = res.ai_available;
       if (!st.options.some((o) => o.key === st.option)) {
@@ -224,9 +253,10 @@ async function next() {
         st.preview = null;
       }
     }
-    if (st.step === 4) {
+    if (st.step === 5) {
       const res = await api("wizard/preview", { method: "POST", body: {
-        option: st.option, goal: st.goal, experience: st.experience, days: st.days, minutes: st.minutes } });
+        option: st.option, goal: st.goal, experience: st.experience, minutes: st.minutes,
+        weekdays: [...st.weekdays].sort(), focus: st.focus } });
       st.preview = res.preview;
       st.check = res.check;
       st.aiError = null;
@@ -254,10 +284,29 @@ async function onClick(ev) {
   }
   const next_ = t("[data-next]");
   if (next_) return busy(next_, next);
+  const wdBtn = t("[data-weekday]");
+  if (wdBtn) {
+    const i = Number(wdBtn.dataset.weekday);
+    st.weekdays = st.weekdays.includes(i) ? st.weekdays.filter((x) => x !== i) : [...st.weekdays, i];
+    st.options = null;
+    st.preview = null;
+    save();
+    return render();
+  }
+  const focusBtn = t("[data-focus]");
+  if (focusBtn) {
+    const f = focusBtn.dataset.focus;
+    if (st.focus.includes(f)) st.focus = st.focus.filter((x) => x !== f);
+    else if (st.focus.length < MAX_FOCUS) st.focus = [...st.focus, f];
+    else toast(`Höchstens ${MAX_FOCUS} Schwerpunkte.`);
+    st.preview = null;
+    save();
+    return render();
+  }
   const pick = t("[data-pick]");
   if (pick) {
     const { pick: group, value } = pick.dataset;
-    const val = ["days", "minutes"].includes(group) ? Number(value) : value;
+    const val = group === "minutes" ? Number(value) : value;
     if (st[group] !== val) {
       st[group] = val;
       // Andere Eckdaten -> Vorschläge und Vorschau sind veraltet

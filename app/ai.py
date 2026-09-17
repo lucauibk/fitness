@@ -99,6 +99,7 @@ def validate_plan(candidate, original, catalog):
                 raise ValueError(f"„{ex['name']}“: Sätze/Wiederholungen außerhalb des Rahmens")
             seen.add(ex["id"])
             clean.append({"exercise_id": ex["id"], "name": ex["name"], "pattern": ex["pattern"],
+                          "focus": bool(it.get("focus")),
                           "muscle_group": ex["muscle_group"], "unit": ex["unit"],
                           "target_sets": sets, "target_reps_min": lo, "target_reps_max": hi})
         out_days.append({"label": orig["label"], "weekdays": list(orig["weekdays"]),
@@ -126,6 +127,8 @@ def _profile_text(profile, preview):
     parts.append(f"Ziel: {preview['goal']}")
     parts.append(f"Erfahrung: {preview['experience']}")
     parts.append(f"Dauer pro Einheit: {preview['minutes']} Minuten")
+    if preview.get("focus"):
+        parts.append("Muskel-Fokus (mehr Volumen gewünscht): " + ", ".join(preview["focus"]))
     if profile.get("limitations"):
         parts.append(f"Einschränkungen/Verletzungen: {profile['limitations'][:300]}")
     return "\n".join(parts)
@@ -161,6 +164,7 @@ def refine_plan(profile, preview, catalog, feedback=None):
         "- Halte Drücken und Ziehen (Brust/Schultern vs. Rücken) etwa im Gleichgewicht; "
         "tausche eher innerhalb desselben Bewegungsmusters als Muster zu streichen.\n"
         "- Streiche keine vorhandene Rumpfübung und keine Übung für die Beinrückseite.\n"
+        "- Wenn ein Muskel-Fokus angegeben ist, behalte dessen zusätzliches Volumen bei.\n"
         "- Ändere nur, was die Person wirklich weiterbringt; ein guter Plan darf so bleiben.\n"
         "Antworte NUR mit JSON in genau dieser Form, ohne Text davor oder danach:\n"
         '{"days":[{"label":"...","exercises":[{"exercise_id":1,"target_sets":3,'

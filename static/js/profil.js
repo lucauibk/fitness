@@ -1,6 +1,7 @@
 /** Profil: persönliche Angaben und der Einstieg in den Plan-Assistenten. */
-import { $, api, esc, formData, formError, getProfile, icon, skeleton, submitOnce, toast } from "./util.js";
-import { openWizard, GOALS, EXPERIENCE, hasWizardDraft } from "./wizard.js";
+import { $, api, esc, formData, formError, getProfile, icon, skeleton, submitOnce, toast,
+  WEEKDAYS } from "./util.js";
+import { openWizard, GOALS, EXPERIENCE, FOCUS, hasWizardDraft } from "./wizard.js";
 
 let root;
 let data = null;
@@ -11,9 +12,11 @@ const option = (value, label, current) =>
 function summary(p) {
   const parts = [
     p.goal ? GOALS[p.goal].label : null,
-    p.days_per_week ? `${p.days_per_week} Tage pro Woche` : null,
+    p.train_weekdays?.length ? p.train_weekdays.map((d) => WEEKDAYS[d]).join(" · ")
+      : p.days_per_week ? `${p.days_per_week} Tage pro Woche` : null,
     p.session_minutes ? `${p.session_minutes} min` : null,
     p.experience ? EXPERIENCE[p.experience].label : null,
+    p.focus?.length ? `Fokus: ${p.focus.map((f) => FOCUS[f]).join(", ")}` : null,
   ].filter(Boolean);
   return parts.length ? parts.join(" · ") : "Noch nicht festgelegt – der Assistent fragt es ab.";
 }
