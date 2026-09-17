@@ -630,11 +630,33 @@ def api_wizard_check(plan: PlanIn):
     return _with_check(_plan_dict(plan))
 
 
+def _finding_keys(check):
+    # Vergleich ueber Muskelgruppe/Art, nicht ueber den genauen Text (Satzzahlen aendern sich)
+    return {(f["level"], f.get("group"), f["text"].split(" ")[0]) for f in check["findings"]}
+
+
 @app.post("/api/wizard/refine")
 def api_wizard_refine(plan: PlanIn, profile_id: int = Depends(current_profile)):
+    """KI-Verfeinerung mit Kontrolle: bringt der Vorschlag neue Luecken, gibt es einmal
+    Rueckmeldung und einen zweiten Versuch; wird es nicht besser, bleibt der Ausgangsplan."""
     preview = _plan_dict(plan)
-    res = ai.refine_plan(_profile(profile_id), preview, generator.catalog())
-    return {**_with_check(res["preview"]), "error": res.get("error")}
+    profile, catalog = _profile(profile_id), generator.catalog()
+    base_keys = _finding_keys(checker.analyze_split(preview))
+    feedback = None
+    for _ in range(2):
+        res = ai.refine_plan(profile, preview, catalog, feedback)
+        if res.get("error"):
+            return {**_with_check(preview), "error": res["error"]}
+        check = checker.analyze_split(res["preview"])
+        new = [f["text"] for f in check["findings"]
+               if (f["level"], f.get("group"), f["text"].split(" ")[0]) not in base_keys]
+        # (gleiche Schluesselbildung wie _finding_keys)
+        if not new:
+            return {"preview": res["preview"], "check": check, "error": None}
+        feedback = new
+    return {**_with_check(preview),
+            "error": "Die KI-Vorschläge hätten neue Lücken gebracht ("
+                     + "; ".join(feedback) + ") – der bisherige Plan bleibt."}
 
 
 @app.post("/api/wizard/save")

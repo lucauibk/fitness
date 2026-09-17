@@ -131,7 +131,7 @@ def _profile_text(profile, preview):
     return "\n".join(parts)
 
 
-def refine_plan(profile, preview, catalog):
+def refine_plan(profile, preview, catalog, feedback=None):
     """KI passt den Regelplan an. Ergebnis: {"preview": plan, "error"?: str}.
     Bei jedem Problem bleibt der Regelplan unveraendert."""
     if not available():
@@ -167,6 +167,9 @@ def refine_plan(profile, preview, catalog):
         '"target_reps_min":8,"target_reps_max":12}]}],'
         '"notes":["höchstens 3 kurze deutsche Sätze: was geändert wurde und warum"]}'
     )
+    if feedback:
+        prompt += ("\n\nDein letzter Vorschlag hatte diese Lücken, die der Ausgangsplan nicht hatte – "
+                   "vermeide sie diesmal:\n" + "\n".join(f"- {f}" for f in feedback))
     res = ask(prompt, max_tokens=2000)
     if "error" in res:
         return {"preview": preview, "error": res["error"]}
