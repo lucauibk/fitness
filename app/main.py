@@ -8,7 +8,7 @@ import sqlite3
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, Dict, List, Literal, Optional
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -556,6 +556,11 @@ class PlanIn(BaseModel):
     minutes: Optional[int] = None
     reason: Optional[str] = None
     notes: List[str] = Field(default_factory=list)
+    basis: List[str] = Field(default_factory=list, max_length=20)
+    reasons: List[str] = Field(default_factory=list, max_length=10)
+    frequency: Dict[str, float] = Field(default_factory=dict)
+    rotate: bool = False
+    weekdays_chosen: List[int] = Field(default_factory=list, max_length=7)
     days: List[PlanDayIn] = Field(..., min_length=1, max_length=7)
 
 
@@ -576,15 +581,18 @@ def _with_check(preview):
 def api_wizard_options(profile_id: int = Depends(current_profile),
                        days: Optional[int] = Query(None, ge=2, le=6),
                        experience: Optional[Experience] = None,
-                       weekdays: str = Query("", max_length=20)):
+                       goal: Optional[Goal] = None,
+                       minutes: Optional[int] = Query(None, ge=30, le=120),
+                       weekdays: str = Query("", max_length=20),
+                       focus: str = Query("", max_length=80)):
     p = _profile(profile_id)
-    wd = db.parse_weekdays(weekdays) or db.parse_weekdays(p.get("train_weekdays"))
+    wd = db.parse_weekdays(weekdays) or p.get("train_weekdays") or []
     if wd and not 2 <= len(wd) <= 6:
         raise HTTPException(400, "Trainingstage: bitte 2 bis 6 Tage wählen.")
-    return {"options": generator.split_options(len(wd) if wd else (days or p.get("days_per_week") or 3),
-                                               experience or p.get("experience") or "einsteiger",
-                                               wd or None),
-            "ai_available": ai.available()}
+    overrides = {"experience": experience, "goal": goal, "minutes": minutes,
+                 "weekdays": wd or None, "days": days,
+                 "focus": db.parse_focus(focus) if focus else None}
+    return {"options": generator.split_options(p, overrides), "ai_available": ai.available()}
 
 
 @app.post("/api/wizard/preview")

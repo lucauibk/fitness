@@ -105,7 +105,8 @@ function render() {
           <textarea name="limitations" rows="2" maxlength="500"
             placeholder="optional, z. B. Knie links, keine Überkopf-Übungen">${esc(p.limitations || "")}</textarea>
         </label>
-        <p class="hint">Einschränkungen berücksichtigt nur die KI-Verfeinerung im Assistenten.</p>
+        <p class="hint">Stichwörter wie Knie, Rücken, Schulter oder Ellbogen berücksichtigt der
+          Assistent direkt bei der Übungswahl; alles andere nur die KI-Verfeinerung.</p>
         <div class="btn-row"><button type="submit" class="btn">Speichern</button></div>
       </form>
     </div>

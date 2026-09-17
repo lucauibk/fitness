@@ -202,14 +202,18 @@ def _migrate(c):
 
 
 def parse_weekdays(value):
-    """"2,4" -> [2, 4]. Leer oder NULL -> []."""
+    """"2,4" oder [2, 4] -> [2, 4]. Leer oder NULL -> []."""
     if not value:
         return []
+    parts = value if isinstance(value, (list, tuple, set)) else str(value).split(",")
     out = []
-    for part in str(value).split(","):
-        part = part.strip()
-        if part.isdigit() and 0 <= int(part) <= 6:
-            out.append(int(part))
+    for part in parts:
+        try:
+            day = int(str(part).strip())
+        except ValueError:
+            continue
+        if 0 <= day <= 6:
+            out.append(day)
     return sorted(set(out))
 
 

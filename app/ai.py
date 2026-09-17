@@ -155,7 +155,10 @@ def refine_plan(profile, preview, catalog, feedback=None):
         "Du bist Trainer im Fitnessstudio und verfeinerst einen automatisch erstellten "
         "Krafttrainingsplan für diese Person:\n"
         f"{_profile_text(profile, preview)}\n\n"
-        "Aktueller Plan (JSON):\n"
+        + (f"Gewählter Split: {preview.get('reason', '')}\n" if preview.get("reason") else "")
+        + ("Grundlagen des Plans:\n" + "\n".join(f"- {b}" for b in preview.get("basis", [])) + "\n"
+           if preview.get("basis") else "")
+        + "\nAktueller Plan (JSON):\n"
         f"{json.dumps(compact, ensure_ascii=False)}\n\n"
         "Erlaubte Übungen (id | Name | Muskelgruppe | Bewegungsmuster):\n"
         + "\n".join(lines) +

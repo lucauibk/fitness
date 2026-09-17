@@ -47,6 +47,12 @@ export function openWizard(profile) {
   const draft = prefs.get("wizard");
   if (draft && draft.profileId === getProfile() && Array.isArray(draft.weekdays)) {
     st = draft;
+    // Entwurf aus einer älteren Version: Vorschläge neu holen
+    if (st.options && !st.options.every((o) => o.frequency)) {
+      st.options = null;
+      st.preview = null;
+      if (st.step > 4) st.step = 4;
+    }
   } else {
     const p = profile || {};
     st = {
@@ -78,7 +84,8 @@ const choice = (group, value, label, text, active) => `
 function stepData() {
   const d = st.data;
   const year = new Date().getFullYear();
-  return `<p class="hint">Diese Angaben helfen vor allem der KI-Verfeinerung. Alles ist freiwillig.</p>
+  return `<p class="hint">Alles freiwillig. Einschränkungen wie „Knie“, „Rücken“, „Schulter“ oder
+      „Ellbogen“ wählt der Assistent direkt bei den Übungen aus.</p>
     <div class="form">
       <div class="field-row">
         <label class="field">Geburtsjahr<input data-field="birth_year" type="number" inputmode="numeric"
@@ -129,15 +136,32 @@ const stepFocus = () => `<p class="hint">Welche Muskeln sollen mehr Aufmerksamke
 const stepExperience = () => `<p class="hint">Wie lange trainierst du schon im Studio?</p>
   <div class="choices">${Object.entries(EXPERIENCE).map(([k, e]) => choice("experience", k, e.label, e.text, st.experience === k)).join("")}</div>`;
 
+const FREQ_ORDER = ["beine", "po", "brust", "ruecken", "schultern", "arme"];
+const FREQ_LABEL = { beine: "Beine", po: "Po", brust: "Brust", ruecken: "Rücken", schultern: "Schultern", arme: "Arme" };
+const times = (v) => `${String(v).replace(".", ",")}×`;
+
+function freqLine(freq, focus = []) {
+  return `<span class="freq">${FREQ_ORDER.map((g) => `<span class="${focus.includes(g) ? "hot" : ""}">
+    ${FREQ_LABEL[g]} <b>${times(freq[g] ?? 0)}</b></span>`).join("")}</span>`;
+}
+
 function stepSplit() {
   if (!st.options) return `<p class="hint">Lade Vorschläge …</p>`;
-  return `<p class="hint">Passend zu deinen ${st.weekdays.length} Tagen (${daysLabel([...st.weekdays].sort())}):</p>
+  const wd = [...st.weekdays].sort();
+  return `<p class="hint">Für deine ${wd.length} Tage (${daysLabel(wd)})${st.focus.length
+      ? ` mit Fokus ${st.focus.map((f) => FOCUS[f]).join(", ")}` : ""} – sortiert nach Eignung:</p>
     <div class="choices">${st.options.map((o) => `
-      <button type="button" class="choice ${st.option === o.key ? "active" : ""}" data-pick="option"
+      <button type="button" class="choice split-choice ${st.option === o.key ? "active" : ""}" data-pick="option"
         data-value="${o.key}" aria-pressed="${st.option === o.key}">
         <span class="choice-title">${esc(o.name)}${o.recommended ? ` <span class="pill ok">empfohlen</span>` : ""}</span>
-        <span class="choice-text">${esc(o.reason)}</span>
-        <span class="choice-text">${o.days.map((d) => `${esc(d.label)} (${daysLabel(d.weekdays)})`).join(" · ")}</span>
+        <span class="choice-text">${esc(o.text)}</span>
+        ${(o.pro || []).length || (o.contra || []).length ? `<ul class="why">
+          ${(o.pro || []).map((r) => `<li class="pro">${esc(r)}</li>`).join("")}
+          ${(o.contra || []).map((r) => `<li class="contra">${esc(r)}</li>`).join("")}
+        </ul>` : ""}
+        <span class="choice-text">pro Woche: ${freqLine(o.frequency, o.focus)}</span>
+        <span class="choice-text">${o.rotate ? "Tage wechseln automatisch: " : ""}${o.days.map((d) =>
+          `${esc(d.label)}${d.weekdays.length ? ` (${daysLabel(d.weekdays)})` : ""}`).join(" · ")}</span>
       </button>`).join("")}</div>`;
 }
 
@@ -166,12 +190,15 @@ function stepPreview() {
   if (!pv) return `<p class="hint">Erstelle Plan …</p>`;
   const findings = st.check?.findings || [];
   return `<label class="field">Name<input data-plan-name maxlength="80" value="${esc(pv.name)}"></label>
+    ${pv.basis?.length ? `<details class="card basis" open><summary class="eyebrow">Darauf basiert dein Plan</summary>
+      <ul class="plain">${pv.basis.map((b) => `<li>${esc(b)}</li>`).join("")}</ul>
+      ${pv.frequency ? `<p class="hint">pro Woche: ${freqLine(pv.frequency, pv.focus || [])}</p>` : ""}</details>` : ""}
     ${pv.notes?.length ? `<div class="card ai-note"><p class="eyebrow">${icon("spark")} Angepasst von der KI</p>
       <ul class="plain">${pv.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></div>` : ""}
     ${st.aiError ? `<p class="callout">${esc(st.aiError)}</p>` : ""}
     ${pv.days.map((d, di) => `<div class="card wiz-day">
       <div class="card-title">${esc(d.label)}</div>
-      <div class="row-meta"><span>${daysLabel(d.weekdays)}</span><span>${d.exercises.length} Übungen</span></div>
+      <div class="row-meta"><span>${d.weekdays.length ? daysLabel(d.weekdays) : "im Wechsel"}</span><span>${d.exercises.length} Übungen</span></div>
       <div class="list flush">${d.exercises.map((ex, ei) => exerciseRow(ex, di, ei, d)).join("")}</div>
     </div>`).join("")}
     <h3 class="form-section">Plan-Check</h3>
@@ -245,7 +272,9 @@ async function next() {
       await api(`profiles/${getProfile()}`, { method: "PATCH", body: {
         goal: st.goal, train_weekdays: weekdays, session_minutes: st.minutes,
         experience: st.experience, focus: st.focus } });
-      const res = await api(`wizard/options?weekdays=${weekdays.join(",")}&experience=${st.experience}`);
+      const q = new URLSearchParams({ weekdays: weekdays.join(","), experience: st.experience,
+        goal: st.goal, minutes: st.minutes, focus: st.focus.join(",") });
+      const res = await api(`wizard/options?${q}`);
       st.options = res.options;
       st.aiAvailable = res.ai_available;
       if (!st.options.some((o) => o.key === st.option)) {
@@ -300,6 +329,7 @@ async function onClick(ev) {
     else if (st.focus.length < MAX_FOCUS) st.focus = [...st.focus, f];
     else toast(`Höchstens ${MAX_FOCUS} Schwerpunkte.`);
     st.preview = null;
+    st.options = null;
     save();
     return render();
   }
