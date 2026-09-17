@@ -1,9 +1,31 @@
 # Fitness
 
-Trainingsplan, Einheiten mitschreiben und Fortschritt – als eigener kleiner Dienst neben
-dem Studienplaner auf dem Homeserver. Läuft auch ohne Verbindung: der Trainingsplan bleibt
-sichtbar, Einheiten werden lokal gespeichert und gesammelt nachgesendet, sobald wieder
-Netz da ist.
+Persönlicher Trainings-Begleiter nach dem Vorbild von MCI – Personal Training AI, als eigener
+Dienst auf dem Homeserver. Läuft auch ohne Verbindung: Plan und letzte Werte bleiben
+sichtbar, Einträge werden lokal gesammelt und nachgesendet, sobald wieder Netz da ist.
+
+## Bereiche
+
+| Tab | Inhalt |
+|---|---|
+| Heute | Tages-Serie, Check-in (Schlaf, Energie, Stress, Muskelkater) → Readiness, an die Erholung angepasstes Training, Mobility-Routine, Kalorien |
+| Training | Einheit (mit Pausen-Timer) · Plan (Splits, Assistent, Plan-Check) · Übungen (Anleitung, Muskel-Grafik, Video-Suche) · Cardio |
+| Ernährung | Kalorien/Makros gegen das Ziel, Mahlzeiten, Suche und Barcode über Open Food Facts, eigene Lebensmittel |
+| Fortschritt | Übersicht (Bestleistungen, Volumen) · Körper (Gewicht, Körperfett, Maße, ViCoach) · Erfolge (Serien, Abzeichen) · Verlauf |
+| Profil | Daten, Ernährungsziel, Plan-Assistent |
+
+## Körperanalyse aus dem Studio (ViCoach)
+
+ViCoach hat keine Schnittstelle und keinen Export. Stattdessen: in ViCoach einen Screenshot
+vom Messergebnis machen → Fortschritt → Körper → „ViCoach-Screenshot“. Die KI liest die Werte,
+man prüft sie im Formular und speichert erst dann. Das Bild wird nicht gespeichert.
+
+## Datenschutz
+
+- Alle Daten liegen in `fitness.db` auf dem Pi.
+- An **Anthropic** (nur mit `ANTHROPIC_API_KEY`, nur auf Knopfdruck): Plan-Check, KI-Verfeinerung
+  (Plan + Eckdaten ohne Namen) und der ViCoach-Screenshot.
+- An **Open Food Facts**: nur Suchbegriff bzw. Barcode.
 
 ## Start (lokal)
 

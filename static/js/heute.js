@@ -1,23 +1,74 @@
-/** Heute: welcher Split-Teil ist dran, was stand letztes Mal, was wäre der Vorschlag. */
-import { api, closeSheet, empty, esc, fmtWeight, getProfile, icon, openSheet, relDate,
-  setsSummary, skeleton, toast, WEEKDAYS_LONG } from "./util.js";
+/** Heute: Wochen-Streak, Check-in mit Readiness, heutiges (angepasstes) Training,
+ *  Mobility-Routine und Kalorienbilanz – alles auf einen Blick. */
+import { $, api, closeSheet, empty, esc, fmtWeight, getProfile, GROUPS, icon, openSheet,
+  relDate, setsSummary, skeleton, toast, WEEKDAYS_LONG, busy } from "./util.js";
 import { startDraft, hasDraft } from "./training.js";
+import { weekStrip } from "./erfolge.js";
+import { ring } from "./ernaehrung.js";
+import * as outbox from "./outbox.js";
 
 let root;
 let data = null;
+let editingCheckin = false;
 const dayCache = new Map();
 
+const SCALES = {
+  sleep: ["Schlaf", ["sehr schlecht", "schlecht", "okay", "gut", "sehr gut"]],
+  energy: ["Energie", ["leer", "müde", "normal", "fit", "voller Energie"]],
+  stress: ["Stress", ["entspannt", "gering", "mittel", "hoch", "sehr hoch"]],
+};
+const SORE = ["–", "leicht", "mittel", "stark"];
+
+// ------------------------------------------------------------ Check-in
+function checkinForm(c) {
+  const v = { sleep: c?.sleep ?? 3, energy: c?.energy ?? 3, stress: c?.stress ?? 3 };
+  const sore = c?.soreness || {};
+  return `<div class="card checkin" data-checkin-form>
+    <p class="eyebrow">Wie geht's dir heute?</p>
+    ${Object.entries(SCALES).map(([k, [label, words]]) => `
+      <div class="scale" data-scale="${k}">
+        <span class="scale-label">${label}</span>
+        <div class="scale-dots" role="radiogroup" aria-label="${label}">
+          ${words.map((w, i) => `<button type="button" role="radio" class="dot-btn ${v[k] === i + 1 ? "on" : ""}"
+            data-value="${i + 1}" aria-checked="${v[k] === i + 1}" aria-label="${label}: ${w}">${i + 1}</button>`).join("")}
+        </div>
+        <span class="scale-word" data-word>${words[v[k] - 1]}</span>
+      </div>`).join("")}
+    <p class="scale-label">Muskelkater <span class="hint">– antippen zum Steigern</span></p>
+    <div class="chips sore">${Object.entries(GROUPS).map(([g, l]) => `<button type="button"
+      class="chip sore-${sore[g] || 0}" data-sore="${g}" data-level="${sore[g] || 0}">${l}<small>${SORE[sore[g] || 0]}</small></button>`).join("")}</div>
+    <div class="btn-row"><button type="button" class="btn primary" data-save-checkin>${icon("check")} Check-in speichern</button>
+      ${c ? `<button type="button" class="btn ghost" data-cancel-checkin>Abbrechen</button>` : ""}</div>
+  </div>`;
+}
+
+function readinessCard(c) {
+  const lvl = c.level;
+  const tone = { voll: "ok", leichter: "soon", erholung: "urgent" }[lvl.key];
+  const sore = Object.entries(c.soreness || {}).filter(([, v]) => v >= 2).map(([g]) => GROUPS[g]);
+  return `<div class="card readiness ${tone}">
+    <div class="readiness-ring" style="--p:${c.readiness}"><b>${c.readiness}</b><small>Readiness</small></div>
+    <div class="grow">
+      <p class="eyebrow">Check-in</p>
+      <h3 class="card-title">${esc(lvl.title)}</h3>
+      <p class="hint">${esc(lvl.text)}</p>
+      ${sore.length ? `<p class="hint">Muskelkater: ${esc(sore.join(", "))}</p>` : ""}
+      <button type="button" class="link-btn" data-edit-checkin>Ändern</button>
+    </div>
+  </div>`;
+}
+
+// --------------------------------------------------------------- Karten
 function exerciseRow(e) {
   const s = e.suggest;
-  const target = e.target_reps_min === e.target_reps_max
-    ? `${e.target_reps_min}` : `${e.target_reps_min}–${e.target_reps_max}`;
+  const range = e.target_reps_min === e.target_reps_max ? `${e.target_reps_min}` : `${e.target_reps_min}–${e.target_reps_max}`;
   return `<div class="row-item">
     <div class="row-main">
       <div class="row-title">${esc(e.name)}</div>
       <div class="row-meta">
-        <span>${e.target_sets} Sätze · ${target} Whd.</span>
-        ${e.last.length ? `<span>letztes Mal ${esc(setsSummary(e.last, e.unit))}</span>`
-          : `<span class="faint">noch nie gemacht</span>`}
+        <span>${e.target_sets} × ${range}</span>
+        ${e.adjusted ? `<span class="soon-text">${esc(e.adjusted)}</span>`
+          : e.last?.length ? `<span>zuletzt ${esc(setsSummary(e.last, e.unit))}</span>` : ""}
       </div>
     </div>
     <span class="suggest ${s.raise_weight ? "up" : ""}" title="${esc(s.reason)}">
@@ -26,52 +77,90 @@ function exerciseRow(e) {
   </div>`;
 }
 
-function render() {
-  if (!data?.split) {
-    root.innerHTML = `${empty("Noch kein Split angelegt",
-        "Lege unter <b>Plan</b> einen Split mit deinen Trainingstagen an.",
-        { label: "Zum Plan", attrs: 'onclick="location.hash=\'plan\'"' })}`;
-    return;
+function workoutCard() {
+  const d = data;
+  if (!d.split) {
+    return `<div class="card">${empty("Noch kein Trainingsplan",
+      "Lass dir im Profil einen Plan erstellen oder leg unter Training → Plan selbst einen an.",
+      { label: "Plan erstellen", attrs: 'data-goto="profil"' })}</div>`;
   }
-  const day = data.day;
+  const day = d.day;
+  if (!day) return "";
   const running = hasDraft();
+  const trained = d.streak.trained_today;
   const weekday = WEEKDAYS_LONG[(new Date().getDay() + 6) % 7];
-  const pos = data.position ? `Tag ${data.position} von ${data.day_count}` : "";
-  const last = data.last_workout;
-
-  root.innerHTML = `<p class="page-sub top">${esc(data.split.name)}</p>
-    ${day ? `<div class="card hero">
-      <p class="eyebrow">${data.fixed ? `${esc(weekday)} · fester Tag` : "als Nächstes dran"}</p>
+  return `<div class="card hero">
+      <p class="eyebrow">${d.fixed ? `${esc(weekday)} · Training` : "Als Nächstes dran"}${trained ? " · heute schon aktiv ✓" : ""}</p>
       <h3 class="hero-title">${esc(day.label)}</h3>
-      <p class="hint">${esc(pos)}${day.exercises.length ? ` · ${day.exercises.length} Übungen` : ""}</p>
+      <p class="hint">${day.exercises.length} Übungen · ${day.exercises.reduce((n, e) => n + e.target_sets, 0)} Sätze
+        ${d.position ? ` · Tag ${d.position} von ${d.day_count}` : ""}</p>
+      ${d.sore_today?.length ? `<p class="callout">${icon("warn")} Muskelkater in ${esc(d.sore_today.map((g) => GROUPS[g]).join(", "))} –
+        die Sätze sind reduziert.${d.alternative ? ` Alternativ heute <button type="button" class="link-btn" data-start="${d.alternative.id}">${esc(d.alternative.label)} trainieren</button>.` : ""}</p>` : ""}
       <div class="btn-row">
         ${running
-          ? `<a class="btn primary" href="#training">${icon("clock")} Einheit fortsetzen</a>`
-          : `<button type="button" class="btn primary" data-start="${day.id}">${icon("plus")} Einheit starten</button>`}
+          ? `<a class="btn primary" href="#training/einheit">${icon("play")} Einheit fortsetzen</a>`
+          : `<button type="button" class="btn primary" data-start="${day.id}">${icon("play")} Einheit starten</button>`}
         <button type="button" class="btn ghost" data-pick>Anderer Tag</button>
       </div>
     </div>
-    <h3 class="group-title">Übungen<span class="count-muted">Vorschlag fürs nächste Mal</span></h3>
-    <div class="list">${day.exercises.map(exerciseRow).join("")
-      || `<p class="hint pad">Für diesen Tag sind noch keine Übungen eingetragen.</p>`}</div>`
-    : `${empty("Für heute ist nichts geplant", "Wähle einen Trainingstag, wenn du trotzdem willst.",
-        { label: "Trainingstag wählen", attrs: "data-pick" })}`}
-    ${last ? `<p class="hint pad">Letzte Einheit: ${esc(last.day_label || "Training")} · ${esc(relDate(last.at, { time: false }))}</p>` : ""}`;
+    <details class="group-details">
+      <summary class="group-title">Übungen<span class="count-muted">Vorschlag fürs nächste Mal</span>${icon("down", "chev")}</summary>
+      <div class="list">${day.exercises.map(exerciseRow).join("")
+        || `<p class="hint pad">Für diesen Tag sind noch keine Übungen eingetragen.</p>`}</div>
+    </details>`;
+}
+
+function mobilityCard() {
+  const m = data.mobility;
+  return `<div class="card mini-card" role="button" tabindex="0" data-mobility="${m.key}">
+    <span class="row-icon">${icon("stretch")}</span>
+    <div class="grow"><p class="eyebrow">Mobility · ${m.minutes} min</p>
+      <div class="card-title">${esc(m.title)}</div><p class="hint">${esc(m.text)}</p></div>
+    ${m.done ? `<span class="pill ok">erledigt</span>` : icon("right", "chev")}
+  </div>`;
+}
+
+function nutritionCard() {
+  const n = data.nutrition;
+  const pend = outbox.pending("food-log").filter((e) => !e.date || e.date === data.date)
+    .reduce((s, e) => s + (e.preview?.kcal || 0), 0);
+  const eaten = n.totals.kcal + pend;
+  return `<a class="card mini-card" href="#ernaehrung">
+    ${ring(eaten, n.goals.kcal, { size: 72 })}
+    <div class="grow"><p class="eyebrow">Ernährung</p>
+      <div class="card-title">${Math.round(eaten)} ${n.goals.kcal ? `von ${n.goals.kcal} ` : ""}kcal</div>
+      <p class="hint">Eiweiß ${Math.round(n.totals.protein)}${n.goals.protein ? ` / ${n.goals.protein}` : ""} g</p></div>
+    ${icon("right", "chev")}
+  </a>`;
+}
+
+function render() {
+  const d = data;
+  const showForm = !d.checkin || editingCheckin;
+  root.innerHTML = `<div class="streak-head">
+      <span class="streak-count">${icon("flame")} <b>${d.streak.daily}</b> ${d.streak.daily === 1 ? "Tag" : "Tage"} in Folge</span>
+      ${d.split ? `<span class="hint">${esc(d.split.name)}</span>` : ""}
+    </div>
+    ${weekStrip(d.streak.week)}
+    ${showForm ? checkinForm(d.checkin) : readinessCard(d.checkin)}
+    ${workoutCard()}
+    ${mobilityCard()}
+    ${nutritionCard()}
+    ${d.last_workout ? `<p class="hint pad">Letzte Einheit: ${esc(d.last_workout.day_label || "Training")} · ${esc(relDate(d.last_workout.at, { time: false }))}</p>` : ""}`;
 }
 
 export async function load() {
-  if (!data) root.innerHTML = skeleton(4);
+  // Nicht mitten im Check-in neu zeichnen
+  if (data && root.querySelector("[data-checkin-form].touched")) return;
+  if (!data) root.innerHTML = skeleton(5);
   data = await api("today");
   render();
   prefetchDays();
 }
 
-/** Die Pläne der übrigen Trainingstage still mitladen. Ohne das könnte man im Gym
- *  ohne Empfang keinen anderen Tag starten – der Plan wird ja einzeln geholt. */
+/** Pläne der anderen Tage still mitladen – fürs Starten ohne Empfang. */
 function prefetchDays() {
   const others = (data.days || []).filter((d) => d.id !== data.day?.id);
-  // Bewusst roher fetch: ein stiller Vorab-Ladevorgang soll den Offline-Hinweis
-  // nicht umschreiben, wenn er gerade ins Leere läuft.
   others.forEach((d, i) => setTimeout(() => {
     fetch(`/api/day/${d.id}?profile=${getProfile()}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -80,6 +169,7 @@ function prefetchDays() {
   }, 400 * (i + 1)));
 }
 
+// --------------------------------------------------------------- Aktionen
 function pickDay() {
   if (!data?.days?.length) return;
   const sheet = openSheet({
@@ -98,30 +188,133 @@ function pickDay() {
 }
 
 async function begin(dayId) {
-  // Der heutige Tag steckt schon in /api/today, die anderen im Zwischenspeicher –
-  // damit klappt der Start auch ohne Verbindung.
   const known = data?.day?.id === dayId ? data.day : dayCache.get(dayId);
-  if (known) {
-    startDraft(known);
-    location.hash = "training";
-    return;
-  }
   try {
-    const day = await api(`day/${dayId}`);
-    dayCache.set(dayId, day);
-    startDraft(day);
-    location.hash = "training";
+    startDraft(known || await api(`day/${dayId}`));
+    location.hash = "training/einheit";
   } catch (e) {
-    toast(e.offline ? "Dieser Trainingstag wurde noch nicht geladen – online einmal öffnen."
-      : e.message, { error: true });
+    toast(e.offline ? "Dieser Trainingstag wurde noch nicht geladen – online einmal öffnen." : e.message, { error: true });
   }
+}
+
+async function saveCheckin(btn) {
+  const form = root.querySelector("[data-checkin-form]");
+  const value = (k) => Number(form.querySelector(`[data-scale="${k}"] .on`)?.dataset.value || 3);
+  const soreness = {};
+  form.querySelectorAll("[data-sore]").forEach((b) => {
+    const lvl = Number(b.dataset.level);
+    if (lvl) soreness[b.dataset.sore] = lvl;
+  });
+  const body = { profile_id: getProfile(), sleep: value("sleep"), energy: value("energy"),
+    stress: value("stress"), soreness, client_id: outbox.uuid() };
+  await busy(btn, async () => {
+    try {
+      const res = await outbox.send({ path: "checkin", body });
+      editingCheckin = false;
+      form.classList.remove("touched");
+      if (res.queued) toast("Check-in gespeichert – wird gesendet, sobald wieder Verbindung da ist");
+      await load();
+    } catch (e) { toast(e.message, { error: true }); }
+  });
+}
+
+// Mobility-Routine Schritt für Schritt
+async function openMobility(key) {
+  let r;
+  try { r = await api(`mobility/${key}`); } catch (e) { return toast(e.message, { error: true }); }
+  let i = 0;
+  let timer = null;
+  let left = 0;
+  const sheet = openSheet({ title: esc(r.title), body: "", wide: true });
+  const body = $(".sheet-body", sheet);
+  const stop = () => { clearInterval(timer); timer = null; };
+  function paint() {
+    const m = r.moves[i];
+    const last = i === r.moves.length - 1;
+    body.innerHTML = `<div class="steps-bar">${r.moves.map((_, k) => `<i class="${k <= i ? "on" : ""}"></i>`).join("")}</div>
+      <p class="eyebrow">Übung ${i + 1} von ${r.moves.length}</p>
+      <h3 class="hero-title">${esc(m.name)}</h3>
+      <p>${esc(m.text)}</p>
+      <div class="move-target">${m.seconds
+        ? `<b data-left>${left || m.seconds}</b><span>Sekunden</span>
+           <button type="button" class="btn tonal" data-timer>${icon(timer ? "pause" : "play")} ${timer ? "Pause" : "Start"}</button>`
+        : `<b>${m.reps}</b><span>Wiederholungen</span>`}</div>
+      <div class="btn-row wide">
+        ${i ? `<button type="button" class="btn ghost" data-prev>${icon("left")} Zurück</button>` : ""}
+        <button type="button" class="btn primary" data-next>${last ? `${icon("check")} Fertig` : `Weiter ${icon("right")}`}</button>
+      </div>`;
+  }
+  function tick() {
+    left -= 1;
+    if (!sheet.isConnected) return stop();
+    const el = $("[data-left]", sheet);
+    if (el) el.textContent = Math.max(left, 0);
+    if (left <= 0) {
+      stop();
+      navigator.vibrate?.(150);
+      if (i < r.moves.length - 1) { i += 1; left = 0; }
+      paint();
+    }
+  }
+  sheet.addEventListener("click", async (ev) => {
+    const t = (s) => ev.target.closest(s);
+    if (t("[data-timer]")) {
+      if (timer) stop();
+      else { left = left || r.moves[i].seconds; timer = setInterval(tick, 1000); }
+      return paint();
+    }
+    if (t("[data-prev]")) { stop(); left = 0; i -= 1; return paint(); }
+    const next = t("[data-next]");
+    if (!next) return;
+    stop();
+    left = 0;
+    if (i < r.moves.length - 1) { i += 1; return paint(); }
+    try {
+      const res = await outbox.send({ path: "mobility/log",
+        body: { profile_id: getProfile(), routine: key, client_id: outbox.uuid() } });
+      closeSheet();
+      toast(res.queued ? "Erledigt – wird gesendet, sobald wieder Verbindung da ist" : "Mobility erledigt 💪");
+      window.dispatchEvent(new CustomEvent("data-changed"));
+    } catch (e) { toast(e.message, { error: true }); }
+  });
+  paint();
 }
 
 export async function mount(el) {
   root = el;
   el.addEventListener("click", (ev) => {
-    const start = ev.target.closest("[data-start]");
+    const t = (s) => ev.target.closest(s);
+    const dot = t(".dot-btn");
+    if (dot) {
+      const scale = dot.closest("[data-scale]");
+      scale.querySelectorAll(".dot-btn").forEach((b) => {
+        const on = b === dot;
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-checked", on);
+      });
+      $("[data-word]", scale).textContent = SCALES[scale.dataset.scale][1][Number(dot.dataset.value) - 1];
+      dot.closest("[data-checkin-form]").classList.add("touched");
+      return;
+    }
+    const sore = t("[data-sore]");
+    if (sore) {
+      const lvl = (Number(sore.dataset.level) + 1) % 4;
+      sore.dataset.level = lvl;
+      sore.className = `chip sore-${lvl}`;
+      sore.querySelector("small").textContent = SORE[lvl];
+      sore.closest("[data-checkin-form]").classList.add("touched");
+      return;
+    }
+    const save = t("[data-save-checkin]");
+    if (save) return saveCheckin(save);
+    if (t("[data-edit-checkin]")) { editingCheckin = true; return render(); }
+    if (t("[data-cancel-checkin]")) { editingCheckin = false; return render(); }
+    const start = t("[data-start]");
     if (start) return begin(Number(start.dataset.start));
-    if (ev.target.closest("[data-pick]")) pickDay();
+    if (t("[data-pick]")) return pickDay();
+    const mob = t("[data-mobility]");
+    if (mob) return openMobility(mob.dataset.mobility);
+    const go = t("[data-goto]");
+    if (go) location.hash = go.dataset.goto;
   });
 }

@@ -6,7 +6,7 @@ import { $, $$, api, armDelete, closeSheet, empty, esc, formData, formError, get
 import * as outbox from "./outbox.js";
 
 let root;
-let history = null;
+let today = null;     // /api/today fuer den Startbildschirm
 let timer = null;
 
 // ------------------------------------------------------------- Entwurf
@@ -27,6 +27,8 @@ export function startDraft(day) {
       exercise_id: e.exercise_id,
       name: e.name,
       unit: e.unit,
+      kind: e.kind,
+      adjusted: e.adjusted || null,
       reps_min: e.target_reps_min,
       reps_max: e.target_reps_max,
       last: e.last,
@@ -81,6 +83,7 @@ function exerciseCard(ex, index) {
         <div class="card-title">${esc(ex.name)}</div>
         <div class="row-meta">
           <span>Ziel ${range} Whd.</span>
+          ${ex.adjusted ? `<span class="soon-text">angepasst: ${esc(ex.adjusted)}</span>` : ""}
           ${ex.last?.length ? `<span>letztes Mal ${esc(setsSummary(ex.last, ex.unit))}</span>` : ""}
         </div>
       </div>
@@ -124,38 +127,54 @@ function renderDraft(draft) {
   }
 }
 
-function historyRow(w) {
-  const sets = w.sets || [];
-  const kg = sets.reduce((n, s) => n + (s.weight || 0) * (s.reps || 0), 0);
-  const when = w.started_at || w.finished_at;
-  return `<div class="row-item ${w.pending ? "is-pending" : ""}" ${w.pending ? "" : `role="button" tabindex="0" data-workout="${w.id}"`}>
-    <div class="row-main">
-      <div class="row-title">${esc(w.day_label || w.title || "Training")}</div>
-      <div class="row-meta">
-        <span>${when ? new Date(when).toLocaleDateString("de-AT", { weekday: "short", day: "numeric", month: "short" }) : ""}</span>
-        <span>${sets.length} Sätze</span>
-        ${kg ? `<span>${Math.round(kg).toLocaleString("de-AT")} kg bewegt</span>` : ""}
-      </div>
-    </div>
-    ${w.pending ? `<span class="pill">wartet</span>` : icon("right", "chev")}
-  </div>`;
-}
-
-function renderHistory() {
-  const pending = outbox.pendingWorkouts();
-  const all = [...pending, ...(history || [])];
-  root.innerHTML = `${empty("Gerade läuft keine Einheit",
-      "Starte sie unter <b>Heute</b> – dort stehen auch die Werte vom letzten Mal.",
-      { label: "Zu Heute", attrs: 'data-goto="heute"' })}
-    ${all.length ? `<h3 class="group-title">Zuletzt</h3><div class="list">${all.map(historyRow).join("")}</div>` : ""}`;
+function renderStart() {
+  const t = today;
+  if (!t?.split) {
+    root.innerHTML = `${empty("Noch kein Plan", "Erstelle unter <b>Plan</b> einen Split oder lass dir einen vom Assistenten bauen.",
+      { label: "Zum Plan", attrs: 'data-goto="training/plan"' })}
+      <div class="btn-row"><button type="button" class="btn ghost" data-free>${icon("plus")} Freies Training</button></div>`;
+    return;
+  }
+  const rec = t.day;
+  const lvl = t.checkin?.level;
+  const others = t.days.filter((d) => d.id !== rec?.id);
+  root.innerHTML = `${lvl && lvl.key !== "voll" ? `<p class="callout">${icon("warn")} ${esc(lvl.title)} – die Vorgaben sind angepasst.</p>` : ""}
+    ${rec ? `<div class="card hero">
+      <p class="eyebrow">${t.fixed ? "Heute geplant" : "Als Nächstes dran"}</p>
+      <h3 class="hero-title">${esc(rec.label)}</h3>
+      <p class="hint">${rec.exercises.length} Übungen · ${rec.exercises.reduce((n, e) => n + e.target_sets, 0)} Sätze</p>
+      <div class="btn-row"><button type="button" class="btn primary" data-start="${rec.id}">${icon("play")} Einheit starten</button></div>
+    </div>` : ""}
+    ${others.length ? `<h3 class="group-title">Anderer Tag</h3>
+      <div class="list">${others.map((d) => `<div class="row-item" role="button" tabindex="0" data-start="${d.id}">
+        <div class="row-main"><div class="row-title">${esc(d.label)}</div></div>${icon("right", "chev")}</div>`).join("")}</div>` : ""}
+    <div class="btn-row"><button type="button" class="btn ghost" data-free>${icon("plus")} Freies Training</button></div>`;
 }
 
 export async function load() {
   const draft = getDraft();
   if (draft) return renderDraft(draft);
-  if (!history) root.innerHTML = skeleton(3);
-  history = await api("workouts?limit=20");
-  renderHistory();
+  if (!today) root.innerHTML = skeleton(3);
+  today = await api("today");
+  renderStart();
+}
+
+async function begin(dayId) {
+  try {
+    const day = today?.day?.id === dayId ? today.day : await api(`day/${dayId}`);
+    startDraft(day);
+    load();
+  } catch (e) {
+    toast(e.offline ? "Dieser Trainingstag wurde noch nicht geladen – einmal mit Netz öffnen." : e.message, { error: true });
+  }
+}
+
+function beginFree() {
+  saveDraft({ client_id: outbox.uuid(), profile_id: getProfile(), split_day_id: null,
+    title: "Freies Training", started_at: new Date().toISOString(), exercises: [], notes: "" });
+  window.dispatchEvent(new CustomEvent("outbox-changed"));
+  load();
+  addExercise();
 }
 
 // ------------------------------------------------------- Bearbeiten
@@ -239,7 +258,7 @@ async function finish() {
   try {
     const res = await outbox.send({ path: "workouts", body });
     clearDraft();
-    history = null;
+    today = null;
     toast(res.queued ? "Gespeichert – wird gesendet, sobald du wieder Empfang hast"
       : `Einheit gespeichert · ${sets.length} Sätze`);
     window.dispatchEvent(new CustomEvent("outbox-changed"));
@@ -249,35 +268,80 @@ async function finish() {
   }
 }
 
-function openWorkout(id) {
-  const w = (history || []).find((x) => x.id === id);
-  if (!w) return;
-  const byExercise = {};
-  for (const s of w.sets) (byExercise[s.exercise] ||= []).push(s);
-  const sheet = openSheet({
-    title: w.day_label || w.title || "Einheit",
-    body: `<p class="hint">${new Date(w.started_at || w.finished_at).toLocaleString("de-AT",
-      { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}</p>
-      <div class="list">${Object.entries(byExercise).map(([name, sets]) => `
-        <div class="row-item"><div class="row-main">
-          <div class="row-title">${esc(name)}</div>
-          <div class="row-meta"><span>${esc(setsSummary(sets, sets[0].unit))}</span></div>
-        </div></div>`).join("")}</div>
-      ${w.notes ? `<p class="hint pad">${esc(w.notes)}</p>` : ""}`,
-    footer: `<button type="button" class="btn danger ghost" data-delete>${icon("trash")} Löschen</button>
-      <span class="grow"></span>
-      <button type="button" class="btn ghost" data-close>Schließen</button>`,
-  });
-  armDelete($("[data-delete]", sheet), async () => {
-    closeSheet();
-    try {
-      await api(`workouts/${id}`, { method: "DELETE" });
-      history = null;
-      toast("Einheit gelöscht");
-      window.dispatchEvent(new CustomEvent("data-changed"));
-    } catch (e) { toast(e.message, { error: true }); }
-  }, "Löschen", "Einheit wirklich löschen?");
+// ---------------------------------------------------------- Pausen-Timer
+const REST = { compound: 120, isolation: 75 };
+let restTick = null;
+
+function restBar() {
+  let bar = document.getElementById("restBar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "restBar";
+    bar.className = "rest-bar";
+    bar.setAttribute("role", "timer");
+    bar.innerHTML = `<span class="rest-label">Pause</span><b data-rest-time></b>
+      <button type="button" class="btn small ghost" data-rest="-15">−15 s</button>
+      <button type="button" class="btn small ghost" data-rest="15">+15 s</button>
+      <button type="button" class="btn small tonal" data-rest="skip">Weiter</button>`;
+    bar.addEventListener("click", (ev) => {
+      const b = ev.target.closest("[data-rest]");
+      if (!b) return;
+      if (b.dataset.rest === "skip") return stopRest();
+      const r = prefs.get("rest");
+      if (r) { r.until += Number(b.dataset.rest) * 1000; prefs.set("rest", r); tick(); }
+    });
+    document.body.appendChild(bar);
+  }
+  return bar;
 }
+
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.2, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+    o.connect(g).connect(ctx.destination);
+    o.start();
+    o.stop(ctx.currentTime + 0.5);
+  } catch { /* kein Ton moeglich */ }
+}
+
+function tick() {
+  const r = prefs.get("rest");
+  if (!r) return stopRest();
+  const left = Math.round((r.until - Date.now()) / 1000);
+  const bar = restBar();
+  if (left <= 0) {
+    navigator.vibrate?.([200, 100, 200]);
+    beep();
+    return stopRest();
+  }
+  bar.querySelector("[data-rest-time]").textContent =
+    `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+  bar.hidden = false;
+}
+
+function startRest(seconds) {
+  const custom = prefs.get("restSeconds");
+  prefs.set("rest", { until: Date.now() + (custom || seconds) * 1000 });
+  clearInterval(restTick);
+  restTick = setInterval(tick, 500);
+  tick();
+}
+
+function stopRest() {
+  prefs.set("rest", null);
+  clearInterval(restTick);
+  restTick = null;
+  const bar = document.getElementById("restBar");
+  if (bar) bar.hidden = true;
+}
+
+// Laeuft nach einem Neuladen weiter
+if (prefs.get("rest")) { restTick = setInterval(tick, 500); }
 
 // ------------------------------------------------------------- Mount
 export async function mount(el) {
@@ -285,10 +349,11 @@ export async function mount(el) {
 
   el.addEventListener("click", (ev) => {
     const t = (sel) => ev.target.closest(sel);
+    const start = t("[data-start]");
+    if (start) return begin(Number(start.dataset.start));
+    if (t("[data-free]")) return beginFree();
     const goto = t("[data-goto]");
     if (goto) { location.hash = goto.dataset.goto; return; }
-    const w = t("[data-workout]");
-    if (w) return openWorkout(Number(w.dataset.workout));
 
     const toggle = t("[data-toggle]");
     if (toggle) {
@@ -301,10 +366,16 @@ export async function mount(el) {
         row.querySelector('[data-field="reps"]').focus();
         return;
       }
-      return update((d) => {
+      let nowDone = false;
+      let kind = null;
+      update((d) => {
         const s = d.exercises[i].sets[j];
         s.done = !s.done;
+        nowDone = s.done;
+        kind = d.exercises[i].kind;
       });
+      if (nowDone) startRest(kind === "compound" ? REST.compound : REST.isolation);
+      return;
     }
     const add = t("[data-add-set]");
     if (add) {
@@ -329,12 +400,13 @@ export async function mount(el) {
       }), icon("trash"), "Entfernen?");
     }
     if (t("[data-add-ex]")) return addExercise();
-    if (t("[data-finish]")) return finish();
+    if (t("[data-finish]")) { stopRest(); return finish(); }
     const cancel = t("[data-cancel]");
     if (cancel) {
       return armDelete(cancel, () => {
+        stopRest();
         clearDraft();
-        history = null;
+        today = null;
         toast("Einheit verworfen");
         window.dispatchEvent(new CustomEvent("outbox-changed"));
         load();

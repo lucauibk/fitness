@@ -81,6 +81,67 @@ CREATE TABLE IF NOT EXISTS bodyweight (
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY, value TEXT
 );
+CREATE TABLE IF NOT EXISTS checkins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    sleep INTEGER, stress INTEGER, energy INTEGER,   -- je 1..5
+    soreness TEXT,                                   -- JSON {"beine": 2, ...}, 0..3
+    readiness INTEGER,
+    client_id TEXT UNIQUE,
+    UNIQUE(profile_id, date)
+);
+CREATE TABLE IF NOT EXISTS cardio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    activity TEXT NOT NULL,
+    minutes REAL NOT NULL,
+    distance_km REAL, kcal REAL, avg_hr INTEGER, notes TEXT,
+    client_id TEXT UNIQUE
+);
+CREATE TABLE IF NOT EXISTS mobility_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    routine TEXT NOT NULL,
+    client_id TEXT UNIQUE
+);
+CREATE TABLE IF NOT EXISTS foods (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    barcode TEXT UNIQUE,
+    name TEXT NOT NULL,
+    brand TEXT,
+    kcal REAL NOT NULL, protein REAL, carbs REAL, fat REAL,   -- je 100 g
+    serving_g REAL,
+    source TEXT DEFAULT 'eigen',                               -- off | eigen
+    created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS food_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    meal TEXT NOT NULL,                  -- fruehstueck | mittag | abend | snack
+    food_id INTEGER,
+    name TEXT,                           -- Kopie, falls das Lebensmittel spaeter verschwindet
+    grams REAL NOT NULL,
+    kcal REAL, protein REAL, carbs REAL, fat REAL,   -- fuer diese Menge, eingefroren
+    client_id TEXT UNIQUE
+);
+CREATE TABLE IF NOT EXISTS body_measurements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    source TEXT DEFAULT 'manuell',       -- manuell | vicoach
+    weight_kg REAL, body_fat_pct REAL, body_fat_estimated INTEGER DEFAULT 0,
+    muscle_mass_kg REAL, water_pct REAL, visceral_fat REAL, bmr_kcal REAL, bio_age REAL,
+    waist_cm REAL, hip_cm REAL, chest_cm REAL, arm_cm REAL, thigh_cm REAL, neck_cm REAL,
+    notes TEXT,
+    client_id TEXT UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_food_log_day ON food_log(profile_id, date);
+CREATE INDEX IF NOT EXISTS idx_cardio_day ON cardio(profile_id, date);
+CREATE INDEX IF NOT EXISTS idx_body_day ON body_measurements(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_sets_workout ON sets(workout_id);
 CREATE INDEX IF NOT EXISTS idx_sets_exercise ON sets(exercise_id);
 CREATE INDEX IF NOT EXISTS idx_workouts_profile ON workouts(profile_id, started_at);
@@ -98,9 +159,16 @@ MIGRATIONS = {
                  "goal": "TEXT", "experience": "TEXT", "days_per_week": "INTEGER",
                  "session_minutes": "INTEGER", "limitations": "TEXT",
                  # Wochentage, an denen trainiert werden kann ("0,2,4"), und Muskel-Fokus ("arme,po")
-                 "train_weekdays": "TEXT", "focus": "TEXT"},
+                 "train_weekdays": "TEXT", "focus": "TEXT",
+                 # Ernaehrung: Ziele (nutrition_auto=1 -> berechnet)
+                 "activity_level": "TEXT", "kcal_goal": "INTEGER", "protein_goal": "INTEGER",
+                 "carbs_goal": "INTEGER", "fat_goal": "INTEGER",
+                 "nutrition_auto": "INTEGER DEFAULT 1"},
     # Bewegungsmuster: danach waehlt der Assistent Uebungen aus
-    "exercises": {"pattern": "TEXT", "kind": "TEXT"},
+    "exercises": {"pattern": "TEXT", "kind": "TEXT",
+                  # Uebungsbibliothek
+                  "instructions": "TEXT", "mistakes": "TEXT", "muscles_primary": "TEXT",
+                  "muscles_secondary": "TEXT", "equipment": "TEXT", "video_query": "TEXT"},
 }
 
 
@@ -319,6 +387,8 @@ def init():
         _migrate(c)
         _seed(c)
         _catalog_v2(c)
+        from .exercise_info import apply as _exercise_info
+        _exercise_info(c)
     with sqlite3.connect(DB_PATH, timeout=30) as c:
         # WAL: Lesen blockiert nicht, waehrend geschrieben wird – wichtig, wenn zwei
         # Leute gleichzeitig eine Einheit hochladen.
@@ -375,8 +445,25 @@ def backup(tag=None):
 # damit Spaltennamen nie ungeprueft aus dem Request in SQL landen.
 WRITABLE = {
     "profiles": ("name", "color", "birth_year", "sex", "height_cm", "goal", "experience",
-                 "days_per_week", "session_minutes", "limitations", "train_weekdays", "focus"),
-    "exercises": ("name", "muscle_group", "unit", "archived", "pattern", "kind"),
+                 "days_per_week", "session_minutes", "limitations", "train_weekdays", "focus",
+                 "activity_level", "kcal_goal", "protein_goal", "carbs_goal", "fat_goal",
+                 "nutrition_auto"),
+    "exercises": ("name", "muscle_group", "unit", "archived", "pattern", "kind",
+                  "instructions", "mistakes", "muscles_primary", "muscles_secondary",
+                  "equipment", "video_query"),
+    "checkins": ("profile_id", "date", "sleep", "stress", "energy", "soreness", "readiness",
+                 "client_id"),
+    "cardio": ("profile_id", "date", "activity", "minutes", "distance_km", "kcal", "avg_hr",
+               "notes", "client_id"),
+    "mobility_log": ("profile_id", "date", "routine", "client_id"),
+    "foods": ("barcode", "name", "brand", "kcal", "protein", "carbs", "fat", "serving_g",
+              "source", "created_at"),
+    "food_log": ("profile_id", "date", "meal", "food_id", "name", "grams", "kcal", "protein",
+                 "carbs", "fat", "client_id"),
+    "body_measurements": ("profile_id", "date", "source", "weight_kg", "body_fat_pct",
+                          "body_fat_estimated", "muscle_mass_kg", "water_pct", "visceral_fat",
+                          "bmr_kcal", "bio_age", "waist_cm", "hip_cm", "chest_cm", "arm_cm",
+                          "thigh_cm", "neck_cm", "notes", "client_id"),
     "splits": ("profile_id", "name", "active"),
     "split_days": ("split_id", "position", "label", "weekdays"),
     "split_exercises": ("split_day_id", "exercise_id", "position", "target_sets",
@@ -508,7 +595,7 @@ def split_detail(split_id):
     split["days"] = [day_out(d) for d in list_rows_where("split_days", "split_id", split_id, "position, id")]
     for day in split["days"]:
         day["exercises"] = rows(
-            "SELECT se.*, e.name, e.muscle_group, e.unit FROM split_exercises se"
+            "SELECT se.*, e.name, e.muscle_group, e.unit, e.kind, e.pattern FROM split_exercises se"
             " JOIN exercises e ON e.id = se.exercise_id"
             " WHERE se.split_day_id=? ORDER BY se.position, se.id", (day["id"],))
     return split

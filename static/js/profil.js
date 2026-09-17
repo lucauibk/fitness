@@ -21,6 +21,40 @@ function summary(p) {
   return parts.length ? parts.join(" · ") : "Noch nicht festgelegt – der Assistent fragt es ab.";
 }
 
+const ACT = { niedrig: "wenig (Bürojob)", mittel: "mittel (viel auf den Beinen)", hoch: "hoch (körperliche Arbeit)" };
+
+function nutritionCard() {
+  const n = data.nutrition;
+  const g = n.goals || {};
+  const c = n.computed;
+  return `<div class="card">
+    <p class="eyebrow">Ernährungsziel</p>
+    ${g.kcal ? `<p><b>${g.kcal} kcal</b> · Eiweiß ${g.protein} g · Kohlenhydrate ${g.carbs} g · Fett ${g.fat} g</p>`
+      : `<p class="hint">Für eine Berechnung fehlen: ${esc((n.missing || []).join(", "))}.</p>`}
+    ${c && n.auto ? `<p class="hint">Berechnet aus Gewicht ${String(c.weight).replace(".", ",")} kg, Größe, Alter, Aktivität und Ziel
+      (Gesamtumsatz ≈ ${c.tdee} kcal).</p>` : ""}
+    <form id="nutriForm" class="form">
+      <label class="field">Alltags-Aktivität
+        <select name="activity_level">
+          <option value="">aus den Trainingstagen schätzen</option>
+          ${Object.entries(ACT).map(([k, l]) => `<option value="${k}"${n.activity_level === k ? " selected" : ""}>${l}</option>`).join("")}
+        </select>
+      </label>
+      <div class="toggles"><label class="toggle"><input type="checkbox" name="nutrition_auto" ${n.auto ? "checked" : ""}>
+        <span></span>Ziele automatisch berechnen</label></div>
+      <div class="field-row" data-manual ${n.auto ? "hidden" : ""}>
+        <label class="field">kcal<input name="kcal_goal" type="number" inputmode="numeric" min="800" max="8000" value="${g.kcal ?? ""}"></label>
+        <label class="field">Eiweiß (g)<input name="protein_goal" type="number" inputmode="numeric" min="0" max="500" value="${g.protein ?? ""}"></label>
+      </div>
+      <div class="field-row" data-manual ${n.auto ? "hidden" : ""}>
+        <label class="field">Kohlenh. (g)<input name="carbs_goal" type="number" inputmode="numeric" min="0" max="1500" value="${g.carbs ?? ""}"></label>
+        <label class="field">Fett (g)<input name="fat_goal" type="number" inputmode="numeric" min="0" max="500" value="${g.fat ?? ""}"></label>
+      </div>
+      <div class="btn-row"><button type="submit" class="btn">Ziel speichern</button></div>
+    </form>
+  </div>`;
+}
+
 function render() {
   const { profile: p, weight } = data;
   const year = new Date().getFullYear();
@@ -40,6 +74,8 @@ function render() {
       <p class="eyebrow">Trainingsziel</p>
       <p>${esc(summary(p))}</p>
     </div>
+
+    ${nutritionCard()}
 
     <div class="card">
       <p class="eyebrow">Deine Daten</p>
@@ -62,7 +98,8 @@ function render() {
         <div class="field">
           <span>Körpergewicht</span>
           <p class="hint">${weight ? `${String(weight.kg).replace(".", ",")} kg · ${new Date(weight.date).toLocaleDateString("de-AT")}`
-            : "noch nicht eingetragen"} · <a href="#fortschritt">im Fortschritt eintragen</a></p>
+            : "noch nicht eingetragen"}</p>
+          <a class="btn small ghost" href="#fortschritt/koerper">Gewicht &amp; Maße eintragen</a>
         </div>
         <label class="field">Einschränkungen oder Verletzungen
           <textarea name="limitations" rows="2" maxlength="500"
@@ -73,6 +110,21 @@ function render() {
       </form>
     </div>
     <p class="hint pad">Farbe und weitere Profile: oben rechts auf den Namen tippen.</p>`;
+
+  const nf = $("#nutriForm", root);
+  nf.nutrition_auto.addEventListener("change", () => {
+    nf.querySelectorAll("[data-manual]").forEach((el) => { el.hidden = nf.nutrition_auto.checked; });
+  });
+  submitOnce(nf, async () => {
+    try {
+      const body = formData(nf);
+      if (body.nutrition_auto) ["kcal_goal", "protein_goal", "carbs_goal", "fat_goal"].forEach((k) => delete body[k]);
+      await api(`profiles/${getProfile()}`, { method: "PATCH", body });
+      toast("Ernährungsziel gespeichert");
+      data = null;
+      await load();
+    } catch (e) { formError(nf, e); }
+  });
 
   const form = $("#profilForm", root);
   submitOnce(form, async () => {
@@ -91,8 +143,9 @@ export async function load() {
   // Nicht neu zeichnen, während jemand im Formular tippt
   if (data && root.contains(document.activeElement) && document.activeElement.matches("input, textarea, select")) return;
   if (!data) root.innerHTML = skeleton(4);
-  const [profile, bw] = await Promise.all([api(`profiles/${getProfile()}`), api("bodyweight")]);
-  data = { profile, weight: bw[bw.length - 1] || null };
+  const [profile, bw, nutrition] = await Promise.all([api(`profiles/${getProfile()}`),
+    api("bodyweight"), api("nutrition/goals")]);
+  data = { profile, weight: bw[bw.length - 1] || null, nutrition };
   render();
 }
 

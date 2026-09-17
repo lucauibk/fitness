@@ -380,8 +380,8 @@ async function onClick(ev) {
         window.dispatchEvent(new CustomEvent("data-changed"));
         // closeSheet() geht per history.back() zurueck – erst danach umschalten,
         // sonst setzt der Ruecksprung die Adresse wieder auf die alte Seite.
-        window.addEventListener("popstate", () => { location.hash = "plan"; }, { once: true });
-        setTimeout(() => { if (location.hash !== "#plan") location.hash = "plan"; }, 400);
+        window.addEventListener("popstate", () => { location.hash = "training/plan"; }, { once: true });
+        setTimeout(() => { if (location.hash !== "#training/plan") location.hash = "training/plan"; }, 400);
       } catch (e) { failed(e); }
     });
   }

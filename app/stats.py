@@ -305,6 +305,7 @@ def day_plan(profile_id, day):
         items.append({
             "split_exercise_id": item["id"], "exercise_id": item["exercise_id"],
             "name": item["name"], "unit": item["unit"], "muscle_group": item["muscle_group"],
+            "kind": item.get("kind"), "pattern": item.get("pattern"),
             "target_sets": item["target_sets"],
             "target_reps_min": item["target_reps_min"], "target_reps_max": item["target_reps_max"],
             "target_weight": item["target_weight"], "notes": item["notes"],

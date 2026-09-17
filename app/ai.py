@@ -29,14 +29,19 @@ def _clean(text):
     return re.sub(r"\*\*(.+?)\*\*", r"\1", text).replace("•", "–").strip()
 
 
-def ask(prompt, max_tokens=500):
-    """Eine Frage, eine Antwort. {"text": ...} oder {"error": ...}."""
+def ask(prompt, max_tokens=500, images=()):
+    """Eine Frage, eine Antwort. {"text": ...} oder {"error": ...}.
+    images: [(media_type, base64)] – werden vor den Text gestellt."""
     if not available():
         return {"error": "Kein KI-Schlüssel hinterlegt (ANTHROPIC_API_KEY in .env)."}
     body = json.dumps({
         "model": os.environ.get("ANTHROPIC_MODEL", MODEL_DEFAULT),
         "max_tokens": max_tokens,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": [
+            *({"type": "image", "source": {"type": "base64", "media_type": mt, "data": data}}
+              for mt, data in images),
+            {"type": "text", "text": prompt},
+        ]}],
     }).encode()
     req = urllib.request.Request(
         "https://api.anthropic.com/v1/messages", data=body, method="POST",
@@ -44,7 +49,7 @@ def ask(prompt, max_tokens=500):
                  "anthropic-version": "2023-06-01",
                  "content-type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=45) as res:
+        with urllib.request.urlopen(req, timeout=60 if images else 45) as res:
             data = json.load(res)
     except urllib.error.HTTPError as e:
         log.warning("KI-Anfrage fehlgeschlagen: HTTP %s", e.code)
@@ -184,3 +189,58 @@ def refine_plan(profile, preview, catalog, feedback=None):
         return {"preview": preview,
                 "error": f"Der KI-Vorschlag war nicht verwendbar ({e}) – der Regelplan bleibt."}
     return {"preview": plan}
+
+
+# ------------------------------------------------------ Koerperanalyse lesen
+MEASUREMENT_FIELDS = {
+    "weight_kg": "Körpergewicht in kg",
+    "body_fat_pct": "Körperfett in Prozent",
+    "muscle_mass_kg": "Muskelmasse in kg (Skelettmuskelmasse, falls beides angegeben)",
+    "water_pct": "Körperwasser in Prozent (bei Angabe in Litern: null)",
+    "visceral_fat": "viszerales Fett (Level/Index-Zahl)",
+    "bmr_kcal": "Grundumsatz in kcal",
+    "bio_age": "biologisches bzw. metabolisches Alter in Jahren",
+    "waist_cm": "Taillenumfang in cm", "hip_cm": "Hüftumfang in cm",
+    "chest_cm": "Brustumfang in cm", "arm_cm": "Oberarmumfang in cm",
+    "thigh_cm": "Oberschenkelumfang in cm", "neck_cm": "Halsumfang in cm",
+}
+
+
+def read_measurement(image_b64, media_type):
+    """Messwerte aus einem Screenshot (z. B. ViCoach / mescan) lesen.
+    Ergebnis: {"values": {...}, "date": "YYYY-MM-DD"|None, "dropped": [...]} oder {"error": ...}.
+    Das Bild wird nirgends gespeichert."""
+    from . import body  # hier importiert, um Kreis-Importe zu vermeiden
+    fields = "\n".join(f'- "{k}": {v}' for k, v in MEASUREMENT_FIELDS.items())
+    prompt = (
+        "Das Bild ist ein Screenshot einer Körperanalyse aus einem Fitnessstudio "
+        "(z. B. vicoach, mescan, bodyscan, InBody). Lies die Messwerte ab.\n"
+        "Antworte NUR mit JSON, ohne Text davor oder danach, in dieser Form:\n"
+        '{"date": "YYYY-MM-DD oder null", "values": {<Feld>: Zahl oder null}, '
+        '"not_a_measurement": false}\n'
+        f"Felder:\n{fields}\n"
+        "Regeln: Nur Werte eintragen, die eindeutig im Bild stehen – nichts schätzen oder "
+        "berechnen. Dezimalkomma als Punkt. Wenn das Bild keine Körperanalyse zeigt, "
+        'setze "not_a_measurement": true.'
+    )
+    res = ask(prompt, max_tokens=600, images=[(media_type, image_b64)])
+    if "error" in res:
+        return res
+    try:
+        data = _json_block(res["text"])
+    except (ValueError, json.JSONDecodeError):
+        return {"error": "Die Werte konnten nicht gelesen werden – bitte von Hand eintragen."}
+    if data.get("not_a_measurement"):
+        return {"error": "Auf dem Bild ist keine Körperanalyse zu erkennen."}
+    values, dropped = body.clean(data.get("values") or {})
+    if not values:
+        return {"error": "Auf dem Bild wurden keine Messwerte gefunden."}
+    day = data.get("date")
+    try:
+        from datetime import date as _date
+        day = _date.fromisoformat(day).isoformat() if day else None
+        if day and day > _date.today().isoformat():
+            day = None
+    except (TypeError, ValueError):
+        day = None
+    return {"values": values, "date": day, "dropped": dropped}

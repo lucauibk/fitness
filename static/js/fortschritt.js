@@ -10,7 +10,7 @@ const nf = (n) => Number(n).toLocaleString("de-AT");
 const dm = (iso) => new Date(iso).toLocaleDateString("de-AT", { day: "numeric", month: "short" });
 
 /** Schlichte Linie, selbst gezeichnet – im Gym ist kein fremder Server erreichbar. */
-function sparkline(points, { height = 64, label = (p) => p.value } = {}) {
+export function sparkline(points, { height = 64, label = (p) => p.value } = {}) {
   if (points.length < 2) return "";
   const values = points.map((p) => p.value);
   const min = Math.min(...values);

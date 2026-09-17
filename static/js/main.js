@@ -2,16 +2,35 @@
 import { $, $$, ago, api, closeSheet, empty, esc, getProfile, icon, openSheet, prefs,
   setProfile, submitOnce, toast, formData, formError, safeColor } from "./util.js";
 import * as outbox from "./outbox.js";
+import { subTabs } from "./tabs.js";
 import * as heute from "./heute.js";
-import * as training from "./training.js";
+import * as einheit from "./training.js";
 import * as plan from "./plan.js";
-import * as fortschritt from "./fortschritt.js";
+import * as uebungen from "./uebungen.js";
+import * as cardio from "./cardio.js";
+import * as ernaehrung from "./ernaehrung.js";
+import * as uebersicht from "./fortschritt.js";
+import * as koerper from "./koerper.js";
+import * as erfolge from "./erfolge.js";
+import * as verlauf from "./verlauf.js";
 import * as profil from "./profil.js";
+
+const training = subTabs("training", {
+  einheit: ["Einheit", einheit], plan: ["Plan", plan],
+  uebungen: ["Übungen", uebungen], cardio: ["Cardio", cardio],
+}, "einheit");
+const fortschritt = subTabs("fortschritt", {
+  uebersicht: ["Übersicht", uebersicht], koerper: ["Körper", koerper],
+  erfolge: ["Erfolge", erfolge], verlauf: ["Verlauf", verlauf],
+}, "uebersicht");
+const WITH_SUBS = { training, fortschritt };
+// Alte Adressen aus der ersten Version
+const LEGACY = { plan: "training/plan" };
 
 const VIEWS = {
   heute: ["Heute", heute],
   training: ["Training", training],
-  plan: ["Plan", plan],
+  ernaehrung: ["Ernährung", ernaehrung],
   fortschritt: ["Fortschritt", fortschritt],
   profil: ["Profil", profil],
 };
@@ -22,12 +41,15 @@ let again = false;
 let profiles = [];
 
 const parseHash = () => {
-  const tab = location.hash.replace(/^#/, "").split("/")[0];
-  return VIEWS[tab] ? tab : "heute";
+  const [tab, sub] = location.hash.replace(/^#/, "").split("/");
+  return { tab: VIEWS[tab] ? tab : "heute", sub };
 };
 
 async function show() {
-  const tab = parseHash();
+  const raw = location.hash.replace(/^#/, "");
+  if (LEGACY[raw]) { location.replace(`#${LEGACY[raw]}`); return; }
+  const { tab, sub } = parseHash();
+  WITH_SUBS[tab]?.setSub(sub);
   const switched = tab !== current;
   current = tab;
   closeSheet(false);
@@ -248,7 +270,7 @@ document.addEventListener("click", (e) => { if (e.target.closest("[data-retry]")
 document.addEventListener("keydown", (e) => {
   const typing = e.target.closest?.("input, textarea, select, [contenteditable]");
   if (typing || e.metaKey || e.ctrlKey || e.altKey || document.getElementById("sheet")) return;
-  const keys = { 1: "heute", 2: "training", 3: "plan", 4: "fortschritt", 5: "profil" };
+  const keys = { 1: "heute", 2: "training", 3: "ernaehrung", 4: "fortschritt", 5: "profil" };
   if (keys[e.key]) location.hash = keys[e.key];
 });
 
@@ -273,9 +295,15 @@ function warmOfflineCache() {
   const last = Number(prefs.get("offline.warmed") || 0);
   if (Date.now() - last < 10 * 60 * 1000) return;
   prefs.set("offline.warmed", Date.now());
-  const paths = ["profiles", "exercises", `today?profile=${profile}`, `splits?profile=${profile}`,
-    `progress?profile=${profile}`, `workouts?profile=${profile}&limit=30`,
-    `bodyweight?profile=${profile}`];
+  const q = `profile=${profile}`;
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  // Alles, was die Ansichten ohne Netz brauchen (URL muss exakt wie in api() gebaut sein)
+  const paths = [`profiles?${q}`, `exercises?${q}`, `muscles?${q}`, `today?${q}`, `splits?${q}`,
+    `progress?${q}`, `workouts?limit=20&${q}`, `workouts?limit=60&${q}`, `bodyweight?${q}`,
+    `profiles/${profile}?${q}`, `achievements?${q}`, `measurements?${q}`, `foods/recent?${q}`,
+    `nutrition/day?date=${today}&${q}`, `nutrition/goals?${q}`, `cardio/activities?${q}`, `cardio?limit=30&${q}`,
+    `cardio?limit=60&${q}`, `mobility?${q}`, `checkin?${q}`];
   paths.forEach((p, i) => setTimeout(() => fetch(`/api/${p}`).catch(() => {}), 300 * i));
 }
 

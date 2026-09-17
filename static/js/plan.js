@@ -324,7 +324,9 @@ async function manageExercises() {
   });
 }
 
-function editExercise(ex) {
+const textOf = (v) => (Array.isArray(v) ? v.join("\n") : v || "");
+
+export function editExercise(ex) {
   const isNew = !ex;
   const groups = { brust: "Brust", ruecken: "Rücken", beine: "Beine", schultern: "Schultern",
     arme: "Arme", rumpf: "Rumpf" };
@@ -345,6 +347,15 @@ function editExercise(ex) {
             ${Object.entries(PATTERNS).map(([k, l]) => `<option value="${k}"${ex?.pattern === k ? " selected" : ""}>${l}</option>`).join("")}
           </select>
         </label>
+      </details>
+      <details class="field-more"${ex?.instructions ? "" : ""}>
+        <summary>Anleitung (für die Übungsbibliothek)</summary>
+        <label class="field">Gerät<input name="equipment" maxlength="80" value="${esc(ex?.equipment || "")}"
+          placeholder="z. B. Kabelzug"></label>
+        <label class="field">Ausführung – ein Schritt pro Zeile
+          <textarea name="instructions" rows="4" maxlength="2000">${esc(textOf(ex?.instructions))}</textarea></label>
+        <label class="field">Typische Fehler – einer pro Zeile
+          <textarea name="mistakes" rows="3" maxlength="1000">${esc(textOf(ex?.mistakes))}</textarea></label>
       </details>
       <fieldset class="field"><legend>Gewicht</legend><div class="segmented">
         <label><input type="radio" name="unit" value="kg" ${ex?.unit !== "koerper" ? "checked" : ""}><span>mit Gewicht</span></label>

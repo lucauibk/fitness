@@ -42,8 +42,9 @@ export function queue(entry) {
  */
 export async function send(entry) {
   try {
-    await api(entry.path, { method: "POST", body: entry.body });
-    return { ok: true, queued: false };
+    const data = await api(entry.path, { method: "POST", body: entry.body });
+    celebrate(data);
+    return { ok: true, queued: false, data };
   } catch (e) {
     if (!e.offline) throw e;
     queue(entry);
@@ -64,7 +65,8 @@ export async function flush({ silent = true } = {}) {
       if (!rest.length) break;
       const entry = rest[0];
       try {
-        await api(entry.path, { method: "POST", body: entry.body });
+        const data = await api(entry.path, { method: "POST", body: entry.body });
+        celebrate(data);
         save(list().slice(1));
         sent += 1;
         changed();
@@ -90,15 +92,25 @@ export async function flush({ silent = true } = {}) {
   return { sent, left: count() };
 }
 
-/** Einheiten, die noch im Ausgang liegen – die Oberflaeche zeigt sie trotzdem an,
- *  damit ein Training nicht verloren wirkt. */
-export function pendingWorkouts() {
-  return list().filter((e) => e.path === "workouts").map((e) => ({
+/** Eintraege eines Typs, die noch im Ausgang liegen – die Oberflaeche zeigt sie
+ *  trotzdem an, damit nichts verloren wirkt. */
+export function pending(path) {
+  return list().filter((e) => e.path === path).map((e) => ({
     ...e.body,
     id: `pending-${e.body.client_id}`,
     pending: true,
-    sets: (e.body.sets || []).map((s) => ({ ...s })),
   }));
+}
+
+export const pendingWorkouts = () => pending("workouts")
+  .map((w) => ({ ...w, sets: (w.sets || []).map((s) => ({ ...s })) }));
+
+/** Neu erreichte Meilensteine feiern (die API liefert sie beim Speichern mit). */
+export function celebrate(data) {
+  for (const m of data?.milestones || []) {
+    toast(`🏅 Erreicht: ${m.title}`, { duration: 5000 });
+  }
+  if (data?.milestones?.length) window.dispatchEvent(new CustomEvent("milestones", { detail: data.milestones }));
 }
 
 export function start() {

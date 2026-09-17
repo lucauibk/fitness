@@ -20,7 +20,8 @@ from pydantic import BaseModel, Field
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-from . import ai, checker, db, generator, stats  # noqa: E402
+from . import activity, ai, checker, daily_view, db, generator, readiness, stats  # noqa: E402
+from .common import FIELD_NAMES, NOT_NULL, _data, _found, current_profile  # noqa: E402,F401
 
 STATIC = Path(__file__).parent.parent / "static"
 log = logging.getLogger("fitness")
@@ -34,6 +35,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Fitness", lifespan=lifespan)
+
+from .routes import body as body_routes, daily, library, nutrition as nutrition_routes  # noqa: E402
+
+for _router in (daily.router, library.router, nutrition_routes.router, body_routes.router):
+    app.include_router(_router)
 
 # ------------------------------------------------------- Host-Pruefung
 # Schutz gegen DNS-Rebinding: eine fremde Webseite koennte sonst ueber einen eigenen
@@ -74,24 +80,6 @@ async def check_host(request: Request, call_next):
     return response
 
 
-# ------------------------------------------------------ Fehlermeldungen
-FIELD_NAMES = {"name": "Name", "label": "Bezeichnung", "reps": "Wiederholungen",
-               "weight": "Gewicht", "kg": "Gewicht", "date": "Datum", "rpe": "Anstrengung",
-               "target_sets": "Sätze", "target_reps_min": "Wiederholungen (von)",
-               "target_reps_max": "Wiederholungen (bis)",
-               "target_weight": "Gewicht", "weekdays": "Wochentage", "muscle_group": "Muskelgruppe",
-               "exercise_id": "Übung", "split_day_id": "Trainingstag", "split_id": "Split",
-               "profile_id": "Profil", "unit": "Einheit", "position": "Reihenfolge",
-               "birth_year": "Geburtsjahr", "sex": "Geschlecht", "height_cm": "Größe",
-               "goal": "Ziel", "experience": "Erfahrung", "days_per_week": "Trainingstage",
-               "session_minutes": "Dauer", "limitations": "Einschränkungen",
-               "pattern": "Bewegungsmuster", "option": "Split",
-               "train_weekdays": "Trainingstage", "focus": "Fokus"}
-# Felder, die per PATCH vorhanden sein duerfen, aber nie null werden
-NOT_NULL = ("name", "label", "kg", "date", "exercise_id", "split_id", "split_day_id",
-            "profile_id")
-
-
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError):
     err = exc.errors()[0] if exc.errors() else {}
@@ -117,45 +105,6 @@ async def integrity_error(request: Request, exc: sqlite3.IntegrityError):
     if "profiles.name" in text:
         return JSONResponse({"detail": "Ein Profil mit diesem Namen gibt es schon."}, status_code=409)
     return JSONResponse({"detail": "Eintrag widerspricht vorhandenen Daten."}, status_code=409)
-
-
-# ---------------------------------------------------------------- Hilfen
-def _found(row):
-    if row is None:
-        raise HTTPException(404, "Nicht gefunden.")
-    return row
-
-
-def _data(body, required=()):
-    # exclude_unset: im PATCH nur mitgeschickte Felder aendern, explizites null leert eins.
-    data = body.model_dump(exclude_unset=True)
-    for key, value in data.items():
-        if isinstance(value, str):
-            data[key] = value.strip()
-    for key in ("archived", "active"):
-        if key in data and data[key] is not None:
-            data[key] = int(data[key])
-    for key in required:
-        if data.get(key) in (None, ""):
-            raise HTTPException(400, f"{FIELD_NAMES.get(key, key)} fehlt.")
-    for key in NOT_NULL:
-        if key in data and data[key] in (None, ""):
-            raise HTTPException(400, f"{FIELD_NAMES.get(key, key)} darf nicht leer sein.")
-    if data.get("exercise_id") is not None and not db.exists("exercises", data["exercise_id"]):
-        raise HTTPException(400, "Diese Übung gibt es nicht (mehr).")
-    if data.get("split_day_id") is not None and not db.exists("split_days", data["split_day_id"]):
-        raise HTTPException(400, "Diesen Trainingstag gibt es nicht (mehr).")
-    return data
-
-
-def current_profile(profile: Optional[int] = Query(None)) -> int:
-    """Alle Daten sind an ein Profil gebunden. Die Prüfung passiert hier, damit nie
-    versehentlich die Sätze der anderen Person in einer Auswertung landen."""
-    if profile is None:
-        raise HTTPException(400, "Kein Profil gewählt.")
-    if not db.exists("profiles", profile):
-        raise HTTPException(400, "Dieses Profil gibt es nicht (mehr).")
-    return profile
 
 
 def _check_range(data, old=None):
@@ -207,6 +156,12 @@ class ProfileIn(BaseModel):
     limitations: Optional[str] = Field(None, max_length=500)
     train_weekdays: Optional[List[Annotated[int, Field(ge=0, le=6)]]] = Field(None, max_length=7)
     focus: Optional[List[Focus]] = Field(None, max_length=3)
+    activity_level: Optional[Literal["niedrig", "mittel", "hoch"]] = None
+    nutrition_auto: Optional[bool] = None
+    kcal_goal: Optional[int] = Field(None, ge=800, le=8000)
+    protein_goal: Optional[int] = Field(None, ge=0, le=500)
+    carbs_goal: Optional[int] = Field(None, ge=0, le=1500)
+    fat_goal: Optional[int] = Field(None, ge=0, le=500)
 
 
 class ExerciseIn(BaseModel):
@@ -215,6 +170,10 @@ class ExerciseIn(BaseModel):
     unit: Optional[Unit] = None
     archived: Optional[bool] = None
     pattern: Optional[Pattern] = None
+    instructions: Optional[str] = Field(None, max_length=2000)
+    mistakes: Optional[str] = Field(None, max_length=1000)
+    equipment: Optional[str] = Field(None, max_length=80)
+    video_query: Optional[str] = Field(None, max_length=120)
 
 
 class SplitIn(BaseModel):
@@ -469,7 +428,7 @@ def api_delete_split_exercise(item_id: int, profile_id: int = Depends(current_pr
 # --------------------------------------------------------------- Heute
 @app.get("/api/today")
 def api_today(profile_id: int = Depends(current_profile)):
-    return stats.today_view(profile_id)
+    return daily_view.build(profile_id)
 
 
 @app.get("/api/day/{day_id}")
@@ -477,7 +436,8 @@ def api_day(day_id: int, profile_id: int = Depends(current_profile)):
     _owns_day(day_id, profile_id)
     split = db.split_detail(db.get_row("split_days", day_id)["split_id"])
     day = next(d for d in split["days"] if d["id"] == day_id)
-    return stats.day_plan(profile_id, day)
+    checkin = readiness.get(profile_id, stats.today().isoformat())
+    return daily_view.adjusted_day(profile_id, day, checkin)
 
 
 # ------------------------------------------------------------ Einheiten
@@ -507,8 +467,10 @@ def api_add_workout(body: WorkoutIn):
     # Sätze ohne Wiederholungen sind nicht absolviert – die schickt die Oberfläche gar
     # nicht erst, hier zur Sicherheit noch einmal.
     payload["sets"] = [s for s in payload["sets"] if s.get("reps")]
+    before = activity.reached_keys(body.profile_id)
     workout, created = db.save_workout(payload)
-    return {"workout": workout, "created": created}
+    return {"workout": workout, "created": created,
+            "milestones": activity.new_milestones(before, body.profile_id) if created else []}
 
 
 @app.delete("/api/workouts/{workout_id}")
