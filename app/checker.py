@@ -12,6 +12,7 @@ Anthropic-API geschickt.
 import json
 import logging
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -138,7 +139,8 @@ def ai_review(profile_id):
         "Freizeitsportler (Muskelaufbau, allgemeine Fitness). Antworte auf Deutsch, knapp, "
         "als kurze Liste mit höchstens 5 Punkten. Nenne nur, was wirklich fehlt oder "
         "unausgewogen ist, jeweils mit einer konkreten Übung als Vorschlag. Keine "
-        "medizinischen Aussagen, keine Einleitung, kein Schlusssatz. Wenn der Plan "
+        "medizinischen Aussagen, keine Einleitung, kein Schlusssatz, kein Markdown "
+        "(keine Sternchen, keine Überschriften), Punkte mit „–“ beginnen. Wenn der Plan "
         "ausgewogen ist, sag das in einem Satz.\n\n"
         f"{_plan_text(split)}\n\n"
         "Ein automatischer Check hat bereits gefunden:\n"
@@ -167,4 +169,6 @@ def ai_review(profile_id):
         return {"error": "KI gerade nicht erreichbar – der Pi hat vermutlich kein Internet."}
     text = "".join(part.get("text", "") for part in data.get("content", [])
                    if part.get("type") == "text").strip()
+    # Falls doch Markdown kommt: Fettschrift und Aufzaehlungszeichen glaetten
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text).replace("•", "–")
     return {"text": text} if text else {"error": "Die KI hat keine Antwort geliefert."}
