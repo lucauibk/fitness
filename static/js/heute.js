@@ -35,7 +35,7 @@ function render() {
   }
   const day = data.day;
   const running = hasDraft();
-  const weekday = day?.weekday != null ? WEEKDAYS_LONG[day.weekday] : null;
+  const weekday = WEEKDAYS_LONG[(new Date().getDay() + 6) % 7];
   const pos = data.position ? `Tag ${data.position} von ${data.day_count}` : "";
   const last = data.last_workout;
 
@@ -87,7 +87,7 @@ function pickDay() {
     body: `<div class="list">${data.days.map((d) => `
       <div class="row-item" role="button" tabindex="0" data-pick-day="${d.id}">
         <div class="row-main"><div class="row-title">${esc(d.label)}</div>
-          ${d.weekday != null ? `<div class="row-meta"><span>${WEEKDAYS_LONG[d.weekday]}</span></div>` : ""}
+          ${d.weekdays?.length ? `<div class="row-meta"><span>${d.weekdays.map((i) => WEEKDAYS_LONG[i]).join(", ")}</span></div>` : ""}
         </div>${icon("right", "chev")}
       </div>`).join("")}</div>`,
   });

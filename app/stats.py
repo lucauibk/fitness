@@ -254,7 +254,10 @@ def next_targets(profile_id, limit=8):
     split = db.active_split(profile_id)
     if not split or not split["days"]:
         return []
-    day = pick_day(split, today())
+    # Heute kein fester Tag -> der naechste in der Reihe (wie auf "Heute")
+    day = pick_day(split, today()) or rotation_day(profile_id, split)
+    if not day:
+        return []
     out = []
     for item in day["exercises"][:limit]:
         ex = {"id": item["exercise_id"], "muscle_group": item["muscle_group"]}
@@ -271,7 +274,7 @@ def pick_day(split, on_date):
     days = split["days"]
     if not days:
         return None
-    fixed = [d for d in days if d["weekday"] == on_date.weekday()]
+    fixed = [d for d in days if on_date.weekday() in (d.get("weekdays") or [])]
     if fixed:
         return fixed[0]
     return None
@@ -309,7 +312,7 @@ def day_plan(profile_id, day):
                                            "reason": s["reason"],
                                            "raise_weight": s["raise_weight"]},
         })
-    return {"id": day["id"], "label": day["label"], "weekday": day["weekday"],
+    return {"id": day["id"], "label": day["label"], "weekdays": day.get("weekdays") or [],
             "exercises": items}
 
 
@@ -332,7 +335,8 @@ def today_view(profile_id):
         "fixed": fixed,
         "position": next((i + 1 for i, d in enumerate(split["days"]) if day and d["id"] == day["id"]), None),
         "day_count": len(split["days"]),
-        "days": [{"id": d["id"], "label": d["label"], "weekday": d["weekday"]} for d in split["days"]],
+        "days": [{"id": d["id"], "label": d["label"], "weekdays": d.get("weekdays") or []}
+                 for d in split["days"]],
         "last_workout": last[0] if last else None,
     }
 

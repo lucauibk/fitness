@@ -8,7 +8,7 @@ import sqlite3
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Annotated, List, Literal, Optional
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-from . import db, stats  # noqa: E402
+from . import checker, db, stats  # noqa: E402
 
 STATIC = Path(__file__).parent.parent / "static"
 log = logging.getLogger("fitness")
@@ -79,7 +79,7 @@ FIELD_NAMES = {"name": "Name", "label": "Bezeichnung", "reps": "Wiederholungen",
                "weight": "Gewicht", "kg": "Gewicht", "date": "Datum", "rpe": "Anstrengung",
                "target_sets": "Sätze", "target_reps_min": "Wiederholungen (von)",
                "target_reps_max": "Wiederholungen (bis)",
-               "target_weight": "Gewicht", "weekday": "Wochentag", "muscle_group": "Muskelgruppe",
+               "target_weight": "Gewicht", "weekdays": "Wochentage", "muscle_group": "Muskelgruppe",
                "exercise_id": "Übung", "split_day_id": "Trainingstag", "split_id": "Split",
                "profile_id": "Profil", "unit": "Einheit", "position": "Reihenfolge"}
 # Felder, die per PATCH vorhanden sein duerfen, aber nie null werden
@@ -201,7 +201,7 @@ class SplitIn(BaseModel):
 class DayIn(BaseModel):
     split_id: Optional[int] = None
     label: Optional[str] = Field(None, max_length=40)
-    weekday: Optional[int] = Field(None, ge=0, le=6)
+    weekdays: Optional[List[Annotated[int, Field(ge=0, le=6)]]] = Field(None, max_length=7)
     position: Optional[int] = Field(None, ge=0, le=99)
 
 
@@ -302,7 +302,8 @@ def api_delete_exercise(exercise_id: int):
 def api_splits(profile_id: int = Depends(current_profile)):
     out = db.list_rows_where("splits", "profile_id", profile_id, "id")
     for s in out:
-        s["days"] = db.list_rows_where("split_days", "split_id", s["id"], "position, id")
+        s["days"] = [db.day_out(d) for d in
+                     db.list_rows_where("split_days", "split_id", s["id"], "position, id")]
     return out
 
 
@@ -360,7 +361,9 @@ def api_add_day(body: DayIn, profile_id: int = Depends(current_profile)):
     if data.get("position") is None:
         siblings = db.list_rows_where("split_days", "split_id", data["split_id"])
         data["position"] = len(siblings)
-    return db.insert_row("split_days", data)
+    if "weekdays" in data:
+        data["weekdays"] = db.format_weekdays(data["weekdays"])
+    return db.day_out(db.insert_row("split_days", data))
 
 
 @app.patch("/api/split-days/{day_id}")
@@ -368,7 +371,9 @@ def api_update_day(day_id: int, body: DayIn, profile_id: int = Depends(current_p
     _owns_day(day_id, profile_id)
     data = _data(body)
     data.pop("split_id", None)
-    return _found(db.update_row("split_days", day_id, data))
+    if "weekdays" in data:
+        data["weekdays"] = db.format_weekdays(data["weekdays"])
+    return db.day_out(_found(db.update_row("split_days", day_id, data)))
 
 
 @app.delete("/api/split-days/{day_id}")
@@ -493,6 +498,17 @@ def api_progress(profile_id: int = Depends(current_profile)):
 def api_history(exercise_id: int, profile_id: int = Depends(current_profile)):
     _found(db.get_row("exercises", exercise_id))
     return stats.history(profile_id, exercise_id)
+
+
+# ------------------------------------------------------------ Plan-Check
+@app.get("/api/check")
+def api_check(profile_id: int = Depends(current_profile)):
+    return checker.analyze(profile_id)
+
+
+@app.post("/api/check/ai")
+def api_check_ai(profile_id: int = Depends(current_profile)):
+    return checker.ai_review(profile_id)
 
 
 @app.get("/api/status")

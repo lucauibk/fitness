@@ -1,5 +1,5 @@
 /** Plan: Splits anlegen und wechseln, Trainingstage und Übungen samt Wiederholungs-Bereich. */
-import { $, api, armDelete, closeSheet, deleteLater, empty, esc, formData, formError, icon,
+import { $, api, armDelete, busy, closeSheet, deleteLater, empty, esc, formData, formError, icon,
   isPendingDelete, openSheet, prefs, skeleton, submitOnce, toast, WEEKDAYS,
   WEEKDAYS_LONG } from "./util.js";
 
@@ -9,9 +9,13 @@ let detail = null;      // der gerade geöffnete Split
 let openSplitId = null;
 let sortingDay = null;   // Pfeile nur in dem Tag zeigen, den man gerade sortiert
 let exercises = null;
+const GOOD_SETS = 10;
 
 const changed = () => window.dispatchEvent(new CustomEvent("data-changed"));
 const range = (lo, hi) => (lo === hi ? `${lo}` : `${lo}–${hi}`);
+/** [2, 4] -> "Mi · Fr"; ein einzelner Tag ausgeschrieben. */
+const daysLabel = (days) => (!days?.length ? "kein fester Tag"
+  : days.length === 1 ? WEEKDAYS_LONG[days[0]] : days.map((d) => WEEKDAYS[d]).join(" · "));
 
 // -------------------------------------------------------------- Anzeige
 function exerciseRow(item) {
@@ -36,7 +40,7 @@ function dayCard(day) {
     <div class="ex-head">
       <div>
         <div class="card-title">${esc(day.label)}</div>
-        <div class="row-meta"><span>${day.weekday != null ? WEEKDAYS_LONG[day.weekday] : "kein fester Tag"}</span>
+        <div class="row-meta"><span>${daysLabel(day.weekdays)}</span>
           <span>${day.exercises.length} Übungen</span></div>
       </div>
       <button type="button" class="icon-btn" data-edit-day="${day.id}" aria-label="Trainingstag bearbeiten">${icon("edit")}</button>
@@ -72,6 +76,7 @@ function render() {
     <div class="btn-row">
       <button type="button" class="btn ghost" data-add-split>${icon("plus")} Split</button>
       <button type="button" class="btn ghost" data-exercises>Übungen verwalten</button>
+      ${open?.days.length ? `<button type="button" class="btn ghost" data-check>Plan prüfen</button>` : ""}
     </div>
     ${open ? `<h3 class="group-title">${esc(open.name)}
         <button type="button" class="link-btn" data-edit-split="${open.id}">Umbenennen</button></h3>
@@ -148,15 +153,14 @@ function editDay(day, splitId) {
     body: `<form id="dayForm" class="form">
       <label class="field">Bezeichnung<input name="label" maxlength="40" required autofocus
         value="${esc(day?.label || "")}" placeholder="z. B. Push"></label>
-      <fieldset class="field"><legend>Fester Wochentag</legend>
+      <fieldset class="field"><legend>Wochentage</legend>
         <div class="chips">
-          <label class="chip"><input type="radio" name="weekday" value=""
-            ${day?.weekday == null ? "checked" : ""}>keiner</label>
-          ${WEEKDAYS.map((w, i) => `<label class="chip"><input type="radio" name="weekday" value="${i}"
-            ${day?.weekday === i ? "checked" : ""}>${w}</label>`).join("")}
+          ${WEEKDAYS.map((w, i) => `<label class="chip"><input type="checkbox" data-weekday value="${i}"
+            ${day?.weekdays?.includes(i) ? "checked" : ""}>${w}</label>`).join("")}
         </div>
       </fieldset>
-      <p class="hint">Ohne festen Tag schlägt „Heute“ einfach den nächsten Teil der Reihe vor.</p>
+      <p class="hint">Mehrere möglich, z. B. Mi und Fr. Ohne Auswahl schlägt „Heute“ einfach
+        den nächsten Teil der Reihe vor.</p>
     </form>`,
     footer: footer("dayForm", !isNew),
   });
@@ -164,7 +168,9 @@ function editDay(day, splitId) {
   submitOnce(form, async () => {
     try {
       const data = formData(form);
-      const body = { label: data.label, weekday: data.weekday === null ? null : Number(data.weekday) };
+      // Checkboxen mit gleichem Zweck sammeln – formData() kennt nur Einzelwerte
+      const weekdays = [...form.querySelectorAll("[data-weekday]:checked")].map((el) => Number(el.value));
+      const body = { label: data.label, weekdays };
       if (isNew) await api("split-days", { method: "POST", body: { ...body, split_id: splitId } });
       else await api(`split-days/${day.id}`, { method: "PATCH", body });
       closeSheet();
@@ -353,6 +359,52 @@ function editExercise(ex) {
   }
 }
 
+// ------------------------------------------------------------ Plan-Check
+const LEVEL_ICON = { warn: "warn", info: "check" };
+
+async function checkPlan() {
+  let res;
+  try {
+    res = await api("check");
+  } catch (e) { return toast(e.message, { error: true }); }
+  const max = Math.max(GOOD_SETS, ...res.weekly.map((w) => w.sets));
+  const findings = res.findings.length
+    ? res.findings.map((f) => `<div class="row-item">
+        <span class="row-icon ${f.level === "warn" ? "warn" : ""}">${icon(LEVEL_ICON[f.level] || "check")}</span>
+        <div class="row-main"><div class="row-title">${esc(f.text)}</div></div>
+      </div>`).join("")
+    : `<div class="row-item"><span class="row-icon up">${icon("check")}</span>
+        <div class="row-main"><div class="row-title">Keine Lücken gefunden.</div></div></div>`;
+  const sheet = openSheet({
+    title: "Plan-Check",
+    body: `<p class="hint">${esc(res.split?.name || "")}</p>
+      <div class="list">${findings}</div>
+      <h3 class="form-section">Sätze pro Woche</h3>
+      <div class="bars">${res.weekly.map((w) => `
+        <div class="bar-row"><span class="bar-label">${esc(w.label)}</span>
+          <span class="bar ${w.sets < 6 ? "low" : ""}"><i style="width:${(w.sets / max) * 100}%"></i></span>
+          <span class="bar-value">${w.sets}</span></div>`).join("")}</div>
+      <p class="hint">Richtwert für Muskelaufbau: etwa ${GOOD_SETS}–20 Sätze pro Muskelgruppe und Woche.
+        ${res.rotating ? "Tage ohne festen Wochentag zählen einmal pro Woche." : ""}</p>
+      ${res.ai_available ? `<div class="btn-row"><button type="button" class="btn tonal" data-ai>
+          Mit KI genauer prüfen</button></div><div data-ai-out></div>` : ""}`,
+  });
+  const btn = $("[data-ai]", sheet);
+  btn?.addEventListener("click", () => busy(btn, async () => {
+    const out = $("[data-ai-out]", sheet);
+    out.innerHTML = `<p class="hint">Die KI sieht sich den Plan an …</p>`;
+    try {
+      const r = await api("check/ai", { method: "POST" });
+      out.innerHTML = r.text
+        ? `<div class="card ai-note"><p class="eyebrow">Einschätzung der KI</p>${
+          esc(r.text).replace(/\n/g, "<br>")}</div>`
+        : `<p class="hint">${esc(r.error)}</p>`;
+    } catch (e) {
+      out.innerHTML = `<p class="hint">${esc(e.offline ? "Ohne Verbindung geht die KI-Prüfung nicht." : e.message)}</p>`;
+    }
+  }));
+}
+
 // --------------------------------------------------------------- Mount
 export async function mount(el) {
   root = el;
@@ -400,5 +452,6 @@ export async function mount(el) {
       if (item) return editItem(item);
     }
     if (t("[data-exercises]")) return manageExercises();
+    if (t("[data-check]")) return checkPlan();
   });
 }

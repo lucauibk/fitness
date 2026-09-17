@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS split_days (
     split_id INTEGER NOT NULL,
     position INTEGER DEFAULT 0,
     label TEXT NOT NULL,               -- "Push", "Pull", "Beine"
-    weekday INTEGER                    -- 0 = Montag; NULL = kein fester Tag
+    weekday INTEGER,                   -- veraltet, nur noch fuer die Migration gelesen
+    weekdays TEXT                      -- "2,4" = Mittwoch und Freitag; NULL = kein fester Tag
 );
 CREATE TABLE IF NOT EXISTS split_exercises (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,7 +90,10 @@ CREATE INDEX IF NOT EXISTS idx_split_ex_day ON split_exercises(split_day_id, pos
 
 # Spalten, die nach dem ersten Release dazugekommen sind – bestehende DBs bekommen sie
 # per ALTER TABLE. Neue Spalten immer in BEIDE Stellen (SCHEMA oben und hier).
-MIGRATIONS = {}
+MIGRATIONS = {
+    # Ein Trainingstag kann an mehreren Wochentagen liegen (vorher nur einer)
+    "split_days": {"weekdays": "TEXT"},
+}
 
 
 def now():
@@ -115,6 +119,38 @@ def _migrate(c):
         for col, decl in cols.items():
             if col not in have:
                 c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+    # Alter Einzel-Wochentag -> neue Liste. Betrifft nur noch nicht umgestellte Zeilen,
+    # laeuft also gefahrlos bei jedem Start.
+    c.execute("UPDATE split_days SET weekdays = CAST(weekday AS TEXT)"
+              " WHERE weekdays IS NULL AND weekday IS NOT NULL")
+
+
+def parse_weekdays(value):
+    """"2,4" -> [2, 4]. Leer oder NULL -> []."""
+    if not value:
+        return []
+    out = []
+    for part in str(value).split(","):
+        part = part.strip()
+        if part.isdigit() and 0 <= int(part) <= 6:
+            out.append(int(part))
+    return sorted(set(out))
+
+
+def format_weekdays(days):
+    """[4, 2, 2] -> "2,4". Leere Liste -> NULL (kein fester Tag)."""
+    days = sorted({int(d) for d in (days or []) if 0 <= int(d) <= 6})
+    return ",".join(str(d) for d in days) or None
+
+
+def day_out(row):
+    """Trainingstag fuer die API: Wochentage als Liste, die alte Spalte faellt weg."""
+    if row is None:
+        return None
+    row = dict(row)
+    row["weekdays"] = parse_weekdays(row.get("weekdays"))
+    row.pop("weekday", None)
+    return row
 
 
 # Uebungs-Katalog fuer den ersten Start: Name, Muskelgruppe, Einheit
@@ -189,8 +225,8 @@ def _seed(c):
                         (profile_id, "Push / Pull / Beine", now()))
         split_id = cur.lastrowid
         for pos, (label, weekday, items) in enumerate(STARTER_SPLIT):
-            day = c.execute("INSERT INTO split_days (split_id, position, label, weekday) VALUES (?,?,?,?)",
-                            (split_id, pos, label, weekday)).lastrowid
+            day = c.execute("INSERT INTO split_days (split_id, position, label, weekdays) VALUES (?,?,?,?)",
+                            (split_id, pos, label, str(weekday))).lastrowid
             for ex_pos, (ex_name, sets, lo, hi) in enumerate(items):
                 row = c.execute("SELECT id FROM exercises WHERE name=?", (ex_name,)).fetchone()
                 if row:
@@ -264,7 +300,7 @@ WRITABLE = {
     "profiles": ("name", "color"),
     "exercises": ("name", "muscle_group", "unit", "archived"),
     "splits": ("profile_id", "name", "active"),
-    "split_days": ("split_id", "position", "label", "weekday"),
+    "split_days": ("split_id", "position", "label", "weekdays"),
     "split_exercises": ("split_day_id", "exercise_id", "position", "target_sets",
                         "target_reps_min", "target_reps_max", "target_weight", "notes"),
     "workouts": ("profile_id", "split_day_id", "title", "started_at", "finished_at", "notes"),
@@ -391,7 +427,7 @@ def split_detail(split_id):
     split = get_row("splits", split_id)
     if not split:
         return None
-    split["days"] = list_rows_where("split_days", "split_id", split_id, "position, id")
+    split["days"] = [day_out(d) for d in list_rows_where("split_days", "split_id", split_id, "position, id")]
     for day in split["days"]:
         day["exercises"] = rows(
             "SELECT se.*, e.name, e.muscle_group, e.unit FROM split_exercises se"

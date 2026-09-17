@@ -563,3 +563,8 @@ input:not([type=checkbox]):not([type=radio]):focus, select:focus, textarea:focus
 .card.sorting .order-btns { display: flex; }
 .card.sorting .row-item[role="button"] { cursor: default; }
 .page-sub.top { margin: 0 0 var(--s3); color: var(--muted); font-size: var(--fs-sm); }
+
+/* Plan-Check */
+.row-icon.warn { background: color-mix(in srgb, var(--soon) 15%, transparent); color: var(--soon); }
+.bar.low i { background: var(--soon); }
+.ai-note { margin-top: var(--s3); line-height: 1.55; }
