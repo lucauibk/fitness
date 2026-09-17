@@ -158,6 +158,9 @@ def refine_plan(profile, preview, catalog):
         "die Übungszahl soll zur Dauer passen.\n"
         "- target_sets 1–6, target_reps_min ≤ target_reps_max, beides 1–30.\n"
         "- Berücksichtige Einschränkungen: ersetze belastende Übungen durch schonendere.\n"
+        "- Halte Drücken und Ziehen (Brust/Schultern vs. Rücken) etwa im Gleichgewicht; "
+        "tausche eher innerhalb desselben Bewegungsmusters als Muster zu streichen.\n"
+        "- Streiche keine vorhandene Rumpfübung und keine Übung für die Beinrückseite.\n"
         "- Ändere nur, was die Person wirklich weiterbringt; ein guter Plan darf so bleiben.\n"
         "Antworte NUR mit JSON in genau dieser Form, ohne Text davor oder danach:\n"
         '{"days":[{"label":"...","exercises":[{"exercise_id":1,"target_sets":3,'
