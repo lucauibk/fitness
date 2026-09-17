@@ -541,10 +541,12 @@ input:not([type=checkbox]):not([type=radio]):focus, select:focus, textarea:focus
 /* Auswertungen */
 .bars { display: grid; gap: 6px; margin-top: var(--s2); }
 .bar-row { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); }
-.bar-label { width: 76px; flex: none; color: var(--muted); }
+.bar-label { width: 92px; flex: none; color: var(--muted); font-size: var(--fs-xs); line-height: 1.2; hyphens: auto; }
+.bar-label.hot { color: var(--accent); font-weight: 600; }
 .bar { flex: 1; height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
 .bar i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
-.bar-value { width: 26px; flex: none; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.bar-value { width: 52px; flex: none; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.bar-value small { display: block; font-size: var(--fs-xs); opacity: 0.8; }
 
 .weekbars { display: flex; align-items: flex-end; gap: 5px; height: 72px; margin-top: var(--s2); }
 .weekbar { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 3px; height: 100%; }

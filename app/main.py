@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-from . import activity, ai, checker, daily_view, db, generator, readiness, stats  # noqa: E402
+from . import activity, ai, analysis, checker, daily_view, db, generator, readiness, stats  # noqa: E402
 from .common import FIELD_NAMES, NOT_NULL, _data, _found, current_profile  # noqa: E402,F401
 
 STATIC = Path(__file__).parent.parent / "static"
@@ -517,6 +517,27 @@ def api_history(exercise_id: int, profile_id: int = Depends(current_profile)):
 @app.get("/api/check")
 def api_check(profile_id: int = Depends(current_profile)):
     return checker.analyze(profile_id)
+
+
+class ApplyIn(BaseModel):
+    action: Dict[str, object]
+
+
+@app.get("/api/plan/analyze")
+def api_plan_analyze(profile_id: int = Depends(current_profile),
+                     split: Optional[int] = Query(None)):
+    if split is not None:
+        _owns_split(split, profile_id)
+    return {**analysis.analyze(profile_id, split), "ai_available": ai.available()}
+
+
+@app.post("/api/plan/apply")
+def api_plan_apply(body: ApplyIn, profile_id: int = Depends(current_profile)):
+    try:
+        analysis.apply(profile_id, body.action)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, **analysis.analyze(profile_id)}
 
 
 @app.post("/api/check/ai")

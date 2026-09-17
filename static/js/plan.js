@@ -10,7 +10,6 @@ let detail = null;      // der gerade geöffnete Split
 let openSplitId = null;
 let sortingDay = null;   // Pfeile nur in dem Tag zeigen, den man gerade sortiert
 let exercises = null;
-const GOOD_SETS = 10;
 const PATTERNS = {
   h_push: "Drücken nach vorn (Bankdrücken …)", v_push: "Drücken über Kopf",
   chest_iso: "Brust isoliert (Butterfly …)", h_pull: "Rudern", v_pull: "Ziehen von oben (Latzug …)",
@@ -88,7 +87,7 @@ function render() {
       <button type="button" class="btn ghost" data-add-split>${icon("plus")} Split</button>
       <button type="button" class="btn ghost" data-wizard>${icon("spark")} Mit Assistent</button>
       <button type="button" class="btn ghost" data-exercises>Übungen verwalten</button>
-      ${open?.days.length ? `<button type="button" class="btn ghost" data-check>Plan prüfen</button>` : ""}
+      ${open?.days.length ? `<button type="button" class="btn ghost" data-check>${icon("spark")} Plan verbessern</button>` : ""}
     </div>
     ${open ? `<h3 class="group-title">${esc(open.name)}
         <button type="button" class="link-btn" data-edit-split="${open.id}">Umbenennen</button></h3>
@@ -391,50 +390,116 @@ export function editExercise(ex) {
   }
 }
 
-// ------------------------------------------------------------ Plan-Check
-const LEVEL_ICON = { warn: "warn", info: "check" };
+// -------------------------------------------------------- Plan verbessern
+const LEVEL_ICON = { warn: "warn", info: "spark" };
 
-async function checkPlan() {
-  let res;
+function volumeRows(data) {
+  const max = Math.max(10, ...data.volume.map((v) => Math.max(v.actual, v.target)));
+  return `<div class="bars">${data.volume.map((v) => `
+    <div class="bar-row"><span class="bar-label ${v.focus ? "hot" : ""}">${esc(v.label)}</span>
+      <span class="bar ${v.actual < v.target - 2 ? "low" : ""}"><i style="width:${(v.actual / max) * 100}%"></i></span>
+      <span class="bar-value">${v.actual}${v.actual === v.target ? "" : ` / ${v.target}`}
+        <small>${v.frequency}×</small></span>
+    </div>`).join("")}</div>
+  <p class="hint">Sätze pro Woche (Ist / Richtwert) und wie oft die Gruppe drankommt.
+    Richtwerte kommen aus deinem Ziel, deiner Erfahrung, dem Fokus und deiner Zeit.</p>`;
+}
+
+function suggestionRows(data) {
+  if (!data.suggestions.length) {
+    return `<div class="row-item"><span class="row-icon up">${icon("check")}</span>
+      <div class="row-main"><div class="row-title">Nichts zu verbessern gefunden.</div>
+      <div class="row-meta"><span>Volumen, Häufigkeit und Übungsauswahl passen zu deinen Angaben.</span></div>
+      </div></div>`;
+  }
+  return data.suggestions.map((s, i) => `<div class="row-item">
+      <span class="row-icon ${s.level === "warn" ? "warn" : ""}">${icon(LEVEL_ICON[s.level] || "spark")}</span>
+      <div class="row-main">
+        <div class="row-title">${esc(s.text)}</div>
+        <div class="row-meta"><span>${esc(s.why)}</span></div>
+      </div>
+      ${s.action?.type === "open_exercise"
+        ? `<button type="button" class="btn small ghost" data-open-ex="${s.action.exercise_id}">Öffnen</button>`
+        : s.action ? `<button type="button" class="btn small tonal" data-apply="${i}">Übernehmen</button>` : ""}
+    </div>`).join("");
+}
+
+function adviceCard(data) {
+  const a = data.split_advice;
+  if (!a) return "";
+  return `<div class="card">
+    <p class="eyebrow">Passt der Split?</p>
+    <p>${esc(a.text)}</p>
+    ${a.better?.length ? `<ul class="plain">${a.best.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
+      <div class="btn-row"><button type="button" class="btn tonal" data-wizard>${icon("spark")} Plan mit „${esc(a.best.name)}“ erstellen</button></div>` : ""}
+  </div>`;
+}
+
+async function improvePlan() {
+  let data;
   try {
-    res = await api("check");
+    data = await api("plan/analyze");
   } catch (e) { return toast(e.message, { error: true }); }
-  const max = Math.max(GOOD_SETS, ...res.weekly.map((w) => w.sets));
-  const findings = res.findings.length
-    ? res.findings.map((f) => `<div class="row-item">
-        <span class="row-icon ${f.level === "warn" ? "warn" : ""}">${icon(LEVEL_ICON[f.level] || "check")}</span>
-        <div class="row-main"><div class="row-title">${esc(f.text)}</div></div>
-      </div>`).join("")
-    : `<div class="row-item"><span class="row-icon up">${icon("check")}</span>
-        <div class="row-main"><div class="row-title">Keine Lücken gefunden.</div></div></div>`;
-  const sheet = openSheet({
-    title: "Plan-Check",
-    body: `<p class="hint">${esc(res.split?.name || "")}</p>
-      <div class="list">${findings}</div>
-      <h3 class="form-section">Sätze pro Woche</h3>
-      <div class="bars">${res.weekly.map((w) => `
-        <div class="bar-row"><span class="bar-label">${esc(w.label)}</span>
-          <span class="bar ${w.sets < 6 ? "low" : ""}"><i style="width:${(w.sets / max) * 100}%"></i></span>
-          <span class="bar-value">${w.sets}</span></div>`).join("")}</div>
-      <p class="hint">Richtwert für Muskelaufbau: etwa ${GOOD_SETS}–20 Sätze pro Muskelgruppe und Woche.
-        ${res.rotating ? "Tage ohne festen Wochentag zählen einmal pro Woche." : ""}</p>
-      ${res.ai_available ? `<div class="btn-row"><button type="button" class="btn tonal" data-ai>
-          Mit KI genauer prüfen</button></div><div data-ai-out></div>` : ""}`,
-  });
-  const btn = $("[data-ai]", sheet);
-  btn?.addEventListener("click", () => busy(btn, async () => {
-    const out = $("[data-ai-out]", sheet);
-    out.innerHTML = `<p class="hint">Die KI sieht sich den Plan an …</p>`;
-    try {
-      const r = await api("check/ai", { method: "POST" });
-      out.innerHTML = r.text
-        ? `<div class="card ai-note"><p class="eyebrow">Einschätzung der KI</p>${
-          esc(r.text).replace(/\n/g, "<br>")}</div>`
-        : `<p class="hint">${esc(r.error)}</p>`;
-    } catch (e) {
-      out.innerHTML = `<p class="hint">${esc(e.offline ? "Ohne Verbindung geht die KI-Prüfung nicht." : e.message)}</p>`;
+  if (!data.split) return toast("Es gibt noch keinen Plan zum Verbessern.", { error: true });
+  const sheet = openSheet({ title: "Plan verbessern", body: "", wide: true });
+  const body = $(".sheet-body", sheet);
+
+  function paint() {
+    body.innerHTML = `<p class="hint">${esc(data.split.name)} · ${data.sessions} Einheiten pro Woche</p>
+      ${adviceCard(data)}
+      <h3 class="form-section">Vorschläge</h3>
+      <div class="list">${suggestionRows(data)}</div>
+      <h3 class="form-section">Volumen</h3>
+      ${volumeRows(data)}
+      ${data.ai_available ? `<div class="btn-row"><button type="button" class="btn tonal" data-ai>
+          ${icon("spark")} Zweite Meinung von der KI</button></div>
+        <div data-ai-out></div>` : ""}`;
+  }
+  paint();
+
+  sheet.addEventListener("click", async (ev) => {
+    const applyBtn = ev.target.closest("[data-apply]");
+    if (applyBtn) {
+      const suggestion = data.suggestions[Number(applyBtn.dataset.apply)];
+      return busy(applyBtn, async () => {
+        try {
+          const res = await api("plan/apply", { method: "POST", body: { action: suggestion.action } });
+          data = { ...res, ai_available: data.ai_available };
+          toast("Übernommen");
+          changed();
+          paint();
+        } catch (e) { toast(e.message, { error: true }); }
+      });
     }
-  }));
+    const openEx = ev.target.closest("[data-open-ex]");
+    if (openEx) {
+      const list = exercises || await api("exercises");
+      exercises = list;
+      closeSheet();
+      return editExercise(list.find((x) => x.id === Number(openEx.dataset.openEx)));
+    }
+    if (ev.target.closest("[data-wizard]")) {
+      const profile = await api(`profiles/${getProfile()}`).catch(() => null);
+      closeSheet();
+      return openWizard(profile);
+    }
+    const aiBtn = ev.target.closest("[data-ai]");
+    if (aiBtn) {
+      return busy(aiBtn, async () => {
+        const out = $("[data-ai-out]", sheet);
+        out.innerHTML = `<p class="hint">Die KI sieht sich den Plan an …</p>`;
+        try {
+          const r = await api("check/ai", { method: "POST" });
+          out.innerHTML = r.text
+            ? `<div class="card ai-note"><p class="eyebrow">${icon("spark")} Einschätzung der KI</p>${
+              esc(r.text).replace(/\n/g, "<br>")}</div>`
+            : `<p class="hint">${esc(r.error)}</p>`;
+        } catch (e) {
+          out.innerHTML = `<p class="hint">${esc(e.offline ? "Ohne Verbindung geht die KI-Prüfung nicht." : e.message)}</p>`;
+        }
+      });
+    }
+  });
 }
 
 // --------------------------------------------------------------- Mount
@@ -484,7 +549,7 @@ export async function mount(el) {
       if (item) return editItem(item);
     }
     if (t("[data-exercises]")) return manageExercises();
-    if (t("[data-check]")) return checkPlan();
+    if (t("[data-check]")) return improvePlan();
     if (t("[data-wizard]")) {
       const profile = await api(`profiles/${getProfile()}`).catch(() => null);
       return openWizard(profile);

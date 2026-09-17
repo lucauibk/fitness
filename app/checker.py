@@ -133,6 +133,12 @@ def ai_review(profile_id):
     if not split or not split["days"]:
         return {"error": "Noch kein Split zum Prüfen."}
     rules = analyze(profile_id)["findings"]
+    from . import analysis as plan_analysis
+    data = plan_analysis.analyze(profile_id)
+    volume_text = "\n".join(
+        f"- {v['label']}: {v['actual']} Sätze/Woche (Richtwert {v['target']}), "
+        f"{v['frequency']}× pro Woche" for v in data["volume"])
+    ideas = "\n".join(f"- {s['text']} ({s['why']})" for s in data["suggestions"][:8])
     prompt = (
         "Du prüfst einen Krafttrainingsplan für eine Freizeitsportlerin bzw. einen "
         "Freizeitsportler (Muskelaufbau, allgemeine Fitness). Antworte auf Deutsch, knapp, "
@@ -142,7 +148,9 @@ def ai_review(profile_id):
         "(keine Sternchen, keine Überschriften), Punkte mit „–“ beginnen. Wenn der Plan "
         "ausgewogen ist, sag das in einem Satz.\n\n"
         f"{_plan_text(split)}\n\n"
-        "Ein automatischer Check hat bereits gefunden:\n"
+        f"Wochenvolumen laut Plan:\n{volume_text}\n\n"
+        + (f"Die App schlägt bereits vor:\n{ideas}\n\n" if ideas else "")
+        + "Ein automatischer Check hat bereits gefunden:\n"
         + ("\n".join(f"- {f['text']}" for f in rules) or "- nichts")
         + "\nWiederhole diese Punkte nicht, sondern ergänze nur, was darüber hinausgeht."
     )
