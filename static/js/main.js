@@ -6,12 +6,14 @@ import * as heute from "./heute.js";
 import * as training from "./training.js";
 import * as plan from "./plan.js";
 import * as fortschritt from "./fortschritt.js";
+import * as profil from "./profil.js";
 
 const VIEWS = {
   heute: ["Heute", heute],
   training: ["Training", training],
   plan: ["Plan", plan],
   fortschritt: ["Fortschritt", fortschritt],
+  profil: ["Profil", profil],
 };
 const mounted = new Set();
 let current = null;
@@ -108,6 +110,13 @@ function applyProfile(id) {
   $("#profileDot").style.setProperty("--c", safeColor(p.color));
 }
 
+/** Alle Ansichten frisch einhängen. Ersetzt die Elemente, damit mount() keine
+ *  zweiten Klick-Listener an dieselben Knoten hängt (sonst löst jeder Knopf doppelt aus). */
+function resetViews() {
+  mounted.clear();
+  $$(".view").forEach((el) => el.replaceWith(el.cloneNode(false)));
+}
+
 function openProfiles() {
   const active = getProfile();
   const sheet = openSheet({
@@ -135,8 +144,7 @@ function openProfiles() {
     applyProfile(Number(row.dataset.profile));
     closeSheet();
     // Profilwechsel heisst: alles neu laden, nicht nur die Anzeige umschreiben.
-    mounted.clear();
-    $$(".view").forEach((el) => { el.innerHTML = ""; });
+    resetViews();
     show();
   });
   const form = $("#profileForm", sheet);
@@ -147,8 +155,7 @@ function openProfiles() {
       applyProfile(p.id);
       closeSheet();
       toast(`Profil „${p.name}“ angelegt`);
-      mounted.clear();
-      $$(".view").forEach((el) => { el.innerHTML = ""; });
+      resetViews();
       show();
     } catch (e) { formError(form, e); }
   });
@@ -231,12 +238,17 @@ function retry() {
 // ------------------------------------------------------------ Ereignisse
 window.addEventListener("hashchange", show);
 window.addEventListener("data-changed", () => reload());
+window.addEventListener("profile-changed", (e) => {
+  const i = profiles.findIndex((x) => x.id === e.detail.id);
+  if (i >= 0) profiles[i] = e.detail;
+  applyProfile(e.detail.id);
+});
 $("#profileBtn").addEventListener("click", openProfiles);
 document.addEventListener("click", (e) => { if (e.target.closest("[data-retry]")) retry(); });
 document.addEventListener("keydown", (e) => {
   const typing = e.target.closest?.("input, textarea, select, [contenteditable]");
   if (typing || e.metaKey || e.ctrlKey || e.altKey || document.getElementById("sheet")) return;
-  const keys = { 1: "heute", 2: "training", 3: "plan", 4: "fortschritt" };
+  const keys = { 1: "heute", 2: "training", 3: "plan", 4: "fortschritt", 5: "profil" };
   if (keys[e.key]) location.hash = keys[e.key];
 });
 

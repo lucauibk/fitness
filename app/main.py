@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-from . import checker, db, stats  # noqa: E402
+from . import ai, checker, db, generator, stats  # noqa: E402
 
 STATIC = Path(__file__).parent.parent / "static"
 log = logging.getLogger("fitness")
@@ -81,7 +81,11 @@ FIELD_NAMES = {"name": "Name", "label": "Bezeichnung", "reps": "Wiederholungen",
                "target_reps_max": "Wiederholungen (bis)",
                "target_weight": "Gewicht", "weekdays": "Wochentage", "muscle_group": "Muskelgruppe",
                "exercise_id": "Übung", "split_day_id": "Trainingstag", "split_id": "Split",
-               "profile_id": "Profil", "unit": "Einheit", "position": "Reihenfolge"}
+               "profile_id": "Profil", "unit": "Einheit", "position": "Reihenfolge",
+               "birth_year": "Geburtsjahr", "sex": "Geschlecht", "height_cm": "Größe",
+               "goal": "Ziel", "experience": "Erfahrung", "days_per_week": "Trainingstage",
+               "session_minutes": "Dauer", "limitations": "Einschränkungen",
+               "pattern": "Bewegungsmuster", "option": "Split"}
 # Felder, die per PATCH vorhanden sein duerfen, aber nie null werden
 NOT_NULL = ("name", "label", "kg", "date", "exercise_id", "split_id", "split_day_id",
             "profile_id")
@@ -181,9 +185,24 @@ Group = Literal["brust", "ruecken", "beine", "schultern", "arme", "rumpf"]
 Unit = Literal["kg", "koerper"]
 
 
+Goal = Literal["aufbau", "kraft", "abnehmen", "fitness"]
+Experience = Literal["einsteiger", "fortgeschritten", "erfahren"]
+Pattern = Literal["h_push", "v_push", "chest_iso", "h_pull", "v_pull", "rear_delt", "lateral",
+                  "squat", "hinge", "lunge", "leg_iso_front", "leg_iso_back", "glutes",
+                  "calves", "biceps", "triceps", "core"]
+
+
 class ProfileIn(BaseModel):
     name: Optional[str] = Field(None, max_length=40)
     color: Optional[str] = Field(None, max_length=20)
+    birth_year: Optional[int] = Field(None, ge=1920, le=2020)
+    sex: Optional[Literal["weiblich", "männlich", "divers"]] = None
+    height_cm: Optional[float] = Field(None, ge=100, le=250, allow_inf_nan=False)
+    goal: Optional[Goal] = None
+    experience: Optional[Experience] = None
+    days_per_week: Optional[int] = Field(None, ge=2, le=6)
+    session_minutes: Optional[int] = Field(None, ge=30, le=120)
+    limitations: Optional[str] = Field(None, max_length=500)
 
 
 class ExerciseIn(BaseModel):
@@ -191,6 +210,7 @@ class ExerciseIn(BaseModel):
     muscle_group: Optional[Group] = None
     unit: Optional[Unit] = None
     archived: Optional[bool] = None
+    pattern: Optional[Pattern] = None
 
 
 class SplitIn(BaseModel):
@@ -259,6 +279,11 @@ def api_add_profile(body: ProfileIn):
     return db.get_row("profiles", new_id)
 
 
+@app.get("/api/profiles/{profile_id}")
+def api_profile(profile_id: int):
+    return _found(db.get_row("profiles", profile_id))
+
+
 @app.patch("/api/profiles/{profile_id}")
 def api_update_profile(profile_id: int, body: ProfileIn):
     _found(db.get_row("profiles", profile_id))
@@ -271,9 +296,16 @@ def api_exercises():
     return db.list_rows("exercises", order="muscle_group, name")
 
 
+def _with_kind(data):
+    if "pattern" in data:
+        data["kind"] = (None if data["pattern"] is None else
+                        "compound" if data["pattern"] in db.COMPOUND_PATTERNS else "isolation")
+    return data
+
+
 @app.post("/api/exercises")
 def api_add_exercise(body: ExerciseIn):
-    data = _data(body, required=("name",))
+    data = _with_kind(_data(body, required=("name",)))
     data.setdefault("unit", "kg")
     return db.insert_row("exercises", data)
 
@@ -281,7 +313,7 @@ def api_add_exercise(body: ExerciseIn):
 @app.patch("/api/exercises/{exercise_id}")
 def api_update_exercise(exercise_id: int, body: ExerciseIn):
     _found(db.get_row("exercises", exercise_id))
-    return _found(db.update_row("exercises", exercise_id, _data(body)))
+    return _found(db.update_row("exercises", exercise_id, _with_kind(_data(body))))
 
 
 @app.delete("/api/exercises/{exercise_id}")
@@ -509,6 +541,121 @@ def api_check(profile_id: int = Depends(current_profile)):
 @app.post("/api/check/ai")
 def api_check_ai(profile_id: int = Depends(current_profile)):
     return checker.ai_review(profile_id)
+
+
+# -------------------------------------------------------- Plan-Assistent
+class WizardIn(BaseModel):
+    option: str = Field(..., max_length=20)
+    goal: Optional[Goal] = None
+    experience: Optional[Experience] = None
+    days: Optional[int] = Field(None, ge=2, le=6)
+    minutes: Optional[int] = Field(None, ge=30, le=120)
+
+
+class PlanExerciseIn(BaseModel):
+    exercise_id: int
+    target_sets: int = Field(..., ge=1, le=6)
+    target_reps_min: int = Field(..., ge=1, le=30)
+    target_reps_max: int = Field(..., ge=1, le=30)
+
+
+class PlanDayIn(BaseModel):
+    label: str = Field(..., min_length=1, max_length=40)
+    weekdays: List[Annotated[int, Field(ge=0, le=6)]] = Field(default_factory=list, max_length=7)
+    exercises: List[PlanExerciseIn] = Field(..., min_length=1, max_length=12)
+
+
+class PlanIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+    option: Optional[str] = None
+    goal: Optional[str] = None
+    experience: Optional[str] = None
+    minutes: Optional[int] = None
+    reason: Optional[str] = None
+    notes: List[str] = Field(default_factory=list)
+    days: List[PlanDayIn] = Field(..., min_length=1, max_length=7)
+
+
+class SaveIn(BaseModel):
+    plan: PlanIn
+    activate: bool = True
+
+
+def _profile(profile_id):
+    return _found(db.get_row("profiles", profile_id))
+
+
+def _with_check(preview):
+    return {"preview": preview, "check": checker.analyze_split(preview)}
+
+
+@app.get("/api/wizard/options")
+def api_wizard_options(profile_id: int = Depends(current_profile),
+                       days: Optional[int] = Query(None, ge=2, le=6),
+                       experience: Optional[Experience] = None):
+    p = _profile(profile_id)
+    return {"options": generator.split_options(days or p.get("days_per_week") or 3,
+                                               experience or p.get("experience") or "einsteiger"),
+            "ai_available": ai.available()}
+
+
+@app.post("/api/wizard/preview")
+def api_wizard_preview(body: WizardIn, profile_id: int = Depends(current_profile)):
+    try:
+        preview = generator.generate(_profile(profile_id), body.option,
+                                     body.model_dump(exclude={"option"}))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return _with_check(preview)
+
+
+@app.get("/api/wizard/alternatives")
+def api_wizard_alternatives(pattern: Pattern, exclude: str = Query("", max_length=200)):
+    ids = [int(x) for x in exclude.split(",") if x.strip().isdigit()]
+    return generator.alternatives(pattern, ids)
+
+
+def _plan_dict(plan: PlanIn):
+    """Eingehenden Plan gegen den Katalog pruefen und mit Namen/Muskelgruppen anreichern."""
+    data = plan.model_dump()
+    catalog = db.rows("SELECT id, name, muscle_group, unit, pattern FROM exercises")
+    try:
+        return ai.validate_plan(data, data, catalog)
+    except ValueError as e:
+        raise HTTPException(400, f"Plan ungültig: {e}.") from e
+
+
+@app.post("/api/wizard/check")
+def api_wizard_check(plan: PlanIn):
+    return _with_check(_plan_dict(plan))
+
+
+@app.post("/api/wizard/refine")
+def api_wizard_refine(plan: PlanIn, profile_id: int = Depends(current_profile)):
+    preview = _plan_dict(plan)
+    res = ai.refine_plan(_profile(profile_id), preview, generator.catalog())
+    return {**_with_check(res["preview"]), "error": res.get("error")}
+
+
+@app.post("/api/wizard/save")
+def api_wizard_save(body: SaveIn, profile_id: int = Depends(current_profile)):
+    plan = _plan_dict(body.plan)
+    with db.connect() as c:
+        split_id = c.execute(
+            "INSERT INTO splits (profile_id, name, active, created_at) VALUES (?,?,0,?)",
+            (profile_id, plan["name"].strip(), db.now())).lastrowid
+        for pos, day in enumerate(plan["days"]):
+            day_id = c.execute(
+                "INSERT INTO split_days (split_id, position, label, weekdays) VALUES (?,?,?,?)",
+                (split_id, pos, day["label"], db.format_weekdays(day["weekdays"]))).lastrowid
+            for ex_pos, ex in enumerate(day["exercises"]):
+                c.execute("INSERT INTO split_exercises (split_day_id, exercise_id, position,"
+                          " target_sets, target_reps_min, target_reps_max) VALUES (?,?,?,?,?,?)",
+                          (day_id, ex["exercise_id"], ex_pos, ex["target_sets"],
+                           ex["target_reps_min"], ex["target_reps_max"]))
+    if body.activate:
+        db.activate_split(split_id, profile_id)
+    return db.split_detail(split_id)
 
 
 @app.get("/api/status")

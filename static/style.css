@@ -568,3 +568,23 @@ input:not([type=checkbox]):not([type=radio]):focus, select:focus, textarea:focus
 .row-icon.warn { background: color-mix(in srgb, var(--soon) 15%, transparent); color: var(--soon); }
 .bar.low i { background: var(--soon); }
 .ai-note { margin-top: var(--s3); line-height: 1.55; }
+
+/* Plan-Assistent */
+.steps-bar { display: flex; gap: 4px; margin-bottom: var(--s2); }
+.steps-bar i { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-3); }
+.steps-bar i.on { background: var(--accent); }
+.choices { display: grid; gap: var(--s2); margin: var(--s3) 0; }
+.choices.row { grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); }
+.choice {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: var(--tap);
+  padding: var(--s3) var(--s4); border: 1.5px solid var(--line-strong); border-radius: var(--r2);
+  background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.choices.row .choice { align-items: center; text-align: center; padding: var(--s3) var(--s2); }
+.choice.active { border-color: var(--accent); background: var(--accent-soft); }
+.choice-title { font-weight: 650; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.choice-text { color: var(--muted); font-size: var(--fs-sm); }
+.wiz-day { padding-bottom: var(--s2); }
+.wiz-ex .icon-btn { flex: none; }
+.swap-list { display: flex; flex-wrap: wrap; gap: var(--s2); padding: 0 var(--s4) var(--s3); }
+ul.plain { margin: var(--s2) 0 0; padding-left: 1.2em; display: grid; gap: 4px; }

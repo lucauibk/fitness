@@ -1,0 +1,356 @@
+/** Plan-Assistent: fragt Ziel, Zeit und Erfahrung ab, schlägt Splits vor und zeigt eine
+ *  Vorschau, die man anpassen und übernehmen kann. Der Stand liegt als Entwurf im
+ *  Gerätespeicher – Schließen verliert nichts. */
+import { $, api, busy, closeSheet, esc, getProfile, icon, openSheet, prefs, toast,
+  WEEKDAYS } from "./util.js";
+
+export const GOALS = {
+  aufbau: { label: "Muskelaufbau", text: "Mehr Muskeln, sichtbare Form." },
+  kraft: { label: "Kraft", text: "Schwerer heben, wenige Wiederholungen." },
+  abnehmen: { label: "Abnehmen / Straffen", text: "Viel Bewegung, Muskeln erhalten." },
+  fitness: { label: "Allgemeine Fitness", text: "Fit und belastbar im Alltag." },
+};
+export const EXPERIENCE = {
+  einsteiger: { label: "Einsteiger", text: "Weniger als 6 Monate regelmäßig trainiert." },
+  fortgeschritten: { label: "Fortgeschritten", text: "Etwa 6 Monate bis 2 Jahre." },
+  erfahren: { label: "Erfahren", text: "Mehr als 2 Jahre, Technik sitzt." },
+};
+const STEPS = ["Deine Daten", "Ziel", "Zeit", "Erfahrung", "Split", "Vorschau"];
+const DAYS = [2, 3, 4, 5, 6];
+const MINUTES = [45, 60, 75, 90];
+
+let st = null;       // Entwurf
+let sheet = null;
+
+export const hasWizardDraft = () => {
+  const d = prefs.get("wizard");
+  return Boolean(d && d.profileId === getProfile());
+};
+const save = () => {
+  prefs.set("wizard", st);
+  window.dispatchEvent(new CustomEvent("wizard-changed"));
+};
+const clear = () => {
+  st = null;
+  prefs.set("wizard", null);
+  window.dispatchEvent(new CustomEvent("wizard-changed"));
+};
+const range = (lo, hi) => (lo === hi ? `${lo}` : `${lo}–${hi}`);
+const daysLabel = (d) => (d?.length ? d.map((i) => WEEKDAYS[i]).join(" · ") : "frei");
+
+export function openWizard(profile) {
+  const draft = prefs.get("wizard");
+  if (draft && draft.profileId === getProfile()) {
+    st = draft;
+  } else {
+    const p = profile || {};
+    st = {
+      profileId: getProfile(), step: 0,
+      data: { birth_year: p.birth_year ?? null, height_cm: p.height_cm ?? null,
+        sex: p.sex ?? null, limitations: p.limitations ?? "" },
+      goal: p.goal || null, days: p.days_per_week || null, minutes: p.session_minutes || null,
+      experience: p.experience || null,
+      option: null, options: null, aiAvailable: false,
+      preview: null, check: null, activate: true, swapping: null, alternatives: null,
+    };
+  }
+  sheet = openSheet({ title: "Plan-Assistent", body: "", footer: "", wide: true });
+  sheet.addEventListener("click", onClick);
+  sheet.addEventListener("input", onInput);
+  sheet.addEventListener("change", onInput);
+  render();
+}
+
+// ------------------------------------------------------------ Anzeige
+const choice = (group, value, label, text, active) => `
+  <button type="button" class="choice ${active ? "active" : ""}" data-pick="${group}" data-value="${value}"
+    aria-pressed="${active}">
+    <span class="choice-title">${esc(label)}</span>
+    ${text ? `<span class="choice-text">${esc(text)}</span>` : ""}
+  </button>`;
+
+function stepData() {
+  const d = st.data;
+  const year = new Date().getFullYear();
+  return `<p class="hint">Diese Angaben helfen vor allem der KI-Verfeinerung. Alles ist freiwillig.</p>
+    <div class="form">
+      <div class="field-row">
+        <label class="field">Geburtsjahr<input data-field="birth_year" type="number" inputmode="numeric"
+          min="1920" max="${year - 6}" value="${d.birth_year ?? ""}"></label>
+        <label class="field">Größe (cm)<input data-field="height_cm" type="number" inputmode="decimal"
+          min="100" max="250" step="0.5" value="${d.height_cm ?? ""}"></label>
+      </div>
+      <label class="field">Geschlecht
+        <select data-field="sex">
+          ${[["", "keine Angabe"], ["weiblich", "weiblich"], ["männlich", "männlich"], ["divers", "divers"]]
+            .map(([v, l]) => `<option value="${v}"${(d.sex || "") === v ? " selected" : ""}>${l}</option>`).join("")}
+        </select>
+      </label>
+      <label class="field">Einschränkungen oder Verletzungen
+        <textarea data-field="limitations" rows="2" maxlength="500"
+          placeholder="optional, z. B. Knie links">${esc(d.limitations || "")}</textarea>
+      </label>
+    </div>`;
+}
+
+const stepGoal = () => `<p class="hint">Was willst du vor allem erreichen?</p>
+  <div class="choices">${Object.entries(GOALS).map(([k, g]) => choice("goal", k, g.label, g.text, st.goal === k)).join("")}</div>`;
+
+const stepTime = () => `<h3 class="form-section">Wie viele Tage pro Woche?</h3>
+  <div class="choices row">${DAYS.map((d) => choice("days", d, `${d}`, "", st.days === d)).join("")}</div>
+  <h3 class="form-section">Wie lange pro Einheit?</h3>
+  <div class="choices row">${MINUTES.map((m) => choice("minutes", m, `${m} min`, "", st.minutes === m)).join("")}</div>`;
+
+const stepExperience = () => `<p class="hint">Wie lange trainierst du schon im Studio?</p>
+  <div class="choices">${Object.entries(EXPERIENCE).map(([k, e]) => choice("experience", k, e.label, e.text, st.experience === k)).join("")}</div>`;
+
+function stepSplit() {
+  if (!st.options) return `<p class="hint">Lade Vorschläge …</p>`;
+  return `<p class="hint">Passend zu ${st.days} Tagen pro Woche:</p>
+    <div class="choices">${st.options.map((o) => `
+      <button type="button" class="choice ${st.option === o.key ? "active" : ""}" data-pick="option"
+        data-value="${o.key}" aria-pressed="${st.option === o.key}">
+        <span class="choice-title">${esc(o.name)}${o.recommended ? ` <span class="pill ok">empfohlen</span>` : ""}</span>
+        <span class="choice-text">${esc(o.reason)}</span>
+        <span class="choice-text">${o.days.map((d) => `${esc(d.label)} (${daysLabel(d.weekdays)})`).join(" · ")}</span>
+      </button>`).join("")}</div>`;
+}
+
+function exerciseRow(ex, di, ei, day) {
+  const key = `${di}:${ei}`;
+  const open = st.swapping === key;
+  return `<div class="row-item wiz-ex">
+      <div class="row-main">
+        <div class="row-title">${esc(ex.name)}</div>
+        <div class="row-meta"><span>${ex.target_sets} × ${range(ex.target_reps_min, ex.target_reps_max)} Whd.</span></div>
+      </div>
+      <button type="button" class="icon-btn" data-swap="${key}" aria-label="${esc(ex.name)} tauschen"
+        aria-expanded="${open}">${icon("swap")}</button>
+      ${day.exercises.length > 1 ? `<button type="button" class="icon-btn" data-remove="${key}"
+        aria-label="${esc(ex.name)} entfernen">${icon("x")}</button>` : ""}
+    </div>
+    ${open ? `<div class="swap-list">${st.alternatives === null ? `<p class="hint">Lade …</p>`
+      : st.alternatives.length ? st.alternatives.map((a) => `<button type="button" class="chip"
+          data-replace="${a.id}">${esc(a.name)}</button>`).join("")
+      : `<p class="hint">Keine Alternative mit gleichem Bewegungsablauf.</p>`}</div>` : ""}`;
+}
+
+function stepPreview() {
+  const pv = st.preview;
+  if (!pv) return `<p class="hint">Erstelle Plan …</p>`;
+  const findings = st.check?.findings || [];
+  return `<label class="field">Name<input data-plan-name maxlength="80" value="${esc(pv.name)}"></label>
+    ${pv.notes?.length ? `<div class="card ai-note"><p class="eyebrow">${icon("spark")} Angepasst von der KI</p>
+      <ul class="plain">${pv.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></div>` : ""}
+    ${st.aiError ? `<p class="callout">${esc(st.aiError)}</p>` : ""}
+    ${pv.days.map((d, di) => `<div class="card wiz-day">
+      <div class="card-title">${esc(d.label)}</div>
+      <div class="row-meta"><span>${daysLabel(d.weekdays)}</span><span>${d.exercises.length} Übungen</span></div>
+      <div class="list flush">${d.exercises.map((ex, ei) => exerciseRow(ex, di, ei, d)).join("")}</div>
+    </div>`).join("")}
+    <h3 class="form-section">Plan-Check</h3>
+    <div class="list">${findings.length ? findings.map((f) => `<div class="row-item">
+        <span class="row-icon ${f.level === "warn" ? "warn" : ""}">${icon(f.level === "warn" ? "warn" : "check")}</span>
+        <div class="row-main"><div class="row-title">${esc(f.text)}</div></div></div>`).join("")
+      : `<div class="row-item"><span class="row-icon up">${icon("check")}</span>
+        <div class="row-main"><div class="row-title">Keine Lücken gefunden.</div></div></div>`}</div>
+    ${st.aiAvailable ? `<div class="btn-row"><button type="button" class="btn tonal" data-ai>
+        ${icon("spark")} Mit KI verfeinern</button></div>
+      <p class="hint">Die KI berücksichtigt auch Alter und Einschränkungen und nutzt nur Übungen aus deinem Katalog.</p>` : ""}
+    <div class="toggles"><label class="toggle"><input type="checkbox" data-activate ${st.activate ? "checked" : ""}>
+      <span></span>Gleich als aktiven Plan verwenden</label></div>
+    <p class="hint">Wochentage und Gewichte kannst du danach unter „Plan“ anpassen.</p>`;
+}
+
+function canNext() {
+  return [true, Boolean(st.goal), Boolean(st.days && st.minutes), Boolean(st.experience),
+    Boolean(st.option), Boolean(st.preview)][st.step];
+}
+
+function render() {
+  if (!sheet?.isConnected) return;
+  $("#sheetTitle", sheet).textContent = `Plan-Assistent · ${STEPS[st.step]}`;
+  const body = $(".sheet-body", sheet);
+  const views = [stepData, stepGoal, stepTime, stepExperience, stepSplit, stepPreview];
+  body.innerHTML = `<div class="steps-bar" aria-label="Schritt ${st.step + 1} von ${STEPS.length}">
+      ${STEPS.map((_, i) => `<i class="${i <= st.step ? "on" : ""}"></i>`).join("")}</div>
+    <p class="eyebrow">Schritt ${st.step + 1} von ${STEPS.length}</p>
+    ${views[st.step]()}`;
+  let foot = $(".sheet-foot", sheet);
+  if (!foot) {
+    foot = document.createElement("div");
+    foot.className = "sheet-foot";
+    sheet.appendChild(foot);
+  }
+  const last = st.step === STEPS.length - 1;
+  foot.innerHTML = `
+    ${st.step > 0 ? `<button type="button" class="btn ghost" data-back>${icon("left")} Zurück</button>`
+      : `<button type="button" class="btn ghost danger" data-reset>Neu beginnen</button>`}
+    <span class="grow"></span>
+    ${last ? `<button type="button" class="btn primary" data-save ${canNext() ? "" : "disabled"}>${icon("check")} Plan übernehmen</button>`
+      : `<button type="button" class="btn primary" data-next ${canNext() ? "" : "disabled"}>Weiter ${icon("right")}</button>`}`;
+}
+
+// ------------------------------------------------------------ Aktionen
+const planBody = () => ({ ...st.preview });
+
+async function recheck() {
+  try {
+    const res = await api("wizard/check", { method: "POST", body: planBody() });
+    st.check = res.check;
+    save();
+    render();
+  } catch { /* Befunde bleiben auf dem letzten Stand */ }
+}
+
+function failed(e) {
+  toast(e.offline ? "Für den Assistenten braucht es eine Verbindung zum Server." : e.message, { error: true });
+}
+
+async function next() {
+  try {
+    if (st.step === 0) {
+      const body = { ...st.data, limitations: (st.data.limitations || "").trim() || null };
+      await api(`profiles/${getProfile()}`, { method: "PATCH", body });
+    }
+    if (st.step === 3) {
+      await api(`profiles/${getProfile()}`, { method: "PATCH", body: {
+        goal: st.goal, days_per_week: st.days, session_minutes: st.minutes, experience: st.experience } });
+      const res = await api(`wizard/options?days=${st.days}&experience=${st.experience}`);
+      st.options = res.options;
+      st.aiAvailable = res.ai_available;
+      if (!st.options.some((o) => o.key === st.option)) {
+        st.option = (st.options.find((o) => o.recommended) || st.options[0]).key;
+        st.preview = null;
+      }
+    }
+    if (st.step === 4) {
+      const res = await api("wizard/preview", { method: "POST", body: {
+        option: st.option, goal: st.goal, experience: st.experience, days: st.days, minutes: st.minutes } });
+      st.preview = res.preview;
+      st.check = res.check;
+      st.aiError = null;
+      st.swapping = null;
+    }
+    st.step = Math.min(st.step + 1, STEPS.length - 1);
+    save();
+    render();
+    $(".sheet-body", sheet)?.scrollTo(0, 0);
+  } catch (e) { failed(e); }
+}
+
+async function onClick(ev) {
+  const t = (sel) => ev.target.closest(sel);
+  if (t("[data-back]")) {
+    st.step = Math.max(0, st.step - 1);
+    save();
+    return render();
+  }
+  if (t("[data-reset]")) {
+    const profile = await api(`profiles/${getProfile()}`).catch(() => null);
+    clear();
+    closeSheet();
+    return openWizard(profile);
+  }
+  const next_ = t("[data-next]");
+  if (next_) return busy(next_, next);
+  const pick = t("[data-pick]");
+  if (pick) {
+    const { pick: group, value } = pick.dataset;
+    const val = ["days", "minutes"].includes(group) ? Number(value) : value;
+    if (st[group] !== val) {
+      st[group] = val;
+      // Andere Eckdaten -> Vorschläge und Vorschau sind veraltet
+      if (group !== "option") st.options = null;
+      st.preview = null;
+      st.check = null;
+    }
+    save();
+    return render();
+  }
+  const swap = t("[data-swap]");
+  if (swap) {
+    const key = swap.dataset.swap;
+    if (st.swapping === key) { st.swapping = null; return render(); }
+    st.swapping = key;
+    st.alternatives = null;
+    render();
+    const [di, ei] = key.split(":").map(Number);
+    const day = st.preview.days[di];
+    const ex = day.exercises[ei];
+    try {
+      const exclude = day.exercises.map((x) => x.exercise_id).join(",");
+      st.alternatives = await api(`wizard/alternatives?pattern=${encodeURIComponent(ex.pattern)}&exclude=${exclude}`);
+    } catch (e) { st.alternatives = []; failed(e); }
+    return render();
+  }
+  const replace = t("[data-replace]");
+  if (replace) {
+    const [di, ei] = st.swapping.split(":").map(Number);
+    const alt = st.alternatives.find((a) => a.id === Number(replace.dataset.replace));
+    const ex = st.preview.days[di].exercises[ei];
+    Object.assign(ex, { exercise_id: alt.id, name: alt.name, muscle_group: alt.muscle_group,
+      unit: alt.unit, pattern: alt.pattern });
+    st.swapping = null;
+    save();
+    render();
+    return recheck();
+  }
+  const remove = t("[data-remove]");
+  if (remove) {
+    const [di, ei] = remove.dataset.remove.split(":").map(Number);
+    st.preview.days[di].exercises.splice(ei, 1);
+    st.swapping = null;
+    save();
+    render();
+    return recheck();
+  }
+  const aiBtn = t("[data-ai]");
+  if (aiBtn) {
+    return busy(aiBtn, async () => {
+      aiBtn.textContent = "Die KI sieht sich den Plan an …";
+      try {
+        const res = await api("wizard/refine", { method: "POST", body: planBody() });
+        st.preview = { ...res.preview, name: st.preview.name };
+        st.check = res.check;
+        st.aiError = res.error || null;
+        save();
+      } catch (e) { failed(e); }
+      render();
+    });
+  }
+  const saveBtn = t("[data-save]");
+  if (saveBtn) {
+    return busy(saveBtn, async () => {
+      try {
+        const split = await api("wizard/save", { method: "POST",
+          body: { plan: planBody(), activate: st.activate } });
+        clear();
+        closeSheet();
+        toast(`„${split.name}“ angelegt${split.active ? " und aktiviert" : ""}`);
+        window.dispatchEvent(new CustomEvent("data-changed"));
+        // closeSheet() geht per history.back() zurueck – erst danach umschalten,
+        // sonst setzt der Ruecksprung die Adresse wieder auf die alte Seite.
+        window.addEventListener("popstate", () => { location.hash = "plan"; }, { once: true });
+        setTimeout(() => { if (location.hash !== "#plan") location.hash = "plan"; }, 400);
+      } catch (e) { failed(e); }
+    });
+  }
+}
+
+function onInput(ev) {
+  const f = ev.target.closest("[data-field]");
+  if (f) {
+    const v = f.value.trim();
+    st.data[f.dataset.field] = v === "" ? null : (f.type === "number" ? Number(v) : f.value);
+    return save();
+  }
+  if (ev.target.matches("[data-plan-name]") && st.preview) {
+    st.preview.name = ev.target.value.trim() || st.preview.name;
+    return save();
+  }
+  if (ev.target.matches("[data-activate]")) {
+    st.activate = ev.target.checked;
+    save();
+  }
+}

@@ -9,14 +9,9 @@ ein ANTHROPIC_API_KEY steht, und nur auf ausdruecklichen Knopfdruck – dann wir
 Plan (Uebungen, Saetze, Wiederholungen; keine Namen, keine Trainingsdaten) an die
 Anthropic-API geschickt.
 """
-import json
 import logging
-import os
-import re
-import urllib.error
-import urllib.request
 
-from . import db
+from . import ai, db
 from .stats import GROUP_LABEL
 
 log = logging.getLogger(__name__)
@@ -25,16 +20,18 @@ log = logging.getLogger(__name__)
 LOW_SETS = 6
 GOOD_SETS = 10
 
-HAMSTRING = ("beinbeuger", "rumänisches kreuzheben", "kreuzheben", "hip thrust",
+HAMSTRING = ("pattern:hinge", "pattern:leg_iso_back", "pattern:glutes",
+             "beinbeuger", "hyperextension", "rumänisches kreuzheben", "kreuzheben", "hip thrust",
              "good morning", "nordic")
-CALVES = ("wade",)
-REAR_DELT = ("face pull", "reverse butterfly", "rudern", "rear delt", "seitheben vorgebeugt")
-AI_MODEL_DEFAULT = "claude-haiku-4-5-20251001"
+CALVES = ("wade", "pattern:calves")
+REAR_DELT = ("pattern:rear_delt", "pattern:h_pull", "face pull", "reverse butterfly", "rudern", "rear delt", "seitheben vorgebeugt")
 
 
 def _weekly(split):
     """Geschaetzte Saetze pro Woche je Muskelgruppe. Ein Tag ohne festen Wochentag
-    zaehlt einmal pro Woche – eine Annahme, die im Ergebnis auch so benannt wird."""
+    zaehlt einmal pro Woche – eine Annahme, die im Ergebnis auch so benannt wird.
+    names enthaelt neben den Uebungsnamen auch die Bewegungsmuster ("pattern:hinge"),
+    damit z. B. Kreuzheben als Beinrueckseite zaehlt, obwohl es unter Ruecken steht."""
     sets = {g: 0 for g in GROUP_LABEL}
     names = {g: [] for g in GROUP_LABEL}
     rotating = False
@@ -48,6 +45,8 @@ def _weekly(split):
                 continue
             sets[g] += (ex.get("target_sets") or 0) * per_week
             names[g].append(ex["name"].lower())
+            if ex.get("pattern"):
+                names[g].append(f"pattern:{ex['pattern']}")
     return sets, names, rotating
 
 
@@ -57,11 +56,17 @@ def _has(names, keywords):
 
 def analyze(profile_id):
     split = db.active_split(profile_id)
-    base = {"ai_available": ai_available()}
+    base = {"ai_available": ai.available()}
     if not split or not split["days"]:
         return {**base, "split": None, "weekly": [], "findings": [
             {"level": "info", "text": "Noch kein Split mit Trainingstagen angelegt."}]}
+    return {**base, "split": {"id": split["id"], "name": split["name"]}, **analyze_split(split)}
 
+
+def analyze_split(split):
+    """Regeln fuer einen beliebigen Plan – auch fuer die Vorschau im Assistenten, die
+    noch nicht gespeichert ist. Erwartet days[].weekdays und
+    days[].exercises[].{name, muscle_group, target_sets}."""
     sets, names, rotating = _weekly(split)
     all_names = [n for group in names.values() for n in group]
     findings = []
@@ -82,7 +87,7 @@ def analyze(profile_id):
                          "text": f"Deutlich mehr Drücken ({push} Sätze) als Ziehen ({pull}). "
                                  "Mehr Rücken- und Zugarbeit entlastet die Schultern."})
 
-    if sets["beine"] and not _has(names["beine"], HAMSTRING):
+    if sets["beine"] and not _has(all_names, HAMSTRING):
         findings.append({"level": "warn", "group": "beine",
                          "text": "Keine Übung für die Beinrückseite – "
                                  "z. B. Beinbeuger oder Rumänisches Kreuzheben."})
@@ -99,8 +104,6 @@ def analyze(profile_id):
         findings.append({"level": "warn", "text": f"„{label}“ hat noch keine Übungen."})
 
     return {
-        **base,
-        "split": {"id": split["id"], "name": split["name"]},
         "weekly": [{"group": g, "label": GROUP_LABEL[g], "sets": sets[g]} for g in GROUP_LABEL],
         "rotating": rotating,
         "findings": findings,
@@ -108,10 +111,6 @@ def analyze(profile_id):
 
 
 # ------------------------------------------------------------------ KI
-def ai_available():
-    return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
-
-
 def _plan_text(split):
     lines = [f"Split: {split['name']}"]
     wd = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
@@ -128,7 +127,7 @@ def _plan_text(split):
 def ai_review(profile_id):
     """Zweite Meinung per KI. Gibt {"text": ...} oder {"error": ...} zurueck –
     ein Fehler hier darf den regelbasierten Check nie verhindern."""
-    if not ai_available():
+    if not ai.available():
         return {"error": "Kein KI-Schlüssel hinterlegt (ANTHROPIC_API_KEY in .env)."}
     split = db.active_split(profile_id)
     if not split or not split["days"]:
@@ -147,28 +146,4 @@ def ai_review(profile_id):
         + ("\n".join(f"- {f['text']}" for f in rules) or "- nichts")
         + "\nWiederhole diese Punkte nicht, sondern ergänze nur, was darüber hinausgeht."
     )
-    body = json.dumps({
-        "model": os.environ.get("ANTHROPIC_MODEL", AI_MODEL_DEFAULT),
-        "max_tokens": 500,
-        "messages": [{"role": "user", "content": prompt}],
-    }).encode()
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages", data=body, method="POST",
-        headers={"x-api-key": os.environ["ANTHROPIC_API_KEY"].strip(),
-                 "anthropic-version": "2023-06-01",
-                 "content-type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as res:
-            data = json.load(res)
-    except urllib.error.HTTPError as e:
-        log.warning("KI-Check fehlgeschlagen: HTTP %s", e.code)
-        return {"error": "Die KI hat die Anfrage abgelehnt (Schlüssel oder Modell prüfen)."
-                if e.code in (401, 403, 404) else f"KI gerade nicht erreichbar (HTTP {e.code})."}
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        log.warning("KI-Check nicht erreichbar: %s", e)
-        return {"error": "KI gerade nicht erreichbar – der Pi hat vermutlich kein Internet."}
-    text = "".join(part.get("text", "") for part in data.get("content", [])
-                   if part.get("type") == "text").strip()
-    # Falls doch Markdown kommt: Fettschrift und Aufzaehlungszeichen glaetten
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text).replace("•", "–")
-    return {"text": text} if text else {"error": "Die KI hat keine Antwort geliefert."}
+    return ai.ask(prompt, max_tokens=500)

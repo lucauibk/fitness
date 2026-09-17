@@ -1,6 +1,7 @@
 /** Plan: Splits anlegen und wechseln, Trainingstage und Übungen samt Wiederholungs-Bereich. */
+import { openWizard } from "./wizard.js";
 import { $, api, armDelete, busy, closeSheet, deleteLater, empty, esc, formData, formError, icon,
-  isPendingDelete, openSheet, prefs, skeleton, submitOnce, toast, WEEKDAYS,
+  getProfile, isPendingDelete, openSheet, prefs, skeleton, submitOnce, toast, WEEKDAYS,
   WEEKDAYS_LONG } from "./util.js";
 
 let root;
@@ -10,6 +11,14 @@ let openSplitId = null;
 let sortingDay = null;   // Pfeile nur in dem Tag zeigen, den man gerade sortiert
 let exercises = null;
 const GOOD_SETS = 10;
+const PATTERNS = {
+  h_push: "Drücken nach vorn (Bankdrücken …)", v_push: "Drücken über Kopf",
+  chest_iso: "Brust isoliert (Butterfly …)", h_pull: "Rudern", v_pull: "Ziehen von oben (Latzug …)",
+  rear_delt: "Hintere Schulter", lateral: "Seitheben", squat: "Kniebeuge / Beinpresse",
+  hinge: "Hüftbeuge (Kreuzheben …)", lunge: "Ausfallschritt", leg_iso_front: "Beinstrecker",
+  leg_iso_back: "Beinbeuger", glutes: "Po", calves: "Waden", biceps: "Bizeps",
+  triceps: "Trizeps", core: "Rumpf",
+};
 
 const changed = () => window.dispatchEvent(new CustomEvent("data-changed"));
 const range = (lo, hi) => (lo === hi ? `${lo}` : `${lo}–${hi}`);
@@ -57,8 +66,10 @@ function dayCard(day) {
 
 function render() {
   if (!splits?.length) {
-    root.innerHTML = `${empty("Noch kein Split", "Ein Split ist dein Trainingsplan – zum Beispiel Push, Pull und Beine.",
-        { label: "Split anlegen", attrs: "data-add-split" })}`;
+    root.innerHTML = `${empty("Noch kein Split", "Ein Split ist dein Trainingsplan – zum Beispiel Push, "
+        + "Pull und Beine. Der Assistent erstellt dir einen passenden.",
+        { label: "Plan mit Assistent erstellen", attrs: "data-wizard" })}
+      <div class="btn-row"><button type="button" class="btn ghost" data-add-split>${icon("plus")} Selbst anlegen</button></div>`;
     return;
   }
   const visible = splits.filter((s) => !isPendingDelete(`splits/${s.id}`));
@@ -75,6 +86,7 @@ function render() {
       </div>`).join("")}</div>
     <div class="btn-row">
       <button type="button" class="btn ghost" data-add-split>${icon("plus")} Split</button>
+      <button type="button" class="btn ghost" data-wizard>${icon("spark")} Mit Assistent</button>
       <button type="button" class="btn ghost" data-exercises>Übungen verwalten</button>
       ${open?.days.length ? `<button type="button" class="btn ghost" data-check>Plan prüfen</button>` : ""}
     </div>
@@ -325,6 +337,15 @@ function editExercise(ex) {
         ${Object.entries(groups).map(([k, label]) => `<label class="chip">
           <input type="radio" name="muscle_group" value="${k}" ${ex?.muscle_group === k ? "checked" : ""}>${label}</label>`).join("")}
       </div></fieldset>
+      <details class="field-more"${ex?.pattern ? " open" : ""}>
+        <summary>Bewegungsmuster (für den Assistenten)</summary>
+        <label class="field">Muster
+          <select name="pattern">
+            <option value="">keines – der Assistent nutzt die Übung nicht</option>
+            ${Object.entries(PATTERNS).map(([k, l]) => `<option value="${k}"${ex?.pattern === k ? " selected" : ""}>${l}</option>`).join("")}
+          </select>
+        </label>
+      </details>
       <fieldset class="field"><legend>Gewicht</legend><div class="segmented">
         <label><input type="radio" name="unit" value="kg" ${ex?.unit !== "koerper" ? "checked" : ""}><span>mit Gewicht</span></label>
         <label><input type="radio" name="unit" value="koerper" ${ex?.unit === "koerper" ? "checked" : ""}><span>Körpergewicht</span></label>
@@ -453,5 +474,9 @@ export async function mount(el) {
     }
     if (t("[data-exercises]")) return manageExercises();
     if (t("[data-check]")) return checkPlan();
+    if (t("[data-wizard]")) {
+      const profile = await api(`profiles/${getProfile()}`).catch(() => null);
+      return openWizard(profile);
+    }
   });
 }

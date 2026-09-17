@@ -93,6 +93,12 @@ CREATE INDEX IF NOT EXISTS idx_split_ex_day ON split_exercises(split_day_id, pos
 MIGRATIONS = {
     # Ein Trainingstag kann an mehreren Wochentagen liegen (vorher nur einer)
     "split_days": {"weekdays": "TEXT"},
+    # Angaben fuer den Plan-Assistenten
+    "profiles": {"birth_year": "INTEGER", "sex": "TEXT", "height_cm": "REAL",
+                 "goal": "TEXT", "experience": "TEXT", "days_per_week": "INTEGER",
+                 "session_minutes": "INTEGER", "limitations": "TEXT"},
+    # Bewegungsmuster: danach waehlt der Assistent Uebungen aus
+    "exercises": {"pattern": "TEXT", "kind": "TEXT"},
 }
 
 
@@ -209,6 +215,57 @@ STARTER_SPLIT = [
 ]
 
 
+# Bewegungsmuster der mitgelieferten Uebungen. Uebungen ohne Muster (Cardio, eigene)
+# nimmt der Assistent nicht.
+COMPOUND_PATTERNS = {"h_push", "v_push", "h_pull", "v_pull", "squat", "hinge", "lunge"}
+STARTER_PATTERNS = {
+    "Bankdrücken": "h_push", "Schrägbankdrücken Kurzhantel": "h_push", "Brustpresse": "h_push",
+    "Liegestütze": "h_push", "Dips": "h_push", "Butterfly": "chest_iso",
+    "Kabelzug-Fliegende": "chest_iso",
+    "Klimmzüge": "v_pull", "Latzug": "v_pull", "Enger Latzug": "v_pull",
+    "Langhantelrudern": "h_pull", "Rudern Kabel": "h_pull", "Rudern Maschine": "h_pull",
+    "Schulterdrücken": "v_push", "Kurzhantel-Schulterdrücken": "v_push",
+    "Seitheben": "lateral", "Seitheben Kabel": "lateral",
+    "Face Pulls": "rear_delt", "Reverse Butterfly": "rear_delt",
+    "Kniebeuge": "squat", "Beinpresse": "squat",
+    "Kreuzheben": "hinge", "Rumänisches Kreuzheben": "hinge",
+    "Ausfallschritte": "lunge", "Bulgarian Split Squat": "lunge",
+    "Beinstrecker": "leg_iso_front", "Beinbeuger": "leg_iso_back",
+    "Beinbeuger sitzend": "leg_iso_back", "Hyperextension": "leg_iso_back",
+    "Hip Thrust": "glutes", "Kabel-Kickback": "glutes",
+    "Wadenheben": "calves", "Wadenheben sitzend": "calves",
+    "Bizepscurls Kurzhantel": "biceps", "Hammercurls": "biceps", "SZ-Curls": "biceps",
+    "Trizepsdrücken Kabel": "triceps", "Trizeps über Kopf": "triceps",
+    "Enges Bankdrücken": "triceps",
+    "Unterarmstütz (Plank)": "core", "Crunches": "core", "Beinheben hängend": "core",
+    "Russian Twist": "core", "Käfer (Dead Bug)": "core", "Pallof Press": "core",
+    "Cable Crunch": "core",
+}
+# Einmalig ergaenzte Uebungen, damit jedes Muster Auswahl hat
+CATALOG_V2 = [
+    ("Enger Latzug", "ruecken", "kg"), ("Rudern Maschine", "ruecken", "kg"),
+    ("Kurzhantel-Schulterdrücken", "schultern", "kg"), ("Seitheben Kabel", "schultern", "kg"),
+    ("Kabelzug-Fliegende", "brust", "kg"), ("Bulgarian Split Squat", "beine", "kg"),
+    ("Beinbeuger sitzend", "beine", "kg"), ("Kabel-Kickback", "beine", "kg"),
+    ("Wadenheben sitzend", "beine", "kg"), ("Pallof Press", "rumpf", "kg"),
+    ("Cable Crunch", "rumpf", "kg"),
+]
+
+
+def _catalog_v2(c):
+    """Neue Uebungen einmalig anlegen (spaeter geloeschte kommen nicht wieder) und
+    Bewegungsmuster setzen, wo noch keines steht – eigene Angaben bleiben."""
+    if not c.execute("SELECT 1 FROM settings WHERE key='catalog_v2'").fetchone():
+        for name, group, unit in CATALOG_V2:
+            c.execute("INSERT OR IGNORE INTO exercises (name, muscle_group, unit) VALUES (?,?,?)",
+                      (name, group, unit))
+        c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('catalog_v2', ?)", (now(),))
+    for name, pattern in STARTER_PATTERNS.items():
+        kind = "compound" if pattern in COMPOUND_PATTERNS else "isolation"
+        c.execute("UPDATE exercises SET pattern=?, kind=? WHERE name=? AND pattern IS NULL",
+                  (pattern, kind, name))
+
+
 def _seed(c):
     """Erster Start: Profil, Uebungs-Katalog und ein Beispiel-Split. Laeuft nur, solange
     noch nichts da ist – ein leer geraeumter Katalog wird nicht wieder aufgefuellt."""
@@ -242,6 +299,7 @@ def init():
         c.executescript(SCHEMA)
         _migrate(c)
         _seed(c)
+        _catalog_v2(c)
     with sqlite3.connect(DB_PATH, timeout=30) as c:
         # WAL: Lesen blockiert nicht, waehrend geschrieben wird – wichtig, wenn zwei
         # Leute gleichzeitig eine Einheit hochladen.
@@ -297,8 +355,9 @@ def backup(tag=None):
 # Whitelist je Tabelle: nur diese Spalten duerfen ueber die API geschrieben werden,
 # damit Spaltennamen nie ungeprueft aus dem Request in SQL landen.
 WRITABLE = {
-    "profiles": ("name", "color"),
-    "exercises": ("name", "muscle_group", "unit", "archived"),
+    "profiles": ("name", "color", "birth_year", "sex", "height_cm", "goal", "experience",
+                 "days_per_week", "session_minutes", "limitations"),
+    "exercises": ("name", "muscle_group", "unit", "archived", "pattern", "kind"),
     "splits": ("profile_id", "name", "active"),
     "split_days": ("split_id", "position", "label", "weekdays"),
     "split_exercises": ("split_day_id", "exercise_id", "position", "target_sets",
