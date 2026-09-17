@@ -28,6 +28,7 @@ export function startDraft(day) {
       name: e.name,
       unit: e.unit,
       kind: e.kind,
+      rest: e.rest_seconds || null,
       adjusted: e.adjusted || null,
       reps_min: e.target_reps_min,
       reps_max: e.target_reps_max,
@@ -368,13 +369,15 @@ export async function mount(el) {
       }
       let nowDone = false;
       let kind = null;
+      let rest = null;
       update((d) => {
         const s = d.exercises[i].sets[j];
         s.done = !s.done;
         nowDone = s.done;
         kind = d.exercises[i].kind;
+        rest = d.exercises[i].rest;   // empfohlene Pause aus dem Plan
       });
-      if (nowDone) startRest(kind === "compound" ? REST.compound : REST.isolation);
+      if (nowDone) startRest(rest || (kind === "compound" ? REST.compound : REST.isolation));
       return;
     }
     const add = t("[data-add-set]");

@@ -309,6 +309,7 @@ def day_plan(profile_id, day):
             "target_sets": item["target_sets"],
             "target_reps_min": item["target_reps_min"], "target_reps_max": item["target_reps_max"],
             "target_weight": item["target_weight"], "notes": item["notes"],
+            "rest_seconds": item.get("rest_seconds"),
             "last": s["last"], "suggest": {"reps": s["reps"], "weight": s["weight"],
                                            "reason": s["reason"],
                                            "raise_weight": s["raise_weight"]},

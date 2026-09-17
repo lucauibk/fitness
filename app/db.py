@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS split_exercises (
     target_reps_min INTEGER DEFAULT 8,   -- Wiederholungs-Bereich: unten einsteigen,
     target_reps_max INTEGER DEFAULT 12,  -- oben angekommen -> Gewicht erhoehen
     target_weight REAL,
+    rest_seconds INTEGER,              -- empfohlene Satzpause
     notes TEXT
 );
 CREATE TABLE IF NOT EXISTS workouts (
@@ -164,6 +165,8 @@ MIGRATIONS = {
                  "activity_level": "TEXT", "kcal_goal": "INTEGER", "protein_goal": "INTEGER",
                  "carbs_goal": "INTEGER", "fat_goal": "INTEGER",
                  "nutrition_auto": "INTEGER DEFAULT 1"},
+    # Empfohlene Satzpause je Uebung
+    "split_exercises": {"rest_seconds": "INTEGER"},
     # Bewegungsmuster: danach waehlt der Assistent Uebungen aus
     "exercises": {"pattern": "TEXT", "kind": "TEXT",
                   # Uebungsbibliothek
@@ -471,7 +474,8 @@ WRITABLE = {
     "splits": ("profile_id", "name", "active"),
     "split_days": ("split_id", "position", "label", "weekdays"),
     "split_exercises": ("split_day_id", "exercise_id", "position", "target_sets",
-                        "target_reps_min", "target_reps_max", "target_weight", "notes"),
+                        "target_reps_min", "target_reps_max", "target_weight",
+                        "rest_seconds", "notes"),
     "workouts": ("profile_id", "split_day_id", "title", "started_at", "finished_at", "notes"),
     "bodyweight": ("profile_id", "date", "kg"),
 }

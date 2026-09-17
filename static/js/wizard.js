@@ -23,6 +23,7 @@ export const FOCUS = {
 };
 const MAX_FOCUS = 3;
 const MINUTES = [45, 60, 75, 90];
+const NO_LIMIT = 0;   // "egal" – dann bestimmt das Zielvolumen den Umfang
 
 let st = null;       // Entwurf
 let sheet = null;
@@ -59,7 +60,8 @@ export function openWizard(profile) {
       profileId: getProfile(), step: 0,
       data: { birth_year: p.birth_year ?? null, height_cm: p.height_cm ?? null,
         sex: p.sex ?? null, limitations: p.limitations ?? "" },
-      goal: p.goal || null, minutes: p.session_minutes || null,
+      goal: p.goal || null,
+      minutes: p.session_minutes ?? (p.days_per_week ? NO_LIMIT : null),
       weekdays: p.train_weekdays || [], focus: p.focus || [],
       experience: p.experience || null,
       option: null, options: null, aiAvailable: false,
@@ -118,7 +120,11 @@ const stepTime = () => `<h3 class="form-section">An welchen Tagen kannst du trai
     : st.weekdays.length > 6 ? "Höchstens 6 Tage – ein Ruhetag pro Woche muss sein."
     : `${st.weekdays.length} Tage pro Woche${backToBack(st.weekdays) ? " · einige direkt hintereinander – das berücksichtigt der Vorschlag" : ""}.`}</p>
   <h3 class="form-section">Wie lange pro Einheit?</h3>
-  <div class="choices row">${MINUTES.map((m) => choice("minutes", m, `${m} min`, "", st.minutes === m)).join("")}</div>`;
+  <div class="choices row">${MINUTES.map((m) => choice("minutes", m, `${m} min`, "", st.minutes === m)).join("")}
+    ${choice("minutes", NO_LIMIT, "egal", "", st.minutes === NO_LIMIT)}</div>
+  <p class="hint">${st.minutes === NO_LIMIT
+    ? "Ohne Obergrenze: der Plan richtet sich allein nach dem sinnvollen Wochenvolumen."
+    : "Die Zeit bestimmt, wie viele Sätze pro Einheit möglich sind (inklusive Satzpausen)."}</p>`;
 
 const backToBack = (wd) => {
   const d = [...wd].sort();
@@ -185,6 +191,22 @@ function exerciseRow(ex, di, ei, day) {
       : `<p class="hint">Keine Alternative mit gleichem Bewegungsablauf.</p>`}</div>` : ""}`;
 }
 
+/** Wochensätze je Muskelgruppe: Ziel aus der Trainingswissenschaft gegen den Plan. */
+function volumeTable(pv) {
+  const v = pv.volume;
+  if (!v) return "";
+  const rows = Object.keys(v.target).filter((g) => v.target[g] || v.planned[g]);
+  const max = Math.max(6, ...rows.map((g) => Math.max(v.target[g], v.planned[g])));
+  return `<h4 class="form-section">Sätze pro Woche</h4>
+    <div class="bars">${rows.map((g) => `<div class="bar-row">
+      <span class="bar-label">${esc(v.labels[g])}</span>
+      <span class="bar"><i style="width:${(v.planned[g] / max) * 100}%"></i></span>
+      <span class="bar-value">${v.planned[g]}${v.planned[g] === v.target[g] ? "" : ` / ${v.target[g]}`}</span>
+    </div>`).join("")}</div>
+    <p class="hint">Balken = im Plan, Zahl dahinter = Richtwert. Etwa 10+ harte Sätze je Muskel
+      und Woche gelten als Schwelle für nahezu maximalen Aufbau.</p>`;
+}
+
 function stepPreview() {
   const pv = st.preview;
   if (!pv) return `<p class="hint">Erstelle Plan …</p>`;
@@ -192,7 +214,8 @@ function stepPreview() {
   return `<label class="field">Name<input data-plan-name maxlength="80" value="${esc(pv.name)}"></label>
     ${pv.basis?.length ? `<details class="card basis" open><summary class="eyebrow">Darauf basiert dein Plan</summary>
       <ul class="plain">${pv.basis.map((b) => `<li>${esc(b)}</li>`).join("")}</ul>
-      ${pv.frequency ? `<p class="hint">pro Woche: ${freqLine(pv.frequency, pv.focus || [])}</p>` : ""}</details>` : ""}
+      ${pv.frequency ? `<p class="hint">Häufigkeit pro Woche: ${freqLine(pv.frequency, pv.focus || [])}</p>` : ""}
+      ${volumeTable(pv)}</details>` : ""}
     ${pv.notes?.length ? `<div class="card ai-note"><p class="eyebrow">${icon("spark")} Angepasst von der KI</p>
       <ul class="plain">${pv.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></div>` : ""}
     ${st.aiError ? `<p class="callout">${esc(st.aiError)}</p>` : ""}
@@ -217,7 +240,7 @@ function stepPreview() {
 
 function canNext() {
   const wd = st.weekdays.length;
-  return [true, Boolean(st.goal), Boolean(wd >= 2 && wd <= 6 && st.minutes), Boolean(st.experience),
+  return [true, Boolean(st.goal), Boolean(wd >= 2 && wd <= 6 && st.minutes !== null), Boolean(st.experience),
     true, Boolean(st.option), Boolean(st.preview)][st.step];
 }
 
@@ -270,10 +293,11 @@ async function next() {
     if (st.step === 4) {
       const weekdays = [...st.weekdays].sort();
       await api(`profiles/${getProfile()}`, { method: "PATCH", body: {
-        goal: st.goal, train_weekdays: weekdays, session_minutes: st.minutes,
+        goal: st.goal, train_weekdays: weekdays, session_minutes: st.minutes || null,
         experience: st.experience, focus: st.focus } });
       const q = new URLSearchParams({ weekdays: weekdays.join(","), experience: st.experience,
-        goal: st.goal, minutes: st.minutes, focus: st.focus.join(",") });
+        goal: st.goal, focus: st.focus.join(",") });
+      q.set("minutes", st.minutes ?? 0);
       const res = await api(`wizard/options?${q}`);
       st.options = res.options;
       st.aiAvailable = res.ai_available;
@@ -284,8 +308,8 @@ async function next() {
     }
     if (st.step === 5) {
       const res = await api("wizard/preview", { method: "POST", body: {
-        option: st.option, goal: st.goal, experience: st.experience, minutes: st.minutes,
-        weekdays: [...st.weekdays].sort(), focus: st.focus } });
+        option: st.option, goal: st.goal, experience: st.experience,
+        minutes: st.minutes ?? 0, weekdays: [...st.weekdays].sort(), focus: st.focus } });
       st.preview = res.preview;
       st.check = res.check;
       st.aiError = null;

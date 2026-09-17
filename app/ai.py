@@ -105,6 +105,7 @@ def validate_plan(candidate, original, catalog):
             seen.add(ex["id"])
             clean.append({"exercise_id": ex["id"], "name": ex["name"], "pattern": ex["pattern"],
                           "focus": bool(it.get("focus")),
+                          "rest_seconds": it.get("rest_seconds"),
                           "muscle_group": ex["muscle_group"], "unit": ex["unit"],
                           "target_sets": sets, "target_reps_min": lo, "target_reps_max": hi})
         out_days.append({"label": orig["label"], "weekdays": list(orig["weekdays"]),

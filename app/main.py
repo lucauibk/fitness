@@ -189,6 +189,7 @@ class DayIn(BaseModel):
 
 
 class SplitExerciseIn(BaseModel):
+    rest_seconds: Optional[int] = Field(None, ge=30, le=300)
     split_day_id: Optional[int] = None
     exercise_id: Optional[int] = None
     position: Optional[int] = Field(None, ge=0, le=99)
@@ -529,7 +530,7 @@ class WizardIn(BaseModel):
     goal: Optional[Goal] = None
     experience: Optional[Experience] = None
     days: Optional[int] = Field(None, ge=2, le=6)
-    minutes: Optional[int] = Field(None, ge=30, le=120)
+    minutes: Optional[int] = Field(None, ge=0, le=120)   # 0 = ohne Zeitgrenze
     weekdays: Optional[List[Annotated[int, Field(ge=0, le=6)]]] = Field(None, max_length=7)
     focus: Optional[List[Focus]] = Field(None, max_length=3)
 
@@ -539,6 +540,7 @@ class PlanExerciseIn(BaseModel):
     target_sets: int = Field(..., ge=1, le=6)
     target_reps_min: int = Field(..., ge=1, le=30)
     target_reps_max: int = Field(..., ge=1, le=30)
+    rest_seconds: Optional[int] = Field(None, ge=30, le=300)
 
 
 class PlanDayIn(BaseModel):
@@ -582,7 +584,7 @@ def api_wizard_options(profile_id: int = Depends(current_profile),
                        days: Optional[int] = Query(None, ge=2, le=6),
                        experience: Optional[Experience] = None,
                        goal: Optional[Goal] = None,
-                       minutes: Optional[int] = Query(None, ge=30, le=120),
+                       minutes: Optional[int] = Query(None, ge=0, le=120),
                        weekdays: str = Query("", max_length=20),
                        focus: str = Query("", max_length=80)):
     p = _profile(profile_id)
@@ -668,9 +670,10 @@ def api_wizard_save(body: SaveIn, profile_id: int = Depends(current_profile)):
                 (split_id, pos, day["label"], db.format_weekdays(day["weekdays"]))).lastrowid
             for ex_pos, ex in enumerate(day["exercises"]):
                 c.execute("INSERT INTO split_exercises (split_day_id, exercise_id, position,"
-                          " target_sets, target_reps_min, target_reps_max) VALUES (?,?,?,?,?,?)",
+                          " target_sets, target_reps_min, target_reps_max, rest_seconds)"
+                          " VALUES (?,?,?,?,?,?,?)",
                           (day_id, ex["exercise_id"], ex_pos, ex["target_sets"],
-                           ex["target_reps_min"], ex["target_reps_max"]))
+                           ex["target_reps_min"], ex["target_reps_max"], ex.get("rest_seconds")))
     if body.activate:
         db.activate_split(split_id, profile_id)
     return db.split_detail(split_id)
