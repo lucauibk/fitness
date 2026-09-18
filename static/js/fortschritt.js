@@ -165,7 +165,7 @@ async function showHistory(exerciseId) {
     const points = await api(`history/${exerciseId}`);
     const line = points.map((p) => ({ value: p.value, date: p.date }));
     openSheet({
-      title: b?.exercise || "Verlauf",
+      title: esc(b?.exercise || "Verlauf"),
       body: `${points.length > 1 ? sparkline(line, { height: 96, label: (p) => p.value })
         : `<p class="hint">Für einen Verlauf braucht es mindestens zwei Einheiten.</p>`}
         <div class="list flush">${[...points].reverse().map((p) => `

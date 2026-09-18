@@ -10,8 +10,13 @@ let today = null;     // /api/today fuer den Startbildschirm
 let timer = null;
 
 // ------------------------------------------------------------- Entwurf
-export const getDraft = () => prefs.get("draft");
-export const hasDraft = () => Boolean(prefs.get("draft"));
+// Der Entwurf liegt geraeteweit im prefs-Speicher; ohne den Profil-Abgleich wuerde bei
+// einem Profilwechsel mitten in einer Einheit der Entwurf des anderen Profils erscheinen.
+export function getDraft() {
+  const d = prefs.get("draft");
+  return d && d.profile_id === getProfile() ? d : null;
+}
+export const hasDraft = () => Boolean(getDraft());
 const saveDraft = (d) => { prefs.set("draft", d); };
 const clearDraft = () => { prefs.set("draft", null); };
 
@@ -95,7 +100,7 @@ function exerciseCard(ex, index) {
       <button type="button" class="btn small ghost" data-add-set="${index}">${icon("plus")} Satz</button>
       ${ex.sets.length > 1 ? `<button type="button" class="btn small ghost" data-drop-set="${index}">Satz weniger</button>` : ""}
       <span class="grow"></span>
-      <button type="button" class="btn small ghost danger" data-drop-ex="${index}" aria-label="Übung entfernen">${icon("trash")}</button>
+      <button type="button" class="btn small ghost danger" data-drop-ex="${index}">${icon("trash")} Entfernen</button>
     </div>
   </div>`;
 }
@@ -126,6 +131,21 @@ function renderDraft(draft) {
       if (el && d) el.textContent = elapsed(d);
     }, 30000);
   }
+  // Einmal pro Aufbau registrieren, nicht im delegierten Klick-Handler – sonst haengt
+  // jeder Tipp einen weiteren Listener an denselben (neu gebauten) Knoten.
+  armDelete($("[data-cancel]", root), () => {
+    stopRest();
+    clearDraft();
+    today = null;
+    toast("Einheit verworfen");
+    window.dispatchEvent(new CustomEvent("outbox-changed"));
+    load();
+  }, "Verwerfen", "Alles verwerfen?");
+  $$("[data-drop-ex]", root).forEach((btn) => {
+    armDelete(btn, () => update((d) => {
+      d.exercises.splice(Number(btn.dataset.dropEx), 1);
+    }), "Entfernen", "Entfernen?");
+  });
 }
 
 function renderStart() {
@@ -233,15 +253,16 @@ const exOption = (e) => `<div class="row-item" role="button" tabindex="0" data-p
 async function finish() {
   const draft = getDraft();
   if (!draft) return;
-  const sets = [];
-  for (const ex of draft.exercises) {
-    let n = 0;
-    for (const s of ex.sets) {
-      if (!s.done || !s.reps) continue;
-      n += 1;
-      sets.push({ exercise_id: ex.exercise_id, set_no: n, reps: s.reps, weight: s.weight });
-    }
+  // Abgehakt, aber ohne Wiederholungen (moeglich, wenn das Feld nach dem Abhaken geleert
+  // wird): nicht still verwerfen, sondern melden – sonst fehlt der Satz ohne Erklaerung.
+  const invalid = draft.exercises.flatMap((ex) => ex.sets.filter((s) => s.done && !s.reps).map(() => ex));
+  if (invalid.length) {
+    const what = invalid.length === 1 ? "Ein abgehakter Satz hat" : `${invalid.length} abgehakte Sätze haben`;
+    toast(`${what} keine Wiederholungen (${invalid[0].name}) – bitte eintragen oder den Haken entfernen.`, { error: true });
+    return;
   }
+  const sets = draft.exercises.flatMap((ex) => ex.sets.filter((s) => s.done)
+    .map((s) => ({ exercise_id: ex.exercise_id, set_no: s.set_no, reps: s.reps, weight: s.weight })));
   if (!sets.length) {
     toast("Noch kein Satz abgehakt.", { error: true });
     return;
@@ -296,18 +317,40 @@ function restBar() {
   return bar;
 }
 
-function beep() {
+// Ein einziger AudioContext, wiederverwendet statt pro Pause neu erzeugt – und angelegt
+// direkt beim Start der Pause (also innerhalb des Klicks, der sie ausloest). iOS Safari
+// laesst einen AudioContext nur "running" starten, wenn seine Erzeugung auf eine echte
+// Nutzer-Geste zurueckgeht; einer, der erst im setInterval-Callback entsteht, bleibt stumm.
+let audioCtx = null;
+
+function unlockAudio() {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.frequency.value = 880;
-    g.gain.setValueAtTime(0.2, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-    o.connect(g).connect(ctx.destination);
-    o.start();
-    o.stop(ctx.currentTime + 0.5);
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
   } catch { /* kein Ton moeglich */ }
+}
+
+function beep() {
+  if (!audioCtx) return;
+  try {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.2, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+    o.connect(g).connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + 0.5);
+  } catch { /* kein Ton moeglich */ }
+}
+
+/** navigator.vibrate ist unter iOS Safari ein No-op, und ein im Hintergrund gedrosselter
+ *  Timer meldet das Pausenende sonst gar nicht – eine Notification ist der einzige Weg,
+ *  der auch bei gesperrtem Bildschirm ankommt. Es wird nie um Erlaubnis gebeten (das waere
+ *  ein eigener Eingriff); ist sie schon erteilt, wird sie genutzt. */
+function notifyRestOver() {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try { new Notification("Pause vorbei", { body: "Weiter geht's.", tag: "rest-over" }); } catch { /* egal */ }
 }
 
 function tick() {
@@ -318,6 +361,7 @@ function tick() {
   if (left <= 0) {
     navigator.vibrate?.([200, 100, 200]);
     beep();
+    if (document.hidden) notifyRestOver();
     return stopRest();
   }
   bar.querySelector("[data-rest-time]").textContent =
@@ -326,6 +370,10 @@ function tick() {
 }
 
 function startRest(seconds) {
+  unlockAudio();   // muss synchron in der Nutzer-Geste passieren, die die Pause ausloest
+  if (typeof Notification !== "undefined" && Notification.permission === "default") {
+    Notification.requestPermission().catch(() => {});
+  }
   const custom = prefs.get("restSeconds");
   prefs.set("rest", { until: Date.now() + (custom || seconds) * 1000 });
   clearInterval(restTick);
@@ -343,6 +391,11 @@ function stopRest() {
 
 // Laeuft nach einem Neuladen weiter
 if (prefs.get("rest")) { restTick = setInterval(tick, 500); }
+// Im Hintergrund wird setInterval gedrosselt – beim Zurueckkommen sofort nachrechnen,
+// statt auf den naechsten (verspaeteten) Tick zu warten.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && prefs.get("rest")) tick();
+});
 
 // ------------------------------------------------------------- Mount
 export async function mount(el) {
@@ -396,25 +449,10 @@ export async function mount(el) {
         if (ex.sets.length > 1) ex.sets.pop();
       });
     }
-    const dropEx = t("[data-drop-ex]");
-    if (dropEx) {
-      return armDelete(dropEx, () => update((d) => {
-        d.exercises.splice(Number(dropEx.dataset.dropEx), 1);
-      }), icon("trash"), "Entfernen?");
-    }
+    // data-drop-ex und data-cancel sind zweistufig (armDelete) und werden einmal pro
+    // renderDraft() registriert, nicht hier im delegierten Handler.
     if (t("[data-add-ex]")) return addExercise();
     if (t("[data-finish]")) { stopRest(); return finish(); }
-    const cancel = t("[data-cancel]");
-    if (cancel) {
-      return armDelete(cancel, () => {
-        stopRest();
-        clearDraft();
-        today = null;
-        toast("Einheit verworfen");
-        window.dispatchEvent(new CustomEvent("outbox-changed"));
-        load();
-      }, "Verwerfen", "Alles verwerfen?");
-    }
   });
 
   // Zahlen und Notiz direkt in den Entwurf schreiben – bei jedem Tastendruck, damit

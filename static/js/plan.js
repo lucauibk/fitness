@@ -430,7 +430,7 @@ function adviceCard(data) {
   return `<div class="card">
     <p class="eyebrow">Passt der Split?</p>
     <p>${esc(a.text)}</p>
-    ${a.better?.length ? `<ul class="plain">${a.best.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
+    ${a.best ? `<ul class="plain">${a.best.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
       <div class="btn-row"><button type="button" class="btn tonal" data-wizard>${icon("spark")} Plan mit „${esc(a.best.name)}“ erstellen</button></div>` : ""}
   </div>`;
 }
@@ -489,7 +489,7 @@ async function improvePlan() {
         const out = $("[data-ai-out]", sheet);
         out.innerHTML = `<p class="hint">Die KI sieht sich den Plan an …</p>`;
         try {
-          const r = await api("check/ai", { method: "POST" });
+          const r = await api("check/ai", { method: "POST", timeout: 50000 });
           out.innerHTML = r.text
             ? `<div class="card ai-note"><p class="eyebrow">${icon("spark")} Einschätzung der KI</p>${
               esc(r.text).replace(/\n/g, "<br>")}</div>`

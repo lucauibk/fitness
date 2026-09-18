@@ -65,7 +65,7 @@ function openWorkout(id) {
   const byExercise = {};
   for (const s of w.sets) (byExercise[s.exercise] ||= []).push(s);
   const sheet = openSheet({
-    title: w.day_label || w.title || "Einheit",
+    title: esc(w.day_label || w.title || "Einheit"),
     body: `<p class="hint">${new Date(w.started_at || w.finished_at).toLocaleString("de-AT",
       { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}</p>
       <div class="list">${Object.entries(byExercise).map(([name, sets]) => `

@@ -147,7 +147,7 @@ function openScan() {
     status.textContent = "Werte werden gelesen … (dauert ein paar Sekunden)";
     try {
       const image = await shrink(file);
-      const res = await api("measurements/scan", { method: "POST", body: { image, media_type: "image/jpeg" } });
+      const res = await api("measurements/scan", { method: "POST", body: { image, media_type: "image/jpeg" }, timeout: 65000 });
       closeSheet(false, { replacing: true });
       openForm({ values: res.values, date: res.date, source: "vicoach", dropped: res.dropped });
     } catch (e) {

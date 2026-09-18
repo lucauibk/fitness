@@ -413,7 +413,7 @@ async function onClick(ev) {
     return busy(aiBtn, async () => {
       aiBtn.textContent = "Die KI sieht sich den Plan an …";
       try {
-        const res = await api("wizard/refine", { method: "POST", body: planBody() });
+        const res = await api("wizard/refine", { method: "POST", body: planBody(), timeout: 95000 });
         st.preview = { ...res.preview, name: st.preview.name };
         st.check = res.check;
         st.aiError = res.error || null;

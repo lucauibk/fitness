@@ -1,4 +1,5 @@
 """FastAPI-App der Fitness-Anwendung: liefert die Oberfläche und die JSON-Daten."""
+import asyncio
 import hashlib
 import ipaddress
 import json
@@ -27,11 +28,28 @@ STATIC = Path(__file__).parent.parent / "static"
 log = logging.getLogger("fitness")
 
 
+BACKUP_INTERVAL_S = 24 * 3600
+
+
+async def _daily_backup():
+    """Taegliche Sicherung, solange der Dienst laeuft. Ohne das haengt die gesamte
+    Trainingshistorie an einer einzelnen SD-Karte im Pi."""
+    while True:
+        try:
+            db.backup()
+            log.info("Backup geschrieben")
+        except Exception:
+            log.exception("Backup fehlgeschlagen")
+        await asyncio.sleep(BACKUP_INTERVAL_S)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
     log.info("Fitness-App bereit (%s)", db.DB_PATH)
+    backup_task = asyncio.create_task(_daily_backup())
     yield
+    backup_task.cancel()
 
 
 app = FastAPI(title="Fitness", lifespan=lifespan)
@@ -494,11 +512,9 @@ def api_bodyweight(profile_id: int = Depends(current_profile)):
 def api_add_bodyweight(body: BodyweightIn):
     if not db.exists("profiles", body.profile_id):
         raise HTTPException(400, "Dieses Profil gibt es nicht (mehr).")
-    day = body.date or stats.today().isoformat()
-    try:
-        date.fromisoformat(day)
-    except ValueError as e:
-        raise HTTPException(400, "Datum: ungültige Eingabe.") from e
+    # Dieselbe Pruefung wie bei Check-in/Cardio/Mobility (routes/daily.py) – auch hier
+    # sollen keine Zukunftsdaten reinrutschen.
+    day = daily._day(body.date)
     return db.set_bodyweight(body.profile_id, day, body.kg)
 
 
@@ -536,8 +552,8 @@ def api_plan_analyze(profile_id: int = Depends(current_profile),
 def api_plan_apply(body: ApplyIn, profile_id: int = Depends(current_profile)):
     try:
         analysis.apply(profile_id, body.action)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
+    except (ValueError, KeyError, TypeError) as e:
+        raise HTTPException(400, str(e) or "Ungültige Eingabe.") from e
     return {"ok": True, **analysis.analyze(profile_id)}
 
 

@@ -101,8 +101,7 @@ async function reload() {
 
 function updateBadge() {
   const badge = $('#nav [data-tab="training"] .count');
-  const running = Boolean(prefs.get("draft"));
-  badge.hidden = !running;
+  badge.hidden = !einheit.hasDraft();
 }
 
 // ------------------------------------------------------------ Profile
@@ -278,11 +277,11 @@ document.addEventListener("keydown", (e) => {
 setInterval(() => {
   if (document.hidden || document.getElementById("sheet")
       || document.activeElement?.matches("input, textarea")
-      || prefs.get("draft")) return;
+      || einheit.hasDraft()) return;
   reload();
 }, 120000);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && current && !prefs.get("draft")) reload();
+  if (!document.hidden && current && !einheit.hasDraft()) reload();
 });
 
 // ------------------------------------------------------- Offline-Vorrat

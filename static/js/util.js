@@ -19,11 +19,11 @@ function withProfile(path) {
   return url + (url.includes("?") ? "&" : "?") + `profile=${profileId}`;
 }
 
-export async function api(path, { method = "GET", body } = {}) {
+export async function api(path, { method = "GET", body, timeout = TIMEOUT_MS } = {}) {
   let res;
   try {
     // Ohne Timeout haengt ein toter Tailnet-Weg bis zu einer Minute.
-    const signal = typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(TIMEOUT_MS) : undefined;
+    const signal = typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(timeout) : undefined;
     res = await fetch(withProfile(path), {
       method,
       headers: body ? { "Content-Type": "application/json" } : undefined,

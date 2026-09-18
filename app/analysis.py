@@ -292,9 +292,23 @@ def analyze(profile_id, split_id=None):
     }
 
 
+def _int(action, key, default=None):
+    """action[key] als int, mit klarer ValueError statt KeyError/TypeError bei kaputter
+    oder fehlender Eingabe – Vorschlaege kommen roh vom Client, nichts davon ist garantiert."""
+    value = action.get(key, default)
+    if value is None:
+        raise ValueError(f"„{key}“ fehlt.")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"„{key}“ ist keine gültige Zahl.") from e
+
+
 def apply(profile_id, action):
     """Einen Vorschlag umsetzen. Prueft, dass alles zum Profil gehoert."""
-    kind = (action or {}).get("type")
+    if not isinstance(action, dict):
+        raise ValueError("Diesen Vorschlag kann die App nicht automatisch umsetzen.")
+    kind = action.get("type")
     if kind in ("sets", "reps", "remove"):
         item = db.get_row("split_exercises", action.get("item_id"))
         if not item:
@@ -306,9 +320,9 @@ def apply(profile_id, action):
         if kind == "remove":
             db.delete_row("split_exercises", item["id"])
             return {"ok": True}
-        data = ({"target_sets": int(action["target_sets"])} if kind == "sets" else
-                {"target_reps_min": int(action["target_reps_min"]),
-                 "target_reps_max": int(action["target_reps_max"])})
+        data = ({"target_sets": _int(action, "target_sets")} if kind == "sets" else
+                {"target_reps_min": _int(action, "target_reps_min"),
+                 "target_reps_max": _int(action, "target_reps_max")})
         return db.update_row("split_exercises", item["id"], data)
     if kind == "add":
         day = db.get_row("split_days", action.get("day_id"))
@@ -319,9 +333,9 @@ def apply(profile_id, action):
             raise ValueError("Diese Übung gibt es nicht (mehr).")
         siblings = db.list_rows_where("split_exercises", "split_day_id", day["id"])
         return db.insert_row("split_exercises", {
-            "split_day_id": day["id"], "exercise_id": action["exercise_id"],
-            "position": len(siblings), "target_sets": int(action.get("target_sets") or 3),
-            "target_reps_min": int(action.get("target_reps_min") or 8),
-            "target_reps_max": int(action.get("target_reps_max") or 12),
+            "split_day_id": day["id"], "exercise_id": _int(action, "exercise_id"),
+            "position": len(siblings), "target_sets": _int(action, "target_sets", 3),
+            "target_reps_min": _int(action, "target_reps_min", 8),
+            "target_reps_max": _int(action, "target_reps_max", 12),
             "rest_seconds": action.get("rest_seconds")})
     raise ValueError("Diesen Vorschlag kann die App nicht automatisch umsetzen.")

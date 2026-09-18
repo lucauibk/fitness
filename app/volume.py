@@ -98,8 +98,16 @@ def targets(experience, goal, focus=(), days=3, minutes=None):
             # Sonst alles gleichmaessig herunterskalieren, aber nicht unter Erhaltung
             keep = max(0.3, (sum(out.values()) - over) / max(1, sum(out.values())))
             out = {g: max(LANDMARKS[g][0] if out[g] else 0, round(v * keep)) for g, v in out.items()}
-        notes.append(f"{days} Einheiten × {per_session} Sätze ≈ {total} Sätze pro Woche – "
-                     "mehr passt nicht in deine Zeit, deshalb sind die Vorgaben gekürzt.")
+        final = sum(out.values())
+        if final > total:
+            # Die Erhaltungs-Untergrenzen (MV) allein passen schon nicht in die Zeit – das
+            # Kuerzen kann nicht mehr wegnehmen, ohne unter Erhaltungsvolumen zu gehen.
+            notes.append(f"Selbst mit Kürzung kommen ≈ {final} Sätze pro Woche zusammen – mehr, als "
+                         f"{days} Einheiten × {per_session} Sätze ({total} Sätze) hergeben. Für dieses "
+                         "Volumen bräuchte es mehr Zeit pro Einheit oder einen zusätzlichen Trainingstag.")
+        else:
+            notes.append(f"{days} Einheiten × {per_session} Sätze ≈ {total} Sätze pro Woche – "
+                         "mehr passt nicht in deine Zeit, deshalb sind die Vorgaben gekürzt.")
     if focus_targets:
         notes.append("Spezialisierung: " + ", ".join(LABEL[t] for t in sorted(focus_targets))
                      + " bekommen deutlich mehr Sätze, alle anderen Muskeln laufen auf "

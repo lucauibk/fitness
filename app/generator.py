@@ -264,7 +264,9 @@ def generate(profile, option_key, overrides=None):
                         break
             if not candidates:
                 continue
-            ex = candidates[used.get(pattern, 0) % min(len(candidates), 2)]
+            # Durch alle Kandidaten rotieren statt nur die ersten zwei zu nutzen – sonst
+            # bleibt der Rest des Katalogs für dieses Muster ungenutzt.
+            ex = candidates[used.get(pattern, 0) % len(candidates)]
             used[pattern] = used.get(pattern, 0) + 1
             taken.add(ex["id"])
             compound = ex["kind"] == "compound"
