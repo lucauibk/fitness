@@ -162,6 +162,7 @@ class ProfileIn(BaseModel):
     protein_goal: Optional[int] = Field(None, ge=0, le=500)
     carbs_goal: Optional[int] = Field(None, ge=0, le=1500)
     fat_goal: Optional[int] = Field(None, ge=0, le=500)
+    water_goal_ml: Optional[int] = Field(None, ge=500, le=8000)
 
 
 class ExerciseIn(BaseModel):

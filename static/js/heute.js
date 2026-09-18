@@ -10,6 +10,7 @@ import * as outbox from "./outbox.js";
 let root;
 let data = null;
 let editingCheckin = false;
+let waterExtra = 0;   // optimistisch, bis der Klick bestaetigt oder in den Ausgang gelegt ist
 const dayCache = new Map();
 
 const SCALES = {
@@ -134,6 +135,21 @@ function nutritionCard() {
   </a>`;
 }
 
+function waterCard() {
+  const n = data.nutrition;
+  const pend = outbox.pending("water-log").filter((e) => !e.date || e.date === data.date)
+    .reduce((s, e) => s + e.ml, 0);
+  const ml = n.water_ml + pend + waterExtra;
+  const liters = (v) => (v / 1000).toLocaleString("de-AT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return `<div class="card mini-card water-mini">
+    <span class="row-icon">${icon("water")}</span>
+    <div class="grow"><p class="eyebrow">Wasser</p>
+      <div class="card-title">${liters(ml)}${n.water_goal ? ` von ${liters(n.water_goal)}` : ""} L</div></div>
+    <button type="button" class="icon-btn tonal-icon" data-water="-500" aria-label="Halben Liter abziehen">${icon("minus")}</button>
+    <button type="button" class="icon-btn tonal-icon" data-water="500" aria-label="Halben Liter hinzufügen">${icon("plus")}</button>
+  </div>`;
+}
+
 function render() {
   const d = data;
   const showForm = !d.checkin || editingCheckin;
@@ -146,6 +162,7 @@ function render() {
     ${workoutCard()}
     ${mobilityCard()}
     ${nutritionCard()}
+    ${waterCard()}
     ${d.last_workout ? `<p class="hint pad">Letzte Einheit: ${esc(d.last_workout.day_label || "Training")} · ${esc(relDate(d.last_workout.at, { time: false }))}</p>` : ""}`;
 }
 
@@ -316,5 +333,25 @@ export async function mount(el) {
     if (mob) return openMobility(mob.dataset.mobility);
     const go = t("[data-goto]");
     if (go) location.hash = go.dataset.goto;
+    const water = t("[data-water]");
+    if (water) return addWater(Number(water.dataset.water));
   });
+}
+
+async function addWater(ml) {
+  const body = { profile_id: getProfile(), ml, date: data.date, client_id: outbox.uuid() };
+  waterExtra += ml;   // sofort sichtbar, nicht erst nach der Antwort vom Pi
+  render();
+  try {
+    const res = await outbox.send({ path: "water-log", body });
+    waterExtra -= ml;
+    // Erfolgreich gespeichert: gleich in die Bilanz einrechnen statt neu vom Server zu laden.
+    // Im Ausgang gelandet (offline): pendingWater() (in waterCard) zaehlt den Eintrag ab jetzt mit.
+    if (!res.queued) data.nutrition.water_ml = Math.max(0, data.nutrition.water_ml + ml);
+    render();
+  } catch (e) {
+    waterExtra -= ml;
+    render();
+    toast(e.message, { error: true });
+  }
 }

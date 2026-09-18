@@ -27,6 +27,8 @@ function nutritionCard() {
   const n = data.nutrition;
   const g = n.goals || {};
   const c = n.computed;
+  const w = n.water;
+  const liters = (ml) => String(Math.round(ml / 50) * 50 / 1000).replace(".", ",");
   return `<div class="card">
     <p class="eyebrow">Ernährungsziel</p>
     ${g.kcal ? `<p><b>${g.kcal} kcal</b> · Eiweiß ${g.protein} g · Kohlenhydrate ${g.carbs} g · Fett ${g.fat} g</p>`
@@ -50,6 +52,12 @@ function nutritionCard() {
         <label class="field">Kohlenh. (g)<input name="carbs_goal" type="number" inputmode="numeric" min="0" max="1500" value="${g.carbs ?? ""}"></label>
         <label class="field">Fett (g)<input name="fat_goal" type="number" inputmode="numeric" min="0" max="500" value="${g.fat ?? ""}"></label>
       </div>
+      <p class="eyebrow">Trinkziel</p>
+      ${w.auto ? `<p class="hint">Berechnet aus Gewicht und Aktivität: ${liters(w.computed)} L pro Tag.</p>` : ""}
+      <div class="toggles"><label class="toggle"><input type="checkbox" name="water_auto" ${w.auto ? "checked" : ""}>
+        <span></span>Trinkziel automatisch berechnen</label></div>
+      <label class="field" data-water-manual ${w.auto ? "hidden" : ""}>Trinkziel (ml)
+        <input name="water_goal_ml" type="number" inputmode="numeric" min="500" max="8000" step="50" value="${w.goal ?? ""}"></label>
       <div class="btn-row"><button type="submit" class="btn">Ziel speichern</button></div>
     </form>
   </div>`;
@@ -116,10 +124,16 @@ function render() {
   nf.nutrition_auto.addEventListener("change", () => {
     nf.querySelectorAll("[data-manual]").forEach((el) => { el.hidden = nf.nutrition_auto.checked; });
   });
+  nf.water_auto.addEventListener("change", () => {
+    nf.querySelectorAll("[data-water-manual]").forEach((el) => { el.hidden = nf.water_auto.checked; });
+  });
   submitOnce(nf, async () => {
     try {
       const body = formData(nf);
       if (body.nutrition_auto) ["kcal_goal", "protein_goal", "carbs_goal", "fat_goal"].forEach((k) => delete body[k]);
+      if (body.water_auto) body.water_goal_ml = null;
+      else if (body.water_goal_ml == null) return formError(nf, new Error("Trinkziel: bitte einen Wert eintragen."));
+      delete body.water_auto;
       await api(`profiles/${getProfile()}`, { method: "PATCH", body });
       toast("Ernährungsziel gespeichert");
       data = null;

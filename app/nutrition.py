@@ -89,7 +89,33 @@ def day(profile_id, day_iso):
     meals = {k: {"label": v, "entries": [e for e in entries if e["meal"] == k],
                  "kcal": round(sum(e["kcal"] or 0 for e in entries if e["meal"] == k))}
              for k, v in MEALS.items()}
-    return {"date": day_iso, "meals": meals, "totals": totals}
+    water = db.one("SELECT COALESCE(SUM(ml), 0) AS ml FROM water_log WHERE profile_id=? AND date=?",
+                   (profile_id, day_iso))["ml"]
+    return {"date": day_iso, "meals": meals, "totals": totals, "water_ml": max(0, water)}
+
+
+# --------------------------------------------------------------- Wasser
+def _water_goal_computed(profile):
+    """Trinkmenge in ml: Faustregel ~33 ml/kg Koerpergewicht (EFSA/ACSM-Bereich 30-35 ml/kg),
+    plus Zuschlag je nach Aktivitaet – Schwitzen durch Training erhoeht den Bedarf spuerbar.
+    Ohne Gewicht ein allgemeiner Richtwert nach Geschlecht (EFSA: ~2,5 l Maenner, ~2,0 l Frauen)."""
+    weight = latest_weight(profile["id"])
+    days = len(db.parse_weekdays(profile.get("train_weekdays"))) or profile.get("days_per_week") or 0
+    level = profile.get("activity_level")
+    if level:
+        bonus = {"niedrig": 0, "mittel": 350, "hoch": 700}.get(level, 350)
+    else:
+        bonus = 700 if days >= 5 else 350 if days >= 3 else 0
+    base = weight * 33 if weight else {"männlich": 2500, "weiblich": 2000}.get(profile.get("sex"), 2200)
+    return int(round((base + bonus) / 50) * 50)
+
+
+def water_goals(profile):
+    """Trinkziel: wie bei den Kalorienzielen berechnet, solange kein eigener Wert gesetzt ist."""
+    computed = _water_goal_computed(profile)
+    manual = profile.get("water_goal_ml")
+    auto = manual is None
+    return {"auto": auto, "goal": manual if manual is not None else computed, "computed": computed}
 
 
 def portion(food, grams):

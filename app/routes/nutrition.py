@@ -13,7 +13,8 @@ router = APIRouter(prefix="/api")
 FIELD_NAMES.update({"grams": "Menge", "meal": "Mahlzeit", "food_id": "Lebensmittel",
                     "protein": "Eiweiß", "carbs": "Kohlenhydrate", "fat": "Fett",
                     "barcode": "Barcode", "brand": "Marke", "serving_g": "Portion",
-                    "activity_level": "Aktivität", "kcal_goal": "Kalorienziel"})
+                    "activity_level": "Aktivität", "kcal_goal": "Kalorienziel", "ml": "Menge",
+                    "water_goal_ml": "Trinkziel"})
 Meal = Literal["fruehstueck", "mittag", "abend", "snack"]
 Nutrient = Field(None, ge=0, le=100, allow_inf_nan=False)
 
@@ -24,14 +25,36 @@ def _profile(profile_id):
 
 @router.get("/nutrition/goals")
 def get_goals(profile_id: int = Depends(current_profile)):
-    return nutrition.goals(_profile(profile_id))
+    profile = _profile(profile_id)
+    out = nutrition.goals(profile)
+    out["water"] = nutrition.water_goals(profile)
+    return out
 
 
 @router.get("/nutrition/day")
 def get_day(profile_id: int = Depends(current_profile), date: Optional[str] = None):
+    profile = _profile(profile_id)
     out = nutrition.day(profile_id, _day(date))
-    out["goals"] = nutrition.goals(_profile(profile_id))
+    out["goals"] = nutrition.goals(profile)
+    out["water_goal"] = nutrition.water_goals(profile)["goal"]
     return out
+
+
+# ---------------------------------------------------------------- Wasser
+class WaterIn(BaseModel):
+    profile_id: int
+    ml: int = Field(..., ge=-2000, le=2000)
+    date: Optional[str] = None
+    client_id: Optional[str] = Field(None, max_length=60)
+
+
+@router.post("/water-log")
+def add_water(body: WaterIn):
+    profile_id = current_profile(body.profile_id)
+    row, created = insert_once("water_log", {
+        "profile_id": profile_id, "date": _day(body.date), "ml": body.ml,
+        "client_id": body.client_id})
+    return {"entry": row, "created": created}
 
 
 # ---------------------------------------------------------- Lebensmittel

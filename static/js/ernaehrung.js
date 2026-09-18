@@ -7,6 +7,7 @@ import { scanBarcode } from "./scanner.js";
 let root;
 let data = null;
 let day = null;   // YYYY-MM-DD, null = heute
+let waterExtra = 0;   // optimistisch, bis der Klick bestaetigt oder in den Ausgang gelegt ist
 
 const MEALS = { fruehstueck: "Frühstück", mittag: "Mittagessen", abend: "Abendessen", snack: "Snacks" };
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -40,6 +41,38 @@ function pendingEntries() {
   return outbox.pending("food-log").filter((e) => (e.date || todayIso()) === data.date);
 }
 
+function pendingWater() {
+  return outbox.pending("water-log").filter((e) => (e.date || todayIso()) === data.date)
+    .reduce((n, e) => n + e.ml, 0);
+}
+
+// ------------------------------------------------------------- Wasser
+const liters = (ml) => (ml / 1000).toLocaleString("de-AT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+function glass(ml, goal) {
+  const pct = goal ? Math.min(1, Math.max(0, ml / goal)) : 0;
+  const top = 12, bottom = 88, h = (bottom - top) * pct;
+  const shape = "M9 10h42l-6.5 78a4 4 0 0 1-4 3.7H19.5a4 4 0 0 1-4-3.7z";
+  return `<svg class="glass-svg" viewBox="0 0 60 100" width="60" height="100" role="img"
+      aria-label="${num(ml)} von ${goal ? num(goal) : "?"} ml Wasser getrunken">
+    <clipPath id="glassClip"><path d="${shape}"/></clipPath>
+    <path d="${shape}" class="glass-outline"/>
+    ${h > 0 ? `<rect x="3" y="${bottom - h}" width="54" height="${h + 12}" class="glass-fill" clip-path="url(#glassClip)"/>` : ""}
+  </svg>`;
+}
+
+function waterCard(ml, goal) {
+  return `<div class="card water-card">
+    <div class="card-title">${icon("water")} Wasser</div>
+    <div class="water-row">
+      <button type="button" class="icon-btn tonal-icon" data-water="-500" aria-label="Halben Liter abziehen">${icon("minus")}</button>
+      ${glass(ml, goal)}
+      <button type="button" class="icon-btn tonal-icon" data-water="500" aria-label="Halben Liter hinzufügen">${icon("plus")}</button>
+    </div>
+    <p class="water-total">${liters(ml)}${goal ? ` von ${liters(goal)}` : ""} L</p>
+  </div>`;
+}
+
 function render() {
   const g = data.goals.goals || {};
   const t = data.totals;
@@ -63,6 +96,7 @@ function render() {
     </div>
     ${!g.kcal ? `<p class="callout">${icon("warn")} Für ein Kalorienziel fehlen noch: ${esc((data.goals.missing || []).join(", "))}.
       <a href="#profil">Im Profil ergänzen</a></p>` : ""}
+    ${waterCard(data.water_ml + pendingWater() + waterExtra, data.water_goal)}
     ${Object.entries(data.meals).map(([key, m]) => {
       const extra = pend.filter((e) => e.meal === key);
       return `<div class="card meal">
@@ -322,5 +356,25 @@ export async function mount(el) {
     if (add) return openAdd(add.dataset.add);
     const entry = ev.target.closest("[data-entry]");
     if (entry) openEntry(Number(entry.dataset.entry));
+    const water = ev.target.closest("[data-water]");
+    if (water) return addWater(Number(water.dataset.water));
   });
+}
+
+async function addWater(ml) {
+  const body = { profile_id: getProfile(), ml, date: data.date, client_id: outbox.uuid() };
+  waterExtra += ml;   // sofort sichtbar, nicht erst nach der Antwort vom Pi
+  render();
+  try {
+    const res = await outbox.send({ path: "water-log", body });
+    waterExtra -= ml;
+    // Erfolgreich gespeichert: gleich in die Bilanz einrechnen statt neu vom Server zu laden.
+    // Im Ausgang gelandet (offline): pendingWater() zaehlt den Eintrag ab jetzt mit.
+    if (!res.queued) data.water_ml = Math.max(0, data.water_ml + ml);
+    render();
+  } catch (e) {
+    waterExtra -= ml;
+    render();
+    toast(e.message, { error: true });
+  }
 }

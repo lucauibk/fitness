@@ -129,6 +129,13 @@ CREATE TABLE IF NOT EXISTS food_log (
     kcal REAL, protein REAL, carbs REAL, fat REAL,   -- fuer diese Menge, eingefroren
     client_id TEXT UNIQUE
 );
+CREATE TABLE IF NOT EXISTS water_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    ml INTEGER NOT NULL,                 -- positiv = getrunken, negativ = Korrektur
+    client_id TEXT UNIQUE
+);
 CREATE TABLE IF NOT EXISTS body_measurements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     profile_id INTEGER NOT NULL,
@@ -141,6 +148,7 @@ CREATE TABLE IF NOT EXISTS body_measurements (
     client_id TEXT UNIQUE
 );
 CREATE INDEX IF NOT EXISTS idx_food_log_day ON food_log(profile_id, date);
+CREATE INDEX IF NOT EXISTS idx_water_log_day ON water_log(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_cardio_day ON cardio(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_body_day ON body_measurements(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_sets_workout ON sets(workout_id);
@@ -164,7 +172,7 @@ MIGRATIONS = {
                  # Ernaehrung: Ziele (nutrition_auto=1 -> berechnet)
                  "activity_level": "TEXT", "kcal_goal": "INTEGER", "protein_goal": "INTEGER",
                  "carbs_goal": "INTEGER", "fat_goal": "INTEGER",
-                 "nutrition_auto": "INTEGER DEFAULT 1"},
+                 "nutrition_auto": "INTEGER DEFAULT 1", "water_goal_ml": "INTEGER"},
     # Empfohlene Satzpause je Uebung
     "split_exercises": {"rest_seconds": "INTEGER"},
     # Bewegungsmuster: danach waehlt der Assistent Uebungen aus
@@ -454,7 +462,7 @@ WRITABLE = {
     "profiles": ("name", "color", "birth_year", "sex", "height_cm", "goal", "experience",
                  "days_per_week", "session_minutes", "limitations", "train_weekdays", "focus",
                  "activity_level", "kcal_goal", "protein_goal", "carbs_goal", "fat_goal",
-                 "nutrition_auto"),
+                 "nutrition_auto", "water_goal_ml"),
     "exercises": ("name", "muscle_group", "unit", "archived", "pattern", "kind",
                   "instructions", "mistakes", "muscles_primary", "muscles_secondary",
                   "equipment", "video_query"),
@@ -467,6 +475,7 @@ WRITABLE = {
               "source", "created_at"),
     "food_log": ("profile_id", "date", "meal", "food_id", "name", "grams", "kcal", "protein",
                  "carbs", "fat", "client_id"),
+    "water_log": ("profile_id", "date", "ml", "client_id"),
     "body_measurements": ("profile_id", "date", "source", "weight_kg", "body_fat_pct",
                           "body_fat_estimated", "muscle_mass_kg", "water_pct", "visceral_fat",
                           "bmr_kcal", "bio_age", "waist_cm", "hip_cm", "chest_cm", "arm_cm",

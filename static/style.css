@@ -717,6 +717,14 @@ button.chip { border: 0; font-family: inherit; }
 .macro-val { color: var(--muted); font-variant-numeric: tabular-nums; }
 .meal { padding-bottom: var(--s2); }
 .tonal-icon { background: var(--accent-soft); color: var(--accent); border-radius: 50%; }
+
+.water-card { display: flex; flex-direction: column; align-items: center; gap: var(--s2); }
+.water-card .card-title { align-self: flex-start; display: flex; align-items: center; gap: 6px; }
+.water-card .card-title .icon { width: 18px; height: 18px; color: var(--accent); }
+.water-row { display: flex; align-items: center; gap: var(--s4); }
+.glass-outline { fill: none; stroke: var(--muted); stroke-width: 2; opacity: .5; }
+.glass-fill { fill: var(--accent); opacity: .85; transition: y .35s ease, height .35s ease; }
+.water-total { font-weight: 650; font-variant-numeric: tabular-nums; }
 [data-calc] { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin: var(--s3) 0; }
 
 .scanner { position: fixed; inset: 0; z-index: 100; background: #000; display: flex; flex-direction: column; }

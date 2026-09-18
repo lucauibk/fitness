@@ -34,8 +34,10 @@ def build(profile_id):
 
     key = mobility.suggest(raw_day, level_key)
     profile = db.get_row("profiles", profile_id)
-    kcal_day = nutrition.day(profile_id, day_iso)["totals"]
+    day_nutrition = nutrition.day(profile_id, day_iso)
+    kcal_day = day_nutrition["totals"]
     goals = nutrition.goals(profile)["goals"]
+    water_goal = nutrition.water_goals(profile)["goal"]
     ach = activity.achievements(profile_id)
     done_mobility = db.one("SELECT 1 AS x FROM mobility_log WHERE profile_id=? AND date=? AND routine=?",
                            (profile_id, day_iso, key))
@@ -50,5 +52,6 @@ def build(profile_id):
                      "done": bool(done_mobility)},
         "streak": {"daily": ach["daily_streak"], "weekly": ach["weekly_streak"],
                    "week": ach["week"], "trained_today": trained_today},
-        "nutrition": {"totals": kcal_day, "goals": goals},
+        "nutrition": {"totals": kcal_day, "goals": goals,
+                     "water_ml": day_nutrition["water_ml"], "water_goal": water_goal},
     }
