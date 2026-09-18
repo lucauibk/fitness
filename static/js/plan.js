@@ -1,7 +1,7 @@
 /** Plan: Splits anlegen und wechseln, Trainingstage und Übungen samt Wiederholungs-Bereich. */
 import { openWizard } from "./wizard.js";
 import { $, api, armDelete, busy, closeSheet, deleteLater, empty, esc, formData, formError, icon,
-  getProfile, isPendingDelete, openSheet, prefs, skeleton, submitOnce, toast, WEEKDAYS,
+  getProfile, isPendingDelete, openSheet, skeleton, submitOnce, toast, WEEKDAYS,
   WEEKDAYS_LONG } from "./util.js";
 
 let root;

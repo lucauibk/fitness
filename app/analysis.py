@@ -4,7 +4,7 @@ anwendbare Vorschlaege – Saetze anpassen, Uebung ergaenzen oder streichen, Spl
 
 Richtwerte kommen aus app/volume.py (Volumen-Landmarken, Schoenfeld 2017).
 """
-from . import db, generator, splits, volume
+from . import db, generator, volume
 
 # Wenn eine Uebung kein Bewegungsmuster hat, grob ueber die Muskelgruppe zuordnen
 GROUP_FALLBACK = {"brust": "brust", "ruecken": "ruecken", "schultern": "schultern",

@@ -1,6 +1,6 @@
 /** Körper: Gewicht, Körperfett, Muskelmasse, Umfänge – manuell oder aus einem
  *  Screenshot der Studio-Körperanalyse (ViCoach), den die KI ausliest. */
-import { $, api, armDelete, busy, closeSheet, deleteLater, esc, formData, formError, getProfile,
+import { $, api, armDelete, closeSheet, deleteLater, esc, formData, formError, getProfile,
   icon, isPendingDelete, openSheet, skeleton, submitOnce, toast } from "./util.js";
 import * as outbox from "./outbox.js";
 import { sparkline } from "./fortschritt.js";

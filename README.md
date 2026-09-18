@@ -35,6 +35,16 @@ cp .env.example .env
 .venv/bin/uvicorn app.main:app --port 8001
 ```
 
+## Tests
+
+```
+.venv/bin/pytest
+```
+
+Reine Rechenlogik ohne eigene Datenbank (Readiness-Score, Volumen-Planung, Serien-Zaehlung,
+Koerperfett-Schaetzung) plus die Sicherheitsgrenze fuer KI-Antworten (`ai.validate_plan`).
+Laeuft gegen eine eigene, temporaere SQLite-Datei – `fitness.db` bleibt unangetastet.
+
 ## Deploy auf den Pi
 
 ```

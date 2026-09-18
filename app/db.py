@@ -423,19 +423,6 @@ def one(sql, params=()):
     return r[0] if r else None
 
 
-def get_setting(key, default=None):
-    r = one("SELECT value FROM settings WHERE key=?", (key,))
-    return r["value"] if r else default
-
-
-def set_setting(key, value):
-    with connect() as c:
-        if value is None:
-            c.execute("DELETE FROM settings WHERE key=?", (key,))
-        else:
-            c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", (key, value))
-
-
 def backup(tag=None):
     """Konsistente Kopie der DB (auch waehrend geschrieben wird). Taegliche Kopien werden
     nach BACKUP_KEEP_DAYS geloescht, getaggte nie."""

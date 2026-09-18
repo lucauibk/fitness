@@ -1,7 +1,7 @@
 /** Laufende Einheit. Alles passiert zuerst im Geraetespeicher – ohne Netz, ohne Warten.
  *  Erst beim Beenden geht die komplette Einheit in einem Stueck an den Pi (bzw. in den
  *  Ausgang, wenn gerade keine Verbindung da ist). */
-import { $, $$, api, armDelete, closeSheet, empty, esc, formData, formError, getProfile,
+import { $, $$, api, armDelete, closeSheet, empty, esc, getProfile,
   icon, openSheet, prefs, setsSummary, skeleton, toast } from "./util.js";
 import * as outbox from "./outbox.js";
 
@@ -504,8 +504,7 @@ function startRest(seconds) {
   if (typeof Notification !== "undefined" && Notification.permission === "default") {
     Notification.requestPermission().catch(() => {});
   }
-  const custom = prefs.get("restSeconds");
-  prefs.set("rest", { until: Date.now() + (custom || seconds) * 1000 });
+  prefs.set("rest", { until: Date.now() + seconds * 1000 });
   clearInterval(restTick);
   restTick = setInterval(tick, 500);
   tick();

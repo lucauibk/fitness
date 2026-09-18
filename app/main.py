@@ -560,12 +560,6 @@ def api_history(exercise_id: int, profile_id: int = Depends(current_profile)):
     return stats.history(profile_id, exercise_id)
 
 
-# ------------------------------------------------------------ Plan-Check
-@app.get("/api/check")
-def api_check(profile_id: int = Depends(current_profile)):
-    return checker.analyze(profile_id)
-
-
 class ApplyIn(BaseModel):
     action: Dict[str, object]
 

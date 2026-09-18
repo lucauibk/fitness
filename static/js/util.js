@@ -65,26 +65,7 @@ export async function api(path, { method = "GET", body, timeout = TIMEOUT_MS } =
 const pad = (n) => String(n).padStart(2, "0");
 export const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 export const hm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-export const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
-export const sameDay = (a, b) => ymd(a) === ymd(b);
 export const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-
-export function startOfWeek(d) {
-  const x = startOfDay(d);
-  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
-  return x;
-}
-
-export function fmtDate(iso, allDay) {
-  if (!iso) return "kein Datum";
-  const d = new Date(iso);
-  const opts = allDay
-    ? { weekday: "short", day: "2-digit", month: "2-digit" }
-    : { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" };
-  return d.toLocaleString("de-AT", opts);
-}
-
-export const fmtTime = (iso) => (iso ? hm(new Date(iso)) : "");
 
 /** "Heute 10:00", "Morgen 23:59", "Mi 16.09.", "Gestern", "Mo 3.11.2027" */
 export function relDate(iso, { time = true } = {}) {
@@ -101,22 +82,6 @@ export function relDate(iso, { time = true } = {}) {
   return `${wd} ${d.getDate()}.${d.getMonth() + 1}.${year}${days > 0 && days < 7 ? t : ""}`;
 }
 
-/** past: Text fuer Vergangenes ohne Erledigt-Status (Klausur, Anmeldeschluss) – dann nicht rot. */
-export function countdown(iso, { past } = {}) {
-  if (!iso) return { text: "", cls: "" };
-  const ms = new Date(iso) - new Date();
-  if (ms < 0 && past) return { text: past, cls: "" };
-  if (ms < 0) {
-    const h = -ms / 3600000;
-    return { text: h < 24 ? "überfällig" : `seit ${Math.round(h / 24)} T. überfällig`, cls: "urgent" };
-  }
-  const h = ms / 3600000;
-  const text = h < 1 ? `in ${Math.max(1, Math.round(ms / 60000))} min`
-    : h < 48 ? `in ${Math.round(h)} h`
-      : `in ${Math.round(h / 24)} Tagen`;
-  return { text, cls: h < 24 ? "urgent" : h < 72 ? "soon" : "" };
-}
-
 export function ago(iso) {
   if (!iso) return "nie";
   const min = Math.round((Date.now() - new Date(iso)) / 60000);
@@ -124,12 +89,6 @@ export function ago(iso) {
   if (min < 60) return `vor ${min} min`;
   if (min < 1440) return `vor ${Math.round(min / 60)} h`;
   return `vor ${Math.round(min / 1440)} T.`;
-}
-
-// Nur http(s) verlinken – ein Feed koennte sonst javascript:-Links einschleusen.
-export function link(url, text) {
-  if (!url || !/^https?:\/\//i.test(url.trim())) return text;
-  return `<a href="${esc(url.trim())}" target="_blank" rel="noopener noreferrer">${text}</a>`;
 }
 
 /** Leerzustand mit optionaler Aktion: action = { label, attrs } */
@@ -432,13 +391,6 @@ export function formData(form) {
     else out[el.name] = el.value.trim() === "" ? null : el.value.trim();
   }
   return out;
-}
-
-/** ISO -> Wert fuer <input type="datetime-local"> in Ortszeit */
-export function toInput(iso) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return `${ymd(d)}T${hm(d)}`;
 }
 
 /** Fehler am Formular anzeigen; nennt die API ein Feld ('due_at'), wird es markiert. */

@@ -54,15 +54,6 @@ def _has(names, keywords):
     return any(k in n for n in names for k in keywords)
 
 
-def analyze(profile_id):
-    split = db.active_split(profile_id)
-    base = {"ai_available": ai.available()}
-    if not split or not split["days"]:
-        return {**base, "split": None, "weekly": [], "findings": [
-            {"level": "info", "text": "Noch kein Split mit Trainingstagen angelegt."}]}
-    return {**base, "split": {"id": split["id"], "name": split["name"]}, **analyze_split(split)}
-
-
 def analyze_split(split):
     """Regeln fuer einen beliebigen Plan – auch fuer die Vorschau im Assistenten, die
     noch nicht gespeichert ist. Erwartet days[].weekdays und
