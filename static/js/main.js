@@ -306,6 +306,23 @@ function warmOfflineCache() {
   paths.forEach((p, i) => setTimeout(() => fetch(`/api/${p}`).catch(() => {}), 300 * i));
 }
 
+// -------------------------------------------------------------- PR-Moment
+// Ein eigener kurzer Moment statt nur ein Toast – Meilensteine kommen selten genug, dass
+// sie mehr verdienen als eine Zeile, die nach drei Sekunden wieder weg ist.
+window.addEventListener("milestones", (ev) => {
+  const box = document.createElement("div");
+  box.className = "celebrate";
+  box.innerHTML = `<div class="celebrate-card">
+    <span class="celebrate-icon">${icon("trophy")}</span>
+    ${ev.detail.map((m) => `<b>${esc(m.title)}</b>`).join("")}
+  </div>`;
+  document.body.appendChild(box);
+  requestAnimationFrame(() => box.classList.add("in"));
+  const remove = () => { box.classList.remove("in"); setTimeout(() => box.remove(), 300); };
+  box.addEventListener("click", remove);
+  setTimeout(remove, 2600);
+});
+
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch((e) => console.warn("Service Worker:", e));
   navigator.serviceWorker.addEventListener("controllerchange", () => setTimeout(warmOfflineCache, 1000));

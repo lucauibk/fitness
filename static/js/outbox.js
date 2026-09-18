@@ -105,11 +105,9 @@ export function pending(path) {
 export const pendingWorkouts = () => pending("workouts")
   .map((w) => ({ ...w, sets: (w.sets || []).map((s) => ({ ...s })) }));
 
-/** Neu erreichte Meilensteine feiern (die API liefert sie beim Speichern mit). */
+/** Neu erreichte Meilensteine feiern (die API liefert sie beim Speichern mit). Die
+ *  eigentliche Feier hoert auf das "milestones"-Event (main.js) – hier nur melden. */
 export function celebrate(data) {
-  for (const m of data?.milestones || []) {
-    toast(`🏅 Erreicht: ${m.title}`, { duration: 5000 });
-  }
   if (data?.milestones?.length) window.dispatchEvent(new CustomEvent("milestones", { detail: data.milestones }));
 }
 

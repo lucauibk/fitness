@@ -65,13 +65,16 @@ const totalCount = (draft) => draft.exercises.reduce((n, e) => n + e.sets.length
 // ------------------------------------------------------------ Anzeige
 function setRow(ex, exIndex, s, i) {
   const unitLabel = ex.unit === "koerper" ? "kg extra" : "kg";
+  // Das letzte Mal direkt an der Zeile statt nur einmal in der Kartenkopfzeile – das ist
+  // der Unterschied zwischen Zahlen eintippen und sich gezielt steigern.
+  const last = ex.last?.[i];
   return `<div class="set-row ${s.done ? "is-done" : ""}" data-ex="${exIndex}" data-set="${i}">
     <span class="set-no">${s.set_no}</span>
-    <label class="set-field"><span>Whd.</span>
+    <label class="set-field"><span>Whd.${last?.reps != null ? ` · zuletzt ${last.reps}` : ""}</span>
       <input type="number" inputmode="numeric" min="0" max="1000" step="1"
              value="${s.reps ?? ""}" data-field="reps" aria-label="Wiederholungen Satz ${s.set_no}">
     </label>
-    <label class="set-field"><span>${unitLabel}</span>
+    <label class="set-field"><span>${unitLabel}${last?.weight != null ? ` · zuletzt ${String(last.weight).replace(".", ",")}` : ""}</span>
       <input type="number" inputmode="decimal" min="0" max="1000" step="0.5"
              value="${s.weight ?? ""}" data-field="weight" aria-label="Gewicht Satz ${s.set_no}">
     </label>
