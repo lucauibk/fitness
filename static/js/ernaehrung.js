@@ -1,6 +1,6 @@
 /** Ernährung: Tagesbilanz, Mahlzeiten, Lebensmittel suchen/scannen/anlegen. */
-import { $, api, armDelete, closeSheet, esc, formData, formError, getProfile, icon, openSheet,
-  skeleton, submitOnce, toast, busy } from "./util.js";
+import { $, api, armDelete, closeSheet, deleteLater, esc, formData, formError, getProfile, icon,
+  isPendingDelete, openSheet, skeleton, submitOnce, toast, busy } from "./util.js";
 import * as outbox from "./outbox.js";
 import { scanBarcode } from "./scanner.js";
 
@@ -99,13 +99,16 @@ function render() {
     ${waterCard(data.water_ml + pendingWater() + waterExtra, data.water_goal)}
     ${Object.entries(data.meals).map(([key, m]) => {
       const extra = pend.filter((e) => e.meal === key);
+      const visible = m.entries.filter((e) => !isPendingDelete(`food-log/${e.id}`));
+      const kcal = m.kcal - m.entries.filter((e) => isPendingDelete(`food-log/${e.id}`))
+        .reduce((n, e) => n + (e.kcal || 0), 0) + extra.reduce((n, e) => n + (e.preview?.kcal || 0), 0);
       return `<div class="card meal">
         <div class="ex-head"><div><div class="card-title">${esc(m.label)}</div>
-          <div class="row-meta"><span>${num(m.kcal + extra.reduce((n, e) => n + (e.preview?.kcal || 0), 0))} kcal</span></div></div>
+          <div class="row-meta"><span>${num(kcal)} kcal</span></div></div>
           <button type="button" class="icon-btn tonal-icon" data-add="${key}" aria-label="${esc(m.label)} hinzufügen">${icon("plus")}</button>
         </div>
-        ${m.entries.length || extra.length ? `<div class="list flush">
-          ${m.entries.map((e) => `<div class="row-item" role="button" tabindex="0" data-entry="${e.id}">
+        ${visible.length || extra.length ? `<div class="list flush">
+          ${visible.map((e) => `<div class="row-item" role="button" tabindex="0" data-entry="${e.id}">
             <div class="row-main"><div class="row-title">${esc(e.name)}</div>
               <div class="row-meta"><span>${num(e.grams)} g</span><span>E ${num(e.protein)} · K ${num(e.carbs)} · F ${num(e.fat)}</span></div></div>
             <span class="row-aside">${num(e.kcal)} kcal</span></div>`).join("")}
@@ -331,13 +334,9 @@ function openEntry(id) {
       window.dispatchEvent(new CustomEvent("data-changed"));
     } catch (err) { formError(form, err); }
   });
-  armDelete($("[data-delete]", sheet), async () => {
+  armDelete($("[data-delete]", sheet), () => {
     closeSheet();
-    try {
-      await api(`food-log/${id}`, { method: "DELETE" });
-      toast("Eintrag gelöscht");
-      window.dispatchEvent(new CustomEvent("data-changed"));
-    } catch (err) { toast(err.message, { error: true }); }
+    deleteLater(`food-log/${id}`, "Eintrag gelöscht", { onDone: () => { data = null; } });
   }, "Löschen", "Eintrag löschen?");
 }
 

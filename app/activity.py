@@ -127,7 +127,7 @@ def metrics(profile_id):
     best_weekly, weekly = _week_runs(days, end)
 
     sets = db.rows("SELECT s.exercise_id, s.reps, s.weight FROM sets s"
-                   " JOIN workouts w ON w.id = s.workout_id WHERE w.profile_id=?"
+                   " JOIN workouts w ON w.id = s.workout_id WHERE w.profile_id=? AND s.warmup=0"
                    " ORDER BY COALESCE(w.started_at, w.finished_at), w.id, s.id", (profile_id,))
     volume = sum((s["weight"] or 0) * (s["reps"] or 0) for s in sets)
     prs, best = 0, {}

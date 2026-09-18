@@ -33,6 +33,7 @@ export function startDraft(day) {
       name: e.name,
       unit: e.unit,
       kind: e.kind,
+      pattern: e.pattern,
       rest: e.rest_seconds || null,
       adjusted: e.adjusted || null,
       reps_min: e.target_reps_min,
@@ -42,6 +43,7 @@ export function startDraft(day) {
         set_no: i + 1,
         reps: e.suggest.reps ?? e.target_reps_min ?? null,
         weight: e.suggest.weight ?? null,
+        rpe: null,
         done: false,
       })),
     })),
@@ -69,7 +71,9 @@ function setRow(ex, exIndex, s, i) {
   // der Unterschied zwischen Zahlen eintippen und sich gezielt steigern.
   const last = ex.last?.[i];
   return `<div class="set-row ${s.done ? "is-done" : ""}" data-ex="${exIndex}" data-set="${i}">
-    <span class="set-no">${s.set_no}</span>
+    <button type="button" class="set-no ${s.warmup ? "is-warmup" : ""}" data-warmup
+            aria-label="Satz ${s.set_no}${s.warmup ? ", Aufwärmsatz – antippen für normalen Satz" : " – antippen für Aufwärmsatz"}"
+            aria-pressed="${Boolean(s.warmup)}">${s.warmup ? "W" : s.set_no}</button>
     <label class="set-field"><span>Whd.${last?.reps != null ? ` · zuletzt ${last.reps}` : ""}</span>
       <input type="number" inputmode="numeric" min="0" max="1000" step="1"
              value="${s.reps ?? ""}" data-field="reps" aria-label="Wiederholungen Satz ${s.set_no}">
@@ -77,6 +81,10 @@ function setRow(ex, exIndex, s, i) {
     <label class="set-field"><span>${unitLabel}${last?.weight != null ? ` · zuletzt ${String(last.weight).replace(".", ",")}` : ""}</span>
       <input type="number" inputmode="decimal" min="0" max="1000" step="0.5"
              value="${s.weight ?? ""}" data-field="weight" aria-label="Gewicht Satz ${s.set_no}">
+    </label>
+    <label class="set-field set-field-rpe"><span>RPE</span>
+      <input type="number" inputmode="decimal" min="0" max="10" step="0.5"
+             value="${s.rpe ?? ""}" data-field="rpe" aria-label="Anstrengung (RPE) Satz ${s.set_no}, 0 bis 10">
     </label>
     <button type="button" class="set-check" data-toggle aria-pressed="${s.done}"
             aria-label="Satz ${s.set_no} ${s.done ? "nicht erledigt" : "erledigt"}">${icon("check")}</button>
@@ -102,10 +110,55 @@ function exerciseCard(ex, index) {
     <div class="btn-row">
       <button type="button" class="btn small ghost" data-add-set="${index}">${icon("plus")} Satz</button>
       ${ex.sets.length > 1 ? `<button type="button" class="btn small ghost" data-drop-set="${index}">Satz weniger</button>` : ""}
+      ${ex.unit === "kg" ? `<button type="button" class="btn small ghost" data-plates="${index}">${icon("weight")} Scheiben</button>` : ""}
+      ${ex.pattern ? `<button type="button" class="btn small ghost" data-swap="${index}">${icon("swap")} Tauschen</button>` : ""}
       <span class="grow"></span>
       <button type="button" class="btn small ghost danger" data-drop-ex="${index}">${icon("trash")} Entfernen</button>
     </div>
   </div>`;
+}
+
+// -------------------------------------------------------- Hantelscheiben
+const PLATES = [25, 20, 15, 10, 5, 2.5, 1.25, 0.5];
+
+function plateBreakdown(target, bar) {
+  let perSide = Math.max(0, (target - bar) / 2);
+  const out = [];
+  for (const p of PLATES) {
+    while (perSide + 1e-6 >= p) { out.push(p); perSide -= p; }
+  }
+  return out;
+}
+
+function openPlates(exIndex) {
+  const draft = getDraft();
+  const ex = draft?.exercises[exIndex];
+  if (!ex) return;
+  const state = { target: ex.sets.find((s) => s.weight)?.weight || 40, bar: prefs.get("barWeight") || 20 };
+  const sheet = openSheet({ title: `${esc(ex.name)} · Scheiben`, body: "" });
+  const body = $(".sheet-body", sheet);
+  const fmt = (n) => String(n).replace(".", ",");
+  body.innerHTML = `<div class="field-row">
+      <label class="field">Zielgewicht (kg)<input type="number" inputmode="decimal" min="0" max="500" step="0.5" data-target value="${state.target}"></label>
+      <label class="field">Stange (kg)<input type="number" inputmode="decimal" min="0" max="50" step="0.5" data-bar value="${state.bar}"></label>
+    </div>
+    <p class="hint">Pro Seite:</p>
+    <div data-result></div>`;
+  // Nur das Ergebnis aktualisieren, nicht die Eingaben neu bauen – sonst springt der
+  // Cursor bei jedem Tastendruck ans Ende (bzw. verliert den Fokus).
+  function paintResult() {
+    const plates = plateBreakdown(state.target, state.bar);
+    $("[data-result]", body).innerHTML = plates.length
+      ? `<p class="big-number">${plates.map(fmt).join(" + ")}</p>`
+      : `<p class="hint">Kein Zusatzgewicht nötig – nur die Stange.</p>`;
+  }
+  $("[data-target]", body).addEventListener("input", (ev) => { state.target = Number(ev.target.value) || 0; paintResult(); });
+  $("[data-bar]", body).addEventListener("input", (ev) => {
+    state.bar = Number(ev.target.value) || 0;
+    prefs.set("barWeight", state.bar);
+    paintResult();
+  });
+  paintResult();
 }
 
 function renderDraft(draft) {
@@ -177,6 +230,10 @@ function renderStart() {
 
 export async function load() {
   const draft = getDraft();
+  // Vollbild nur hier setzen: load() laeuft ausschliesslich, waehrend Training/Einheit
+  // wirklich sichtbar ist (subTabs ruft nur das aktive Unter-Modul). main.js raeumt beim
+  // Verlassen des Tabs auf.
+  document.body.classList.toggle("training-fullscreen", Boolean(draft));
   if (draft) return renderDraft(draft);
   if (!today) root.innerHTML = skeleton(3);
   today = await api("today");
@@ -208,6 +265,38 @@ function update(fn) {
   fn(draft);
   saveDraft(draft);
   renderDraft(draft);
+}
+
+/** Nur einen Satz aendern (Haken, Aufwaermen): Zeile, Kartenkopf und Fortschrittsbalken
+ *  gezielt austauschen statt die ganze Seite neu zu bauen – sonst springt der Fokus aus
+ *  einem gerade bearbeiteten Feld in einer anderen Zeile und die Seite scrollt zurueck. */
+function updateSet(exIndex, setIndex, fn) {
+  const draft = getDraft();
+  if (!draft) return null;
+  const ex = draft.exercises[exIndex];
+  const s = ex.sets[setIndex];
+  fn(s, ex);
+  saveDraft(draft);
+
+  const row = root.querySelector(`.set-row[data-ex="${exIndex}"][data-set="${setIndex}"]`);
+  if (row) row.outerHTML = setRow(ex, exIndex, s, setIndex);
+
+  const card = $$(".exercise-card", root)[exIndex];
+  if (card) {
+    const done = ex.sets.filter((x) => x.done).length;
+    card.classList.toggle("is-done", done === ex.sets.length);
+    const pill = $(".pill", card);
+    pill.textContent = `${done}/${ex.sets.length}`;
+    pill.classList.toggle("ok", done === ex.sets.length);
+  }
+
+  const done = doneCount(draft);
+  const total = totalCount(draft);
+  const sub = $(".page-sub", root);
+  if (sub) sub.innerHTML = `<span data-elapsed>${elapsed(draft)}</span> · ${done}/${total} Sätze`;
+  const bar = root.querySelector(".progress.lg > i");
+  if (bar) bar.style.width = `${total ? (done / total) * 100 : 0}%`;
+  return { draft, ex, s };
 }
 
 /** Eine Zahl im Entwurf aendern, ohne neu zu zeichnen – sonst springt die Tastatur zu. */
@@ -242,8 +331,9 @@ function addExercise() {
       const ex = active.find((e) => e.id === Number(t.dataset.pickEx));
       closeSheet();
       update((d) => d.exercises.push({
-        exercise_id: ex.id, name: ex.name, unit: ex.unit, reps_min: 8, reps_max: 12, last: [],
-        sets: [{ set_no: 1, reps: null, weight: null, done: false }],
+        exercise_id: ex.id, name: ex.name, unit: ex.unit, pattern: ex.pattern, kind: ex.kind,
+        reps_min: 8, reps_max: 12, last: [],
+        sets: [{ set_no: 1, reps: null, weight: null, rpe: null, done: false }],
       }));
     });
   }).catch((e) => toast(e.message, { error: true }));
@@ -251,6 +341,42 @@ function addExercise() {
 
 const exOption = (e) => `<div class="row-item" role="button" tabindex="0" data-pick-ex="${e.id}">
   <div class="row-main"><div class="row-title">${esc(e.name)}</div></div></div>`;
+
+// ------------------------------------------------------------- Tauschen
+/** Geraet besetzt, Muskel schon wund: passende Alternative aus dem Katalog statt die
+ *  Uebung ersatzlos zu streichen. Nur zur Planungszeit gab es das bisher. */
+async function openSwap(exIndex) {
+  const draft = getDraft();
+  const ex = draft?.exercises[exIndex];
+  if (!ex?.pattern) return;
+  const used = draft.exercises.map((e) => e.exercise_id).join(",");
+  let alts;
+  try {
+    alts = await api(`wizard/alternatives?pattern=${ex.pattern}&exclude=${used}`);
+  } catch (e) {
+    return toast(e.offline ? "Alternativen brauchen eine Verbindung." : e.message, { error: true });
+  }
+  if (!alts.length) return toast("Keine passende Alternative im Katalog gefunden.", { error: true });
+  const sheet = openSheet({
+    title: `${esc(ex.name)} tauschen`,
+    body: `<div class="list">${alts.map((a) => `<div class="row-item" role="button" tabindex="0" data-pick-alt="${a.id}">
+      <div class="row-main"><div class="row-title">${esc(a.name)}</div></div>${icon("right", "chev")}</div>`).join("")}</div>`,
+  });
+  sheet.addEventListener("click", (ev) => {
+    const t = ev.target.closest("[data-pick-alt]");
+    if (!t) return;
+    const alt = alts.find((a) => a.id === Number(t.dataset.pickAlt));
+    closeSheet();
+    update((d) => {
+      const e = d.exercises[exIndex];
+      Object.assign(e, { exercise_id: alt.id, name: alt.name, unit: alt.unit,
+        pattern: alt.pattern, kind: alt.kind, last: [], adjusted: null });
+      e.sets = e.sets.map((s, i) => ({ set_no: i + 1, reps: null, weight: null, rpe: null,
+        warmup: s.warmup, done: false }));
+    });
+    toast(`${alt.name} statt vorheriger Übung`);
+  });
+}
 
 // --------------------------------------------------------- Beenden
 async function finish() {
@@ -265,7 +391,8 @@ async function finish() {
     return;
   }
   const sets = draft.exercises.flatMap((ex) => ex.sets.filter((s) => s.done)
-    .map((s) => ({ exercise_id: ex.exercise_id, set_no: s.set_no, reps: s.reps, weight: s.weight })));
+    .map((s) => ({ exercise_id: ex.exercise_id, set_no: s.set_no, reps: s.reps, weight: s.weight,
+      rpe: s.rpe, warmup: Boolean(s.warmup) })));
   if (!sets.length) {
     toast("Noch kein Satz abgehakt.", { error: true });
     return;
@@ -412,6 +539,13 @@ export async function mount(el) {
     const goto = t("[data-goto]");
     if (goto) { location.hash = goto.dataset.goto; return; }
 
+    const warmup = t("[data-warmup]");
+    if (warmup) {
+      const row = warmup.closest(".set-row");
+      const [i, j] = [Number(row.dataset.ex), Number(row.dataset.set)];
+      updateSet(i, j, (s) => { s.warmup = !s.warmup; });
+      return;
+    }
     const toggle = t("[data-toggle]");
     if (toggle) {
       const row = toggle.closest(".set-row");
@@ -423,17 +557,11 @@ export async function mount(el) {
         row.querySelector('[data-field="reps"]').focus();
         return;
       }
-      let nowDone = false;
-      let kind = null;
-      let rest = null;
-      update((d) => {
-        const s = d.exercises[i].sets[j];
-        s.done = !s.done;
-        nowDone = s.done;
-        kind = d.exercises[i].kind;
-        rest = d.exercises[i].rest;   // empfohlene Pause aus dem Plan
-      });
-      if (nowDone) startRest(rest || (kind === "compound" ? REST.compound : REST.isolation));
+      const res = updateSet(i, j, (s) => { s.done = !s.done; });
+      if (res?.s.done) {
+        const rest = res.ex.rest || (res.ex.kind === "compound" ? REST.compound : REST.isolation);
+        startRest(rest);
+      }
       return;
     }
     const add = t("[data-add-set]");
@@ -442,7 +570,7 @@ export async function mount(el) {
         const ex = d.exercises[Number(add.dataset.addSet)];
         const last = ex.sets[ex.sets.length - 1];
         ex.sets.push({ set_no: ex.sets.length + 1, reps: last?.reps ?? null,
-          weight: last?.weight ?? null, done: false });
+          weight: last?.weight ?? null, rpe: null, done: false });
       });
     }
     const drop = t("[data-drop-set]");
@@ -456,6 +584,10 @@ export async function mount(el) {
     // renderDraft() registriert, nicht hier im delegierten Handler.
     if (t("[data-add-ex]")) return addExercise();
     if (t("[data-finish]")) { stopRest(); return finish(); }
+    const plates = t("[data-plates]");
+    if (plates) return openPlates(Number(plates.dataset.plates));
+    const swap = t("[data-swap]");
+    if (swap) return openSwap(Number(swap.dataset.swap));
   });
 
   // Zahlen und Notiz direkt in den Entwurf schreiben – bei jedem Tastendruck, damit

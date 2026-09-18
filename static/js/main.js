@@ -53,6 +53,9 @@ async function show() {
   const switched = tab !== current;
   current = tab;
   closeSheet(false);
+  // Basiszustand: nur training.js (ueber load()) setzt die Klasse wieder, und das
+  // ausschliesslich waehrend Training/Einheit tatsaechlich sichtbar ist.
+  if (!(tab === "training" && sub === "einheit")) document.body.classList.remove("training-fullscreen");
 
   $$(".view").forEach((el) => { el.hidden = el.id !== `view-${tab}`; });
   $$("#nav a[data-tab]").forEach((a) => a.setAttribute("aria-current", a.dataset.tab === tab ? "page" : "false"));

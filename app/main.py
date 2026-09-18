@@ -225,6 +225,7 @@ class SetIn(BaseModel):
     reps: Optional[int] = Field(None, ge=0, le=1000)
     weight: Optional[float] = Field(None, ge=0, le=1000, allow_inf_nan=False)
     rpe: Optional[float] = Field(None, ge=0, le=10, allow_inf_nan=False)
+    warmup: Optional[bool] = False
 
 
 class WorkoutIn(BaseModel):
@@ -491,6 +492,35 @@ def api_add_workout(body: WorkoutIn):
     workout, created = db.save_workout(payload)
     return {"workout": workout, "created": created,
             "milestones": activity.new_milestones(before, body.profile_id) if created else []}
+
+
+class SetPatch(BaseModel):
+    id: int
+    reps: Optional[int] = Field(None, ge=0, le=1000)
+    weight: Optional[float] = Field(None, ge=0, le=1000, allow_inf_nan=False)
+
+
+class WorkoutPatch(BaseModel):
+    notes: Optional[str] = Field(None, max_length=500)
+    sets: Optional[List[SetPatch]] = None
+
+
+@app.patch("/api/workouts/{workout_id}")
+def api_patch_workout(workout_id: int, body: WorkoutPatch, profile_id: int = Depends(current_profile)):
+    """Eine vergessene oder falsch getippte Einheit korrigieren, statt sie loeschen und
+    neu anlegen zu muessen. Aendert nur Werte bestehender Saetze, keine Struktur."""
+    w = _found(db.get_row("workouts", workout_id))
+    if w["profile_id"] != profile_id:
+        raise HTTPException(403, "Diese Einheit gehört zu einem anderen Profil.")
+    with db.connect() as c:
+        if body.notes is not None:
+            c.execute("UPDATE workouts SET notes=? WHERE id=?", (body.notes, workout_id))
+        for s in body.sets or []:
+            row = c.execute("SELECT workout_id FROM sets WHERE id=?", (s.id,)).fetchone()
+            if not row or row[0] != workout_id:
+                raise HTTPException(400, "Dieser Satz gehört nicht zu dieser Einheit.")
+            c.execute("UPDATE sets SET reps=?, weight=? WHERE id=?", (s.reps, s.weight, s.id))
+    return db.get_workout(workout_id)
 
 
 @app.delete("/api/workouts/{workout_id}")

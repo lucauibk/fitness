@@ -52,11 +52,12 @@ def _local_date(iso):
 
 
 def _sets(profile_id, since=None):
+    # Aufwaermsaetze zaehlen nicht in Volumen, Bestleistungen oder Progression.
     sql = ("SELECT s.*, e.name AS exercise, e.muscle_group, e.unit,"
            " COALESCE(w.started_at, w.finished_at) AS at, w.id AS wid"
            " FROM sets s JOIN workouts w ON w.id = s.workout_id"
            " JOIN exercises e ON e.id = s.exercise_id"
-           " WHERE w.profile_id=?")
+           " WHERE w.profile_id=? AND s.warmup=0")
     params = [profile_id]
     if since:
         sql += " AND COALESCE(w.started_at, w.finished_at) >= ?"
@@ -183,12 +184,13 @@ def last_sets(profile_id, exercise_id):
     """Die Sätze der letzten Einheit, in der diese Übung vorkam."""
     last = db.one(
         "SELECT w.id FROM workouts w JOIN sets s ON s.workout_id = w.id"
-        " WHERE w.profile_id=? AND s.exercise_id=?"
+        " WHERE w.profile_id=? AND s.exercise_id=? AND s.warmup=0"
         " ORDER BY COALESCE(w.started_at, w.finished_at) DESC, w.id DESC LIMIT 1",
         (profile_id, exercise_id))
     if not last:
         return []
-    return db.rows("SELECT set_no, reps, weight FROM sets WHERE workout_id=? AND exercise_id=?"
+    return db.rows("SELECT set_no, reps, weight, rpe FROM sets"
+                   " WHERE workout_id=? AND exercise_id=? AND warmup=0"
                    " ORDER BY set_no, id", (last["id"], exercise_id))
 
 
@@ -209,6 +211,15 @@ def suggest(profile_id, exercise, target_sets=None, reps_min=None, reps_max=None
     at_top = (all((p["reps"] or 0) >= hi for p in previous)
               and done_sets >= (target_sets or 1))
     if at_top:
+        # RPE als Autoregulation: Wiederholungsziel erreicht, aber nahe am Muskelversagen
+        # (⌀ RPE ≥ 9,5) heisst noch keine echte Reserve – dann lieber halten statt steigern.
+        rpes = [p["rpe"] for p in previous if p.get("rpe") is not None]
+        avg_rpe = sum(rpes) / len(rpes) if rpes else None
+        if avg_rpe is not None and avg_rpe >= 9.5:
+            return {"reps": hi, "weight": top, "raise_weight": False,
+                    "reason": f"{hi} Wiederholungen erreicht, aber nah am Muskelversagen (⌀ RPE {avg_rpe:g}) "
+                              "– noch einmal bei gleichem Gewicht, dann steigern",
+                    "last": previous, "range": [lo, hi]}
         step = INCREMENT.get(exercise.get("muscle_group"), 2.5)
         if top:
             return {"reps": lo, "weight": round(top + step, 2), "raise_weight": True,

@@ -70,7 +70,8 @@ CREATE TABLE IF NOT EXISTS sets (
     set_no INTEGER DEFAULT 1,
     reps INTEGER,
     weight REAL,
-    rpe REAL
+    rpe REAL,
+    warmup INTEGER DEFAULT 0     -- zaehlt nicht in Volumen, Bestleistungen und Progression
 );
 CREATE TABLE IF NOT EXISTS bodyweight (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,6 +176,8 @@ MIGRATIONS = {
                  "nutrition_auto": "INTEGER DEFAULT 1", "water_goal_ml": "INTEGER"},
     # Empfohlene Satzpause je Uebung
     "split_exercises": {"rest_seconds": "INTEGER"},
+    # Aufwaermsatz: zaehlt nicht in Volumen, Bestleistungen und Progression
+    "sets": {"warmup": "INTEGER DEFAULT 0"},
     # Bewegungsmuster: danach waehlt der Assistent Uebungen aus
     "exercises": {"pattern": "TEXT", "kind": "TEXT",
                   # Uebungsbibliothek
@@ -559,10 +562,10 @@ def save_workout(payload):
              payload.get("notes"), client_id))
         workout_id = cur.lastrowid
         for s in payload.get("sets", []):
-            c.execute("INSERT INTO sets (workout_id, exercise_id, set_no, reps, weight, rpe)"
-                      " VALUES (?,?,?,?,?,?)",
+            c.execute("INSERT INTO sets (workout_id, exercise_id, set_no, reps, weight, rpe, warmup)"
+                      " VALUES (?,?,?,?,?,?,?)",
                       (workout_id, s["exercise_id"], s.get("set_no") or 1,
-                       s.get("reps"), s.get("weight"), s.get("rpe")))
+                       s.get("reps"), s.get("weight"), s.get("rpe"), int(bool(s.get("warmup")))))
     return get_workout(workout_id), True
 
 

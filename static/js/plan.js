@@ -10,6 +10,7 @@ let detail = null;      // der gerade geöffnete Split
 let openSplitId = null;
 let sortingDay = null;   // Pfeile nur in dem Tag zeigen, den man gerade sortiert
 let exercises = null;
+let confirmActivate = null;   // { id, timer } – zweiter Tipp auf "Wechseln" bestaetigt
 const PATTERNS = {
   h_push: "Drücken nach vorn (Bankdrücken …)", v_push: "Drücken über Kopf",
   chest_iso: "Brust isoliert (Butterfly …)", h_pull: "Rudern", v_pull: "Ziehen von oben (Latzug …)",
@@ -510,11 +511,33 @@ export async function mount(el) {
     const act = t("[data-activate]");
     if (act) {
       ev.stopPropagation();
+      const id = act.dataset.activate;
+      // Zweiter Tipp bestaetigt – ein einzelner Tipp wechselt sonst den Plan ohne
+      // Rueckfrage, inkonsistent zu jeder anderen folgenreichen Aktion in der App.
+      if (confirmActivate?.id !== id) {
+        clearTimeout(confirmActivate?.timer);
+        const prevBtn = confirmActivate && $(`[data-activate="${confirmActivate.id}"]`, root);
+        if (prevBtn) prevBtn.textContent = "Wechseln";
+        act.textContent = "Wirklich wechseln?";
+        confirmActivate = { id, timer: setTimeout(() => {
+          if (confirmActivate?.id === id) { act.textContent = "Wechseln"; confirmActivate = null; }
+        }, 3000) };
+        return;
+      }
+      clearTimeout(confirmActivate.timer);
+      confirmActivate = null;
+      const previous = splits?.find((s) => s.active)?.id;
       try {
-        await api(`splits/${act.dataset.activate}/activate`, { method: "POST" });
-        toast("Split gewechselt");
+        await api(`splits/${id}/activate`, { method: "POST" });
         splits = null;
         changed();
+        toast("Split gewechselt", previous ? {
+          action: "Rückgängig",
+          onAction: async () => {
+            try { await api(`splits/${previous}/activate`, { method: "POST" }); splits = null; changed(); }
+            catch (e) { toast(e.message, { error: true }); }
+          },
+        } : undefined);
       } catch (e) { toast(e.message, { error: true }); }
       return;
     }

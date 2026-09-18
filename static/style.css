@@ -500,13 +500,19 @@ input:not([type=checkbox]):not([type=radio]):focus, select:focus, textarea:focus
 .set-no {
   width: 26px; flex: none; padding-bottom: 12px; color: var(--faint);
   font-size: var(--fs-sm); font-weight: 650; font-variant-numeric: tabular-nums; text-align: center;
+  background: none; border: 0; cursor: pointer; border-radius: var(--r1);
 }
+.set-no.is-warmup { color: var(--accent); }
 .set-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .set-field > span { color: var(--muted); font-size: var(--fs-xs); font-weight: 600; }
 .set-field input {
   width: 100%; min-height: var(--tap); padding: 0 10px; font-size: var(--fs-md);
   font-variant-numeric: tabular-nums; text-align: center;
 }
+/* Anstrengung ist optional und seltener als Whd./Gewicht – schmaler, damit die
+   Haupt-Eingaben den Platz behalten. */
+.set-field-rpe { flex: 0 0 56px; }
+.set-field-rpe input { padding: 0 4px; }
 .set-check {
   width: var(--tap); height: var(--tap); flex: none; display: grid; place-items: center;
   border: 1.5px solid var(--line-strong); border-radius: var(--r2);
@@ -772,6 +778,14 @@ button.chip { border: 0; font-family: inherit; }
 .freq .hot, .freq .hot b { color: var(--accent); }
 .basis summary { cursor: pointer; list-style: none; }
 .basis summary::-webkit-details-marker { display: none; }
+
+/* Vollbildmodus waehrend der Einheit: Topbar und Nav brauchen die 45 Minuten nicht,
+   renderDraft() hat schon eine kompakte eigene Kopfzeile. */
+body.training-fullscreen .topbar,
+body.training-fullscreen #nav { display: none; }
+body.training-fullscreen .content { padding-bottom: var(--s4); }
+body.training-fullscreen .sticky-actions { bottom: calc(env(safe-area-inset-bottom) + var(--s2)); }
+body.training-fullscreen .rest-bar { bottom: calc(env(safe-area-inset-bottom) + var(--s2)); }
 
 /* PR-Moment */
 .celebrate {

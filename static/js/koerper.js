@@ -1,7 +1,7 @@
 /** Körper: Gewicht, Körperfett, Muskelmasse, Umfänge – manuell oder aus einem
  *  Screenshot der Studio-Körperanalyse (ViCoach), den die KI ausliest. */
-import { $, api, armDelete, busy, closeSheet, esc, formData, formError, getProfile, icon,
-  openSheet, skeleton, submitOnce, toast } from "./util.js";
+import { $, api, armDelete, busy, closeSheet, deleteLater, esc, formData, formError, getProfile,
+  icon, isPendingDelete, openSheet, skeleton, submitOnce, toast } from "./util.js";
 import * as outbox from "./outbox.js";
 import { sparkline } from "./fortschritt.js";
 
@@ -48,9 +48,9 @@ function render() {
       <div class="row-item"><div class="row-main"><div class="row-title">${esc(data.labels[k])}</div>
         <div class="row-meta"><span>${dm(data.latest[k].date)}</span></div></div>
         <span class="row-aside"><b>${fmt(data.latest[k].value, k)}</b></span></div>`).join("")}</div>` : ""}
-    ${data.entries.length ? `<details class="group-details"><summary class="group-title">Alle Messungen
-        <span class="count-muted">${data.entries.length}</span>${icon("down", "chev")}</summary>
-      <div class="list">${data.entries.map((e) => `<div class="row-item" role="button" tabindex="0" data-entry="${e.id}">
+    ${data.entries.filter((e) => !isPendingDelete(`measurements/${e.id}`)).length ? `<details class="group-details"><summary class="group-title">Alle Messungen
+        <span class="count-muted">${data.entries.filter((e) => !isPendingDelete(`measurements/${e.id}`)).length}</span>${icon("down", "chev")}</summary>
+      <div class="list">${data.entries.filter((e) => !isPendingDelete(`measurements/${e.id}`)).map((e) => `<div class="row-item" role="button" tabindex="0" data-entry="${e.id}">
         <div class="row-main"><div class="row-title">${dm(e.date)}${e.source === "vicoach" ? " · ViCoach" : ""}</div>
           <div class="row-meta">${[...MAIN, ...GIRTHS].filter((k) => e[k] != null).slice(0, 4)
             .map((k) => `<span>${esc(data.labels[k])} ${fmt(e[k], k)}</span>`).join("")}</div></div>
@@ -171,13 +171,9 @@ function openEntry(id) {
     footer: `<button type="button" class="btn danger ghost" data-delete>${icon("trash")} Löschen</button>
       <span class="grow"></span><button type="button" class="btn ghost" data-close>Schließen</button>`,
   });
-  armDelete($("[data-delete]", sheet), async () => {
+  armDelete($("[data-delete]", sheet), () => {
     closeSheet();
-    try {
-      await api(`measurements/${id}`, { method: "DELETE" });
-      toast("Messung gelöscht");
-      window.dispatchEvent(new CustomEvent("data-changed"));
-    } catch (err) { toast(err.message, { error: true }); }
+    deleteLater(`measurements/${id}`, "Messung gelöscht", { onDone: () => { data = null; } });
   }, "Löschen", "Messung löschen? (Der Eintrag im Gewichtsverlauf bleibt.)");
 }
 

@@ -1,6 +1,6 @@
 /** Verlauf: Krafteinheiten und Cardio gemischt nach Datum. */
-import { $, api, armDelete, closeSheet, empty, esc, icon, openSheet, setsSummary, skeleton,
-  toast } from "./util.js";
+import { $, $$, api, armDelete, closeSheet, deleteLater, empty, esc, icon, isPendingDelete,
+  openSheet, setsSummary, skeleton, toast } from "./util.js";
 import * as outbox from "./outbox.js";
 
 let root;
@@ -45,8 +45,10 @@ function render() {
   const items = [
     ...outbox.pendingWorkouts().map((w) => ({ at: w.started_at || w.finished_at, html: workoutRow(w) })),
     ...outbox.pending("cardio").map((c) => ({ at: c.date || new Date().toISOString(), html: cardioRow(c) })),
-    ...(workouts || []).map((w) => ({ at: w.started_at || w.finished_at, html: workoutRow(w) })),
-    ...(cardio || []).map((c) => ({ at: c.date, html: cardioRow(c) })),
+    ...(workouts || []).filter((w) => !isPendingDelete(`workouts/${w.id}`))
+      .map((w) => ({ at: w.started_at || w.finished_at, html: workoutRow(w) })),
+    ...(cardio || []).filter((c) => !isPendingDelete(`cardio/${c.id}`))
+      .map((c) => ({ at: c.date, html: cardioRow(c) })),
   ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
   root.innerHTML = items.length
     ? `<div class="list">${items.map((i) => i.html).join("")}</div>`
@@ -60,33 +62,78 @@ export async function load() {
 }
 
 function openWorkout(id) {
-  const w = (workouts || []).find((x) => x.id === id);
+  let w = (workouts || []).find((x) => x.id === id);
   if (!w) return;
-  const byExercise = {};
-  for (const s of w.sets) (byExercise[s.exercise] ||= []).push(s);
-  const sheet = openSheet({
-    title: esc(w.day_label || w.title || "Einheit"),
-    body: `<p class="hint">${new Date(w.started_at || w.finished_at).toLocaleString("de-AT",
+  const sheet = openSheet({ title: esc(w.day_label || w.title || "Einheit"), body: "",
+    footer: `<button type="button" class="btn danger ghost" data-delete>${icon("trash")} Löschen</button>
+      <span class="grow"></span>
+      <button type="button" class="btn ghost" data-edit-toggle>Bearbeiten</button>
+      <button type="button" class="btn ghost" data-close>Schließen</button>` });
+  const body = $(".sheet-body", sheet);
+
+  function paintView() {
+    const byExercise = {};
+    for (const s of w.sets) (byExercise[s.exercise] ||= []).push(s);
+    body.innerHTML = `<p class="hint">${new Date(w.started_at || w.finished_at).toLocaleString("de-AT",
       { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}</p>
       <div class="list">${Object.entries(byExercise).map(([name, sets]) => `
         <div class="row-item"><div class="row-main">
           <div class="row-title">${esc(name)}</div>
           <div class="row-meta"><span>${esc(setsSummary(sets, sets[0].unit))}</span></div>
         </div></div>`).join("")}</div>
-      ${w.notes ? `<p class="hint pad">${esc(w.notes)}</p>` : ""}`,
-    footer: `<button type="button" class="btn danger ghost" data-delete>${icon("trash")} Löschen</button>
-      <span class="grow"></span>
-      <button type="button" class="btn ghost" data-close>Schließen</button>`,
+      ${w.notes ? `<p class="hint pad">${esc(w.notes)}</p>` : ""}`;
+  }
+
+  /** Vergessene oder falsch getippte Werte korrigieren, statt die ganze Einheit loeschen
+   *  und neu anlegen zu muessen – Uebungen/Reihenfolge bleiben dabei fix. */
+  function paintEdit() {
+    body.innerHTML = `<p class="hint">Werte anpassen und speichern.</p>
+      <form id="editForm" class="form">
+        ${w.sets.map((s) => `<div class="field-row" data-set-id="${s.id}">
+          <label class="field">${esc(s.exercise)} · Satz ${s.set_no}<input type="number" inputmode="numeric"
+            min="0" max="1000" step="1" value="${s.reps ?? ""}" data-edit-reps placeholder="Whd."></label>
+          <label class="field">${s.unit === "koerper" ? "kg extra" : "kg"}<input type="number" inputmode="decimal"
+            min="0" max="1000" step="0.5" value="${s.weight ?? ""}" data-edit-weight></label>
+        </div>`).join("")}
+        <div class="btn-row"><button type="submit" class="btn primary">Speichern</button></div>
+      </form>`;
+    $("#editForm", body).addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const sets = $$("[data-set-id]", body).map((row) => ({
+        id: Number(row.dataset.setId),
+        reps: row.querySelector("[data-edit-reps]").value === "" ? null : Number(row.querySelector("[data-edit-reps]").value),
+        weight: row.querySelector("[data-edit-weight]").value === "" ? null : Number(row.querySelector("[data-edit-weight]").value),
+      }));
+      try {
+        w = await api(`workouts/${id}`, { method: "PATCH", body: { sets } });
+        const idx = workouts.findIndex((x) => x.id === id);
+        if (idx >= 0) workouts[idx] = w;
+        toast("Einheit gespeichert");
+        $("[data-edit-toggle]", sheet).textContent = "Bearbeiten";
+        paintView();
+      } catch (e) { toast(e.message, { error: true }); }
+    });
+  }
+
+  paintView();
+  sheet.addEventListener("click", (ev) => {
+    const toggle = ev.target.closest("[data-edit-toggle]");
+    if (!toggle) return;
+    const editing = toggle.textContent !== "Bearbeiten";
+    toggle.textContent = editing ? "Bearbeiten" : "Abbrechen";
+    editing ? paintView() : paintEdit();
   });
-  armDelete($("[data-delete]", sheet), () => remove(`workouts/${id}`, "Einheit gelöscht"),
-    "Löschen", "Einheit wirklich löschen?");
+  armDelete($("[data-delete]", sheet), () => {
+    closeSheet();
+    deleteLater(`workouts/${id}`, "Einheit gelöscht", { onDone: () => { workouts = null; } });
+  }, "Löschen", "Einheit wirklich löschen?");
 }
 
 function openCardio(id) {
   const c = (cardio || []).find((x) => x.id === id);
   if (!c) return;
   const sheet = openSheet({
-    title: c.label,
+    title: esc(c.label || c.activity || "Cardio"),
     body: `<p class="hint">${dateLabel(c.date)}</p>
       <div class="kpis compact">
         <div><span class="big-number">${Math.round(c.minutes)}</span><span>Minuten</span></div>
@@ -97,17 +144,10 @@ function openCardio(id) {
     footer: `<button type="button" class="btn danger ghost" data-delete>${icon("trash")} Löschen</button>
       <span class="grow"></span><button type="button" class="btn ghost" data-close>Schließen</button>`,
   });
-  armDelete($("[data-delete]", sheet), () => remove(`cardio/${id}`, "Cardio-Einheit gelöscht"),
-    "Löschen", "Wirklich löschen?");
-}
-
-async function remove(path, message) {
-  closeSheet();
-  try {
-    await api(path, { method: "DELETE" });
-    toast(message);
-    window.dispatchEvent(new CustomEvent("data-changed"));
-  } catch (e) { toast(e.message, { error: true }); }
+  armDelete($("[data-delete]", sheet), () => {
+    closeSheet();
+    deleteLater(`cardio/${id}`, "Cardio-Einheit gelöscht", { onDone: () => { cardio = null; } });
+  }, "Löschen", "Wirklich löschen?");
 }
 
 export async function mount(el) {
