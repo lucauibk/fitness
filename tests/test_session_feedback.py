@@ -206,3 +206,20 @@ def test_sofort_eingetippte_einheit_meldet_keine_null_minuten(profile_id):
     texte = _texts(session_feedback.evaluate(profile_id, w))
     assert "keine ganze Minute" in texte
     assert "nur 0" not in texte
+
+
+def test_nachgesendete_einheit_vergleicht_nach_datum_nicht_nach_reihenfolge(profile_id):
+    """Der Ausgang sendet nach: eine Montags-Einheit kann erst Mittwoch im Server landen,
+    also *nach* der Dienstags-Einheit. Verglichen werden muss trotzdem nach Datum -
+    sonst misst sich die nachgereichte Einheit an einer, die spaeter stattfand."""
+    ex = _exercise("Nackendruecken")
+    day = _day(profile_id, [(ex, 3, 8, 12)])
+    _workout(profile_id, _sets(ex, 3, weight=50), day, start=START - timedelta(days=2))
+    # Dienstag - kommt zuerst an
+    _workout(profile_id, _sets(ex, 3, weight=70), day, start=START)
+    # Montag - wird nachgesendet, hat also die hoehere id bei frueherem Datum
+    montag = _workout(profile_id, _sets(ex, 3, weight=60), day, start=START - timedelta(days=1))
+
+    res = session_feedback.evaluate(profile_id, montag)
+    # Gegen Sonntag (50 kg) ist 60 kg ein Fortschritt; gegen Dienstag (70 kg) waere es keiner.
+    assert "kein Fortschritt" not in _texts(res), _texts(res)
