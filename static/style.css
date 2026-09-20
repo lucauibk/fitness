@@ -672,10 +672,12 @@ button.chip { border: 0; font-family: inherit; }
   background: var(--surface); color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
 .dot-btn.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .scale-word { grid-column: 2; font-size: var(--fs-xs); color: var(--muted); }
-.sore-scale { margin: var(--s1) 0; }
-.sore-scale .dot-btn.lvl-1.on { background: color-mix(in srgb, var(--soon) 55%, var(--surface-2)); border-color: transparent; color: var(--text); }
-.sore-scale .dot-btn.lvl-2.on { background: color-mix(in srgb, var(--soon) 80%, var(--surface-2)); border-color: transparent; color: var(--text); }
-.sore-scale .dot-btn.lvl-3.on { background: var(--urgent); border-color: var(--urgent); color: #fff; }
+.chips.sore { margin: var(--s2) 0 var(--s1); }
+.chips.sore .chip { min-height: var(--tap); flex-direction: column; justify-content: center; gap: 0; line-height: 1.15; padding: 4px 12px; }
+.chips.sore small { font-size: 11px; opacity: .8; }
+.chip.sore-1 { background: color-mix(in srgb, var(--soon) 14%, var(--surface-2)); color: var(--text); }
+.chip.sore-2 { background: color-mix(in srgb, var(--soon) 32%, var(--surface-2)); color: var(--text); }
+.chip.sore-3 { background: color-mix(in srgb, var(--urgent) 30%, var(--surface-2)); color: var(--text); }
 
 .readiness { display: flex; gap: var(--s4); align-items: center; }
 .readiness-ring {

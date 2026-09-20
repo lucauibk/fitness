@@ -35,16 +35,9 @@ function checkinForm(c) {
         </div>
         <span class="scale-word" data-word>${words[v[k] - 1]}</span>
       </div>`).join("")}
-    <p class="scale-label">Muskelkater</p>
-    ${Object.entries(GROUPS).map(([g, l]) => `
-      <div class="scale sore-scale" data-sore-group="${g}">
-        <span class="scale-label">${l}</span>
-        <div class="scale-dots" role="radiogroup" aria-label="Muskelkater ${l}">
-          ${SORE.map((w, lvl) => `<button type="button" role="radio" class="dot-btn lvl-${lvl} ${(sore[g] || 0) === lvl ? "on" : ""}"
-            data-sore="${g}" data-value="${lvl}" aria-checked="${(sore[g] || 0) === lvl}" aria-label="${l}: ${w}">${lvl}</button>`).join("")}
-        </div>
-        <span class="scale-word" data-word>${SORE[sore[g] || 0]}</span>
-      </div>`).join("")}
+    <p class="scale-label">Muskelkater <span class="hint">– antippen zum Steigern</span></p>
+    <div class="chips sore">${Object.entries(GROUPS).map(([g, l]) => `<button type="button"
+      class="chip sore-${sore[g] || 0}" data-sore="${g}" data-level="${sore[g] || 0}">${l}<small>${SORE[sore[g] || 0]}</small></button>`).join("")}</div>
     <div class="btn-row"><button type="button" class="btn primary" data-save-checkin>${icon("check")} Check-in speichern</button>
       ${c ? `<button type="button" class="btn ghost" data-cancel-checkin>Abbrechen</button>` : ""}</div>
   </div>`;
@@ -225,9 +218,9 @@ async function saveCheckin(btn) {
   const form = root.querySelector("[data-checkin-form]");
   const value = (k) => Number(form.querySelector(`[data-scale="${k}"] .on`)?.dataset.value || 3);
   const soreness = {};
-  form.querySelectorAll("[data-sore-group]").forEach((group) => {
-    const lvl = Number(group.querySelector(".on")?.dataset.value || 0);
-    if (lvl) soreness[group.dataset.soreGroup] = lvl;
+  form.querySelectorAll("[data-sore]").forEach((b) => {
+    const lvl = Number(b.dataset.level);
+    if (lvl) soreness[b.dataset.sore] = lvl;
   });
   const body = { profile_id: getProfile(), sleep: value("sleep"), energy: value("energy"),
     stress: value("stress"), soreness, client_id: outbox.uuid() };
@@ -308,20 +301,6 @@ export async function mount(el) {
   root = el;
   el.addEventListener("click", (ev) => {
     const t = (s) => ev.target.closest(s);
-    // Zwei radiogroups teilen sich .dot-btn (Schlaf/Energie/Stress vs. Muskelkater je
-    // Gruppe) – data-sore zuerst pruefen, sonst greift der generische Zweig daneben.
-    const sore = t("[data-sore]");
-    if (sore) {
-      const group = sore.closest("[data-sore-group]");
-      group.querySelectorAll("[data-sore]").forEach((b) => {
-        const on = b === sore;
-        b.classList.toggle("on", on);
-        b.setAttribute("aria-checked", on);
-      });
-      $("[data-word]", group).textContent = SORE[Number(sore.dataset.value)];
-      group.closest("[data-checkin-form]").classList.add("touched");
-      return;
-    }
     const dot = t(".dot-btn");
     if (dot) {
       const scale = dot.closest("[data-scale]");
@@ -332,6 +311,15 @@ export async function mount(el) {
       });
       $("[data-word]", scale).textContent = SCALES[scale.dataset.scale][1][Number(dot.dataset.value) - 1];
       dot.closest("[data-checkin-form]").classList.add("touched");
+      return;
+    }
+    const sore = t("[data-sore]");
+    if (sore) {
+      const lvl = (Number(sore.dataset.level) + 1) % 4;
+      sore.dataset.level = lvl;
+      sore.className = `chip sore-${lvl}`;
+      sore.querySelector("small").textContent = SORE[lvl];
+      sore.closest("[data-checkin-form]").classList.add("touched");
       return;
     }
     const save = t("[data-save-checkin]");
