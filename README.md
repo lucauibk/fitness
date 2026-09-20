@@ -9,7 +9,7 @@ sichtbar, Einträge werden lokal gesammelt und nachgesendet, sobald wieder Netz 
 | Tab | Inhalt |
 |---|---|
 | Heute | Tages-Serie, Check-in (Schlaf, Energie, Stress, Muskelkater) → Readiness, an die Erholung angepasstes Training, Mobility-Routine, Kalorien |
-| Training | Einheit (mit Pausen-Timer) · Plan (Splits, Assistent, Plan-Check) · Übungen (Anleitung, Muskel-Grafik, Video-Suche) · Cardio |
+| Training | Einheit (mit Pausen-Timer, Bewertung beim Beenden) · Plan (Splits, Assistent, Plan-Check) · Übungen (Anleitung, Muskel-Grafik, Video-Suche) · Cardio |
 | Ernährung | Kalorien/Makros gegen das Ziel, Mahlzeiten, Suche und Barcode über Open Food Facts, eigene Lebensmittel |
 | Fortschritt | Übersicht (Bestleistungen, Volumen) · Körper (Gewicht, Körperfett, Maße, ViCoach) · Erfolge (Serien, Abzeichen) · Verlauf |
 | Profil | Daten, Ernährungsziel, Plan-Assistent |
@@ -42,7 +42,8 @@ cp .env.example .env
 ```
 
 Reine Rechenlogik ohne eigene Datenbank (Readiness-Score, Volumen-Planung, Serien-Zaehlung,
-Koerperfett-Schaetzung) plus die Sicherheitsgrenze fuer KI-Antworten (`ai.validate_plan`).
+Koerperfett-Schaetzung, Einheits-Bewertung) plus die Sicherheitsgrenze fuer KI-Antworten
+(`ai.validate_plan`).
 Laeuft gegen eine eigene, temporaere SQLite-Datei – `fitness.db` bleibt unangetastet.
 
 ## Deploy auf den Pi

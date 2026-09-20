@@ -126,6 +126,30 @@ export function setsSummary(sets, unit) {
   return `${label} @ ${fmtWeight(w, unit)}`;
 }
 
+/** Urteil ueber eine fertige Einheit, wie es der Server rechnet: Punktzahl, was gestimmt
+ *  hat und was zum perfekten Training gefehlt hat. Eingetippt wird davon nichts – die
+ *  Bewertung kommt aus den geloggten Saetzen, dem Trainingstag und der letzten Einheit. */
+export function feedbackHtml(fb) {
+  if (!fb) return "";
+  const tone = fb.score >= 85 ? "gut" : fb.score >= 50 ? "mittel" : "schwach";
+  const block = (title, items, name) => (items?.length
+    ? `<p class="feedback-lead">${title}</p>
+       <ul class="feedback-list ${name}">${items
+         .map((t) => `<li>${icon(name === "bad" ? "warn" : "check")}<span>${esc(t)}</span></li>`)
+         .join("")}</ul>`
+    : "");
+  return `<div class="feedback tone-${tone}">
+    <div class="feedback-score">
+      <span class="big-number">${fb.score}</span>
+      <span>von 100 · <b>${esc(fb.label)}</b></span>
+    </div>
+    ${fb.missing?.length
+      ? block("Das hat gefehlt", fb.missing.map((m) => m.text), "bad")
+      : `<p class="feedback-lead">${icon("trophy")} Nichts auszusetzen.</p>`}
+    ${block("Das hat gestimmt", fb.good, "good")}
+  </div>`;
+}
+
 /** Das gewaehlte Profil haengt an jeder Anfrage; gefiltert wird auf dem Server. */
 let profileId = null;
 export const setProfile = (id) => { profileId = id ? Number(id) : null; };

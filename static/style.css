@@ -803,3 +803,21 @@ body.training-fullscreen .rest-bar { bottom: calc(env(safe-area-inset-bottom) + 
 .celebrate-icon { color: var(--accent); }
 .celebrate-icon .icon { width: 48px; height: 48px; }
 .celebrate-card b { font-size: var(--fs-lg); text-align: center; }
+
+/* Urteil ueber eine fertige Einheit (Sheet nach dem Beenden und im Verlauf) */
+.feedback { margin-top: var(--s4); border-top: 1px solid var(--line); padding-top: var(--s4); }
+.feedback-score { display: flex; align-items: baseline; gap: var(--s2); margin-bottom: var(--s3); }
+.feedback-score span:last-child { color: var(--muted); font-size: var(--fs-sm); }
+.feedback-score b { color: var(--text); }
+.tone-gut .big-number { color: var(--ok); }
+.tone-mittel .big-number { color: var(--soon); }
+.tone-schwach .big-number { color: var(--urgent); }
+.feedback-lead {
+  font-size: var(--fs-sm); font-weight: 650; color: var(--muted);
+  margin: var(--s3) 0 var(--s2);
+}
+.feedback-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
+.feedback-list li { display: flex; align-items: flex-start; gap: var(--s2); line-height: 1.45; }
+.feedback-list .icon { flex: none; width: 18px; height: 18px; margin-top: 1px; }
+.feedback-list.bad .icon { color: var(--soon); }
+.feedback-list.good .icon { color: var(--ok); }

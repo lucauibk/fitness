@@ -1,6 +1,6 @@
 /** Verlauf: Krafteinheiten und Cardio gemischt nach Datum. */
-import { $, $$, api, armDelete, closeSheet, deleteLater, empty, esc, icon, isPendingDelete,
-  openSheet, setsSummary, skeleton, toast } from "./util.js";
+import { $, $$, api, armDelete, closeSheet, deleteLater, empty, esc, feedbackHtml, icon,
+  isPendingDelete, openSheet, setsSummary, skeleton, toast } from "./util.js";
 import * as outbox from "./outbox.js";
 
 let root;
@@ -64,6 +64,8 @@ export async function load() {
 function openWorkout(id) {
   let w = (workouts || []).find((x) => x.id === id);
   if (!w) return;
+  let editing = false;
+  let fbGeladen = false;   // sonst bliebe das Platzhalter-Skelett stehen, wenn das Nachladen scheitert
   const sheet = openSheet({ title: esc(w.day_label || w.title || "Einheit"), body: "",
     footer: `<button type="button" class="btn danger ghost" data-delete>${icon("trash")} Löschen</button>
       <span class="grow"></span>
@@ -81,7 +83,8 @@ function openWorkout(id) {
           <div class="row-title">${esc(name)}</div>
           <div class="row-meta"><span>${esc(setsSummary(sets, sets[0].unit))}</span></div>
         </div></div>`).join("")}</div>
-      ${w.notes ? `<p class="hint pad">${esc(w.notes)}</p>` : ""}`;
+      ${w.notes ? `<p class="hint pad">${esc(w.notes)}</p>` : ""}
+      ${w.feedback ? feedbackHtml(w.feedback) : (fbGeladen ? "" : skeleton(2))}`;
   }
 
   /** Vergessene oder falsch getippte Werte korrigieren, statt die ganze Einheit loeschen
@@ -109,6 +112,7 @@ function openWorkout(id) {
         const idx = workouts.findIndex((x) => x.id === id);
         if (idx >= 0) workouts[idx] = w;
         toast("Einheit gespeichert");
+        editing = false;
         $("[data-edit-toggle]", sheet).textContent = "Bearbeiten";
         paintView();
       } catch (e) { toast(e.message, { error: true }); }
@@ -116,12 +120,19 @@ function openWorkout(id) {
   }
 
   paintView();
+  // Das Urteil steckt nur in der Detailantwort – die Liste rechnet es aus Kostengruenden
+  // nicht je Zeile mit.
+  api(`workouts/${id}`).then((full) => { w = { ...w, ...full }; }).catch(() => {}).then(() => {
+    fbGeladen = true;
+    if (!editing) paintView();
+  });
+
   sheet.addEventListener("click", (ev) => {
     const toggle = ev.target.closest("[data-edit-toggle]");
     if (!toggle) return;
-    const editing = toggle.textContent !== "Bearbeiten";
-    toggle.textContent = editing ? "Bearbeiten" : "Abbrechen";
-    editing ? paintView() : paintEdit();
+    editing = !editing;
+    toggle.textContent = editing ? "Abbrechen" : "Bearbeiten";
+    editing ? paintEdit() : paintView();
   });
   armDelete($("[data-delete]", sheet), () => {
     closeSheet();

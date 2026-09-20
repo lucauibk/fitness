@@ -1,7 +1,7 @@
 /** Laufende Einheit. Alles passiert zuerst im Geraetespeicher – ohne Netz, ohne Warten.
  *  Erst beim Beenden geht die komplette Einheit in einem Stueck an den Pi (bzw. in den
  *  Ausgang, wenn gerade keine Verbindung da ist). */
-import { $, $$, api, armDelete, closeSheet, empty, esc, getProfile,
+import { $, $$, api, armDelete, closeSheet, empty, esc, feedbackHtml, getProfile,
   icon, openSheet, prefs, setsSummary, skeleton, toast } from "./util.js";
 import * as outbox from "./outbox.js";
 
@@ -415,6 +415,14 @@ async function finish() {
       : `Einheit gespeichert · ${sets.length} Sätze`);
     window.dispatchEvent(new CustomEvent("outbox-changed"));
     window.dispatchEvent(new CustomEvent("data-changed"));
+    // Das Urteil kommt mit der Antwort zurueck. Ohne Netz liegt die Einheit im Ausgang –
+    // dann gibt es die Bewertung erst nach dem Nachsenden, im Verlauf.
+    const fb = res.data?.feedback;
+    if (fb) {
+      openSheet({ title: "Einheit bewertet", body: feedbackHtml(fb),
+        footer: `<span class="grow"></span>
+          <button type="button" class="btn primary" data-close>Passt</button>` });
+    }
   } catch (e) {
     toast(e.message, { error: true });
   }

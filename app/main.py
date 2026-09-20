@@ -21,7 +21,8 @@ from pydantic import BaseModel, Field
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-from . import activity, ai, analysis, checker, daily_view, db, generator, readiness, stats  # noqa: E402
+from . import (activity, ai, analysis, checker, daily_view, db, generator, readiness,  # noqa: E402
+               session_feedback, stats)
 from .common import FIELD_NAMES, NOT_NULL, _data, _found, current_profile  # noqa: E402,F401
 
 STATIC = Path(__file__).parent.parent / "static"
@@ -472,7 +473,7 @@ def api_workout(workout_id: int, profile_id: int = Depends(current_profile)):
     w = _found(db.get_workout(workout_id))
     if w["profile_id"] != profile_id:
         raise HTTPException(403, "Diese Einheit gehört zu einem anderen Profil.")
-    return w
+    return session_feedback.for_workout(profile_id, w)
 
 
 @app.post("/api/workouts")
@@ -491,7 +492,9 @@ def api_add_workout(body: WorkoutIn):
     before = activity.reached_keys(body.profile_id)
     workout, created = db.save_workout(payload)
     return {"workout": workout, "created": created,
-            "milestones": activity.new_milestones(before, body.profile_id) if created else []}
+            "milestones": activity.new_milestones(before, body.profile_id) if created else [],
+            # Beim zweiten Eintreffen derselben client_id nicht noch einmal urteilen.
+            "feedback": session_feedback.evaluate(body.profile_id, workout) if created else None}
 
 
 class SetPatch(BaseModel):
@@ -520,7 +523,7 @@ def api_patch_workout(workout_id: int, body: WorkoutPatch, profile_id: int = Dep
             if not row or row[0] != workout_id:
                 raise HTTPException(400, "Dieser Satz gehört nicht zu dieser Einheit.")
             c.execute("UPDATE sets SET reps=?, weight=? WHERE id=?", (s.reps, s.weight, s.id))
-    return db.get_workout(workout_id)
+    return session_feedback.for_workout(profile_id, db.get_workout(workout_id))
 
 
 @app.delete("/api/workouts/{workout_id}")
