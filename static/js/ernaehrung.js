@@ -198,7 +198,16 @@ function highlight(text, q) {
 
 function foodRow(f, i, q) {
   const s = servingOf(f);
-  const meta = [f.brand && esc(f.brand), s && esc(s.text), f.last_grams && `zuletzt ${num(f.last_grams)} g`].filter(Boolean);
+  // Schon mal gegessen: die zuletzt genommene Menge ist, was man mit einem Tipp uebernimmt –
+  // also deren kcal als Hauptzahl, nicht mal pro Portion und mal pro 100 g.
+  if (f.last_grams) {
+    const meta = [f.brand && esc(f.brand), `${num(f.kcal)} kcal / 100 g`].filter(Boolean);
+    return `<div class="row-item food-row" role="button" tabindex="0" data-pick="${i}">
+      <div class="row-main"><div class="row-title">${highlight(f.name, q)}</div>
+        <div class="row-meta">${meta.map((m) => `<span>${m}</span>`).join("")}</div></div>
+      <span class="row-aside food-kcal"><b>${num(kcalFor(f, f.last_grams))} kcal</b><small>${portionsText({ ...f, grams: f.last_grams })}${num(f.last_grams)} g wie zuletzt</small></span></div>`;
+  }
+  const meta = [f.brand && esc(f.brand), s && esc(s.text)].filter(Boolean);
   return `<div class="row-item food-row" role="button" tabindex="0" data-pick="${i}">
     <div class="row-main"><div class="row-title">${highlight(f.name, q)}</div>
       ${meta.length ? `<div class="row-meta">${meta.map((m) => `<span>${m}</span>`).join("")}</div>` : ""}</div>

@@ -67,8 +67,10 @@ function render() {
   const { profile: p, weight } = data;
   const year = new Date().getFullYear();
   const draft = hasWizardDraft();
+  // Grosser Einstieg nur, solange es noch keinen Plan gibt – danach reicht eine Zeile
+  // unter dem Trainingsziel (der Assistent steckt auch unter Training → Plan).
   root.innerHTML = `
-    <div class="card hero">
+    ${data.hasPlan ? "" : `<div class="card hero">
       <p class="eyebrow">Plan-Assistent</p>
       <h3 class="hero-title">Plan erstellen lassen</h3>
       <p class="hint">Ziel, Zeit und Erfahrung angeben – daraus entsteht ein passender Plan,
@@ -76,11 +78,13 @@ function render() {
       <div class="btn-row">
         <button type="button" class="btn primary" data-wizard>${icon("spark")} ${draft ? "Assistent fortsetzen" : "Neuen Plan erstellen"}</button>
       </div>
-    </div>
+    </div>`}
 
     <div class="card">
       <p class="eyebrow">Trainingsziel</p>
       <p>${esc(summary(p))}</p>
+      ${data.hasPlan ? `<div class="btn-row"><button type="button" class="btn small tonal" data-wizard>${icon("spark")}
+        ${draft ? "Assistent fortsetzen" : "Neuen Plan erstellen"}</button></div>` : ""}
     </div>
 
     ${nutritionCard()}
@@ -122,9 +126,10 @@ function render() {
       <p class="eyebrow">Daten exportieren</p>
       <p class="hint">Als CSV für Excel oder Numbers – nur die Daten dieses Profils.</p>
       <div class="btn-row">${[["saetze", "Sätze"], ["cardio", "Cardio"], ["koerper", "Körper"], ["ernaehrung", "Ernährung"]]
-        .map(([k, l]) => `<a class="btn small ghost" href="/api/export/${k}.csv?profile=${getProfile()}" download>${icon("down")} ${l}</a>`).join("")}</div>
+        .map(([k, l]) => `<a class="btn small ghost" href="/api/export/${k}.csv?profile=${getProfile()}" download>${icon("download")} ${l}</a>`).join("")}</div>
     </div>
-    <p class="hint pad">Farbe und weitere Profile: oben rechts auf den Namen tippen.</p>`;
+    <div class="btn-row"><button type="button" class="btn ghost" data-profiles>${icon("user")} Profile verwalten</button></div>
+    <p class="hint pad">Name, Farbe und weitere Profile – auch oben rechts über den Namen.</p>`;
 
   const nf = $("#nutriForm", root);
   nf.nutrition_auto.addEventListener("change", () => {
@@ -165,9 +170,9 @@ export async function load() {
   if (data && root.contains(document.activeElement) && document.activeElement.matches("input, textarea, select")) return;
   if (data && hasDirtyForm(root)) return;
   if (!data) root.innerHTML = skeleton(4);
-  const [profile, bw, nutrition] = await Promise.all([api(`profiles/${getProfile()}`),
-    api("bodyweight"), api("nutrition/goals")]);
-  data = { profile, weight: bw[bw.length - 1] || null, nutrition };
+  const [profile, bw, nutrition, splits] = await Promise.all([api(`profiles/${getProfile()}`),
+    api("bodyweight"), api("nutrition/goals"), api("splits").catch(() => [])]);
+  data = { profile, weight: bw[bw.length - 1] || null, nutrition, hasPlan: splits.some((s) => s.active) };
   render();
 }
 
@@ -175,6 +180,7 @@ export async function mount(el) {
   root = el;
   el.addEventListener("click", (ev) => {
     if (ev.target.closest("[data-wizard]")) openWizard(data?.profile);
+    if (ev.target.closest("[data-profiles]")) document.getElementById("profileBtn")?.click();
   });
 }
 

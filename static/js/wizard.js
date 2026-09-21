@@ -64,8 +64,10 @@ export function openWizard(profile) {
     }
   } else {
     const p = profile || {};
+    // Stehen die Eckdaten schon im Profil, gleich bei "Ziel" anfangen – "Zurueck" fuehrt hin.
+    const known = Boolean(p.birth_year && p.height_cm && p.sex);
     st = {
-      profileId: getProfile(), step: 0,
+      profileId: getProfile(), step: known ? 1 : 0,
       data: { birth_year: p.birth_year ?? null, height_cm: p.height_cm ?? null,
         sex: p.sex ?? null, limitations: p.limitations ?? "" },
       goal: p.goal || null,
@@ -259,7 +261,8 @@ function render() {
   const views = [stepData, stepGoal, stepTime, stepExperience, stepFocus, stepSplit, stepPreview];
   body.innerHTML = `<div class="steps-bar" aria-label="Schritt ${st.step + 1} von ${STEPS.length}">
       ${STEPS.map((_, i) => `<i class="${i <= st.step ? "on" : ""}"></i>`).join("")}</div>
-    <p class="eyebrow">Schritt ${st.step + 1} von ${STEPS.length}</p>
+    <div class="wizard-step"><p class="eyebrow">Schritt ${st.step + 1} von ${STEPS.length}</p>
+      ${st.step > 0 ? `<button type="button" class="link-btn danger-text" data-reset>Neu beginnen</button>` : ""}</div>
     ${views[st.step]()}`;
   let foot = $(".sheet-foot", sheet);
   if (!foot) {
@@ -269,8 +272,7 @@ function render() {
   }
   const last = st.step === STEPS.length - 1;
   foot.innerHTML = `
-    ${st.step > 0 ? `<button type="button" class="btn ghost" data-back>${icon("left")} Zurück</button>`
-      : `<button type="button" class="btn ghost danger" data-reset>Neu beginnen</button>`}
+    ${st.step > 0 ? `<button type="button" class="btn ghost" data-back>${icon("left")} Zurück</button>` : ""}
     <span class="grow"></span>
     ${last ? `<button type="button" class="btn primary" data-save ${canNext() ? "" : "disabled"}>${icon("check")} Plan übernehmen</button>`
       : `<button type="button" class="btn primary" data-next ${canNext() ? "" : "disabled"}>Weiter ${icon("right")}</button>`}`;

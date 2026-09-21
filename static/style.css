@@ -932,3 +932,7 @@ body.training-fullscreen.resting .content { padding-bottom: calc(var(--rest-h) +
 .day-details:not([open]) { padding-block: var(--s3); }
 .plan-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); margin-top: var(--s4); }
 .plan-head .group-title { margin: 0; }
+.wizard-step { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); }
+.link-btn.danger-text { color: var(--urgent); font-size: var(--fs-sm); }
+/* Der Titel bekommt nach dem Tab-Wechsel den Fokus (Screenreader) – ohne Tastatur kein Rahmen */
+#pageTitle:focus:not(:focus-visible) { outline: none; }
