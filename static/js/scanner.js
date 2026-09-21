@@ -25,7 +25,9 @@ export function scanBarcode() {
     const overlay = document.createElement("div");
     overlay.className = "scanner";
     overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
     overlay.setAttribute("aria-label", "Barcode scannen");
+    const lastFocus = document.activeElement;
     overlay.innerHTML = `<video playsinline muted></video>
       <div class="scanner-frame" aria-hidden="true"></div>
       <div class="scanner-bar">
@@ -51,9 +53,27 @@ export function scanBarcode() {
       try { reader?.reset(); } catch { /* egal */ }
       stream?.getTracks().forEach((t) => t.stop());
       overlay.remove();
+      document.removeEventListener("keydown", onKey, true);
+      if (lastFocus?.isConnected) lastFocus.focus({ preventScroll: true });
       if (code) navigator.vibrate?.(80);
       resolve(code || null);
     }
+
+    // Esc schliesst den Scanner, Tab bleibt in ihm (das Sheet darunter haelt still, util.js).
+    function onKey(e) {
+      // stopPropagation: sonst sieht der Sheet-Handler (util.js) den Scanner schon nicht
+      // mehr und schliesst das Sheet darunter gleich mit.
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(null); return; }
+      if (e.key !== "Tab") return;
+      const items = [...overlay.querySelectorAll("button, input")];
+      const [first, last] = [items[0], items[items.length - 1]];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+    document.addEventListener("keydown", onKey, true);
+    overlay.addEventListener("scanner-close", () => finish(null));
+    // Fokus auf Abbrechen, nicht ins Eingabefeld – die Tastatur wuerde die Kamera verdecken.
+    overlay.querySelector("[data-cancel]").focus({ preventScroll: true });
 
     overlay.querySelector("[data-cancel]").addEventListener("click", () => finish(null));
     overlay.querySelector("form").addEventListener("submit", (ev) => {
@@ -73,6 +93,8 @@ export function scanBarcode() {
           const supported = await window.BarcodeDetector.getSupportedFormats?.() || FORMATS;
           const detector = new window.BarcodeDetector({ formats: FORMATS.filter((f) => supported.includes(f)) });
           stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+          // Abgebrochen, waehrend die Kamera noch startete: sofort wieder aus (Kamera-LED).
+          if (done) { stream.getTracks().forEach((t) => t.stop()); return; }
           video.srcObject = stream;
           await video.play();
           msg.textContent = "Barcode in den Rahmen halten.";

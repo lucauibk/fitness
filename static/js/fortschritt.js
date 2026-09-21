@@ -75,7 +75,7 @@ function frequencySection() {
       : `<p class="hint">Diese Woche noch nichts eingetragen.</p>`}
     <h4 class="form-section">Letzte 8 Wochen</h4>
     <div class="weekbars">${weeks.map((w) => `
-      <span class="weekbar" title="Woche ab ${dm(w.week)}: ${w.count} Einheiten">
+      <span class="weekbar" role="img" aria-label="Woche ab ${dm(w.week)}: ${w.count} Einheiten" title="Woche ab ${dm(w.week)}: ${w.count} Einheiten">
         <i style="height:${Math.max(4, (w.count / maxCount) * 100)}%"></i>
         <b>${w.count || ""}</b></span>`).join("")}</div>
   </div>`;

@@ -19,6 +19,7 @@ const SCALES = {
   stress: ["Stress", ["entspannt", "gering", "mittel", "hoch", "sehr hoch"]],
 };
 const SORE = ["–", "leicht", "mittel", "stark"];
+const soreWord = (lvl) => (lvl ? SORE[lvl] : "keiner");
 
 // ------------------------------------------------------------ Check-in
 function checkinForm(c) {
@@ -31,13 +32,15 @@ function checkinForm(c) {
         <span class="scale-label">${label}</span>
         <div class="scale-dots" role="radiogroup" aria-label="${label}">
           ${words.map((w, i) => `<button type="button" role="radio" class="dot-btn ${v[k] === i + 1 ? "on" : ""}"
-            data-value="${i + 1}" aria-checked="${v[k] === i + 1}" aria-label="${label}: ${w}">${i + 1}</button>`).join("")}
+            data-value="${i + 1}" aria-checked="${v[k] === i + 1}" tabindex="${v[k] === i + 1 ? 0 : -1}"
+            aria-label="${label}: ${w}">${i + 1}</button>`).join("")}
         </div>
         <span class="scale-word" data-word>${words[v[k] - 1]}</span>
       </div>`).join("")}
     <p class="scale-label">Muskelkater <span class="hint">– antippen zum Steigern</span></p>
     <div class="chips sore">${Object.entries(GROUPS).map(([g, l]) => `<button type="button"
-      class="chip sore-${sore[g] || 0}" data-sore="${g}" data-level="${sore[g] || 0}">${l}<small>${SORE[sore[g] || 0]}</small></button>`).join("")}</div>
+      class="chip sore-${sore[g] || 0}" data-sore="${g}" data-level="${sore[g] || 0}"
+      aria-label="Muskelkater ${l}: ${soreWord(sore[g] || 0)}">${l}<small>${SORE[sore[g] || 0]}</small></button>`).join("")}</div>
     <div class="btn-row"><button type="button" class="btn primary" data-save-checkin>${icon("check")} Check-in speichern</button>
       ${c ? `<button type="button" class="btn ghost" data-cancel-checkin>Abbrechen</button>` : ""}</div>
   </div>`;
@@ -70,9 +73,10 @@ function exerciseRow(e) {
         <span>${e.target_sets} × ${range}</span>
         ${e.adjusted ? `<span class="soon-text">${esc(e.adjusted)}</span>`
           : e.last?.length ? `<span>zuletzt ${esc(setsSummary(e.last, e.unit))}</span>` : ""}
+        ${s.reason && e.last?.length ? `<span>${esc(s.reason)}</span>` : ""}
       </div>
     </div>
-    <span class="suggest ${s.raise_weight ? "up" : ""}" title="${esc(s.reason)}">
+    <span class="suggest ${s.raise_weight ? "up" : ""}">
       ${s.raise_weight ? icon("up") : ""}${esc(s.weight != null ? fmtWeight(s.weight, e.unit) : `${s.reps} Whd.`)}
     </span>
   </div>`;
@@ -328,6 +332,17 @@ async function openMobility(key) {
 
 export async function mount(el) {
   root = el;
+  // Skalen wie echte Radiogruppen: ein Tab-Stopp pro Skala, Pfeiltasten waehlen.
+  el.addEventListener("keydown", (ev) => {
+    const dot = ev.target.closest?.(".dot-btn");
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[ev.key];
+    if (!dot || !step) return;
+    ev.preventDefault();
+    const dots = [...dot.closest("[role=radiogroup]").querySelectorAll(".dot-btn")];
+    const next = dots[(dots.indexOf(dot) + step + dots.length) % dots.length];
+    next.click();
+    next.focus();
+  });
   el.addEventListener("click", (ev) => {
     const t = (s) => ev.target.closest(s);
     const dot = t(".dot-btn");
@@ -337,6 +352,7 @@ export async function mount(el) {
         const on = b === dot;
         b.classList.toggle("on", on);
         b.setAttribute("aria-checked", on);
+        b.tabIndex = on ? 0 : -1;
       });
       $("[data-word]", scale).textContent = SCALES[scale.dataset.scale][1][Number(dot.dataset.value) - 1];
       dot.closest("[data-checkin-form]").classList.add("touched");
@@ -348,6 +364,7 @@ export async function mount(el) {
       sore.dataset.level = lvl;
       sore.className = `chip sore-${lvl}`;
       sore.querySelector("small").textContent = SORE[lvl];
+      sore.setAttribute("aria-label", `Muskelkater ${GROUPS[sore.dataset.sore]}: ${soreWord(lvl)}`);
       sore.closest("[data-checkin-form]").classList.add("touched");
       return;
     }

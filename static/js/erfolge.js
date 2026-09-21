@@ -41,8 +41,8 @@ function render() {
         <span class="row-aside">${String(m.value).replace(".", ",")} / ${m.threshold}</span>
       </div>`).join("")}</div>` : ""}
     <h3 class="group-title">Abzeichen<span class="count-muted">${d.reached.length}</span></h3>
-    ${d.reached.length ? `<div class="badges">${d.reached.map((m) => `<div class="badge" title="${esc(m.desc)}">
-        <span class="badge-icon">${icon("trophy")}</span><b>${esc(m.title)}</b></div>`).join("")}</div>`
+    ${d.reached.length ? `<div class="badges">${d.reached.map((m) => `<div class="badge">
+        <span class="badge-icon">${icon("trophy")}</span><b>${esc(m.title)}</b><small>${esc(m.desc)}</small></div>`).join("")}</div>`
       : `<p class="hint pad">Noch keine – die erste Einheit bringt das erste Abzeichen.</p>`}`;
 }
 

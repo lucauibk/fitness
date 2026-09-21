@@ -319,6 +319,14 @@ window.addEventListener("popstate", () => {
     popDone = null;
     return;
   }
+  // Zurueck waehrend des Scanners: nur den Scanner schliessen, das Sheet darunter bleibt –
+  // dessen Verlaufseintrag wieder herstellen, er wurde gerade verbraucht.
+  const scanner = document.querySelector(".scanner");
+  if (scanner) {
+    if (document.getElementById("sheet")) history.pushState({ sheet: true }, "");
+    scanner.dispatchEvent(new CustomEvent("scanner-close"));
+    return;
+  }
   const wrap = document.getElementById("sheet");
   if (!wrap) return;
   if (wrap.dataset.dirty) {
@@ -332,6 +340,7 @@ window.addEventListener("popstate", () => {
 document.addEventListener("keydown", (e) => {
   const sheet = document.querySelector("#sheet .sheet");
   if (!sheet) return;
+  if (document.querySelector(".scanner")) return;   // der Scanner liegt darueber und regelt das selbst
   if (e.key === "Escape") {
     if (e.target.matches?.("select")) return; // Esc schliesst hier nur die Auswahlliste
     e.preventDefault();

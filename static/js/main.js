@@ -45,6 +45,15 @@ const parseHash = () => {
   return { tab: VIEWS[tab] ? tab : "heute", sub };
 };
 
+let hadView = false;   // beim allerersten Aufbau den Fokus nicht verschieben
+
+/** Sichtbarer Name und Screenreader-Name zusammen – "Profil wechseln" allein verschweigt,
+ *  welches Profil gerade aktiv ist. */
+function showProfileName(name) {
+  $("#profileName").textContent = name;
+  $("#profileBtn").setAttribute("aria-label", `Profil wechseln, aktiv: ${name}`);
+}
+
 async function show() {
   const raw = location.hash.replace(/^#/, "");
   if (LEGACY[raw]) { location.replace(`#${LEGACY[raw]}`); return; }
@@ -73,7 +82,12 @@ async function show() {
     console.error(e);
     if (!mounted.has(tab)) el.innerHTML = errorState(e);
   }
-  if (switched) window.scrollTo(0, 0);
+  if (switched) {
+    window.scrollTo(0, 0);
+    // Seitenwechsel ansagen: der Fokus bliebe sonst in der Navigation stehen.
+    if (hadView) $("#pageTitle").focus({ preventScroll: true });
+    hadView = true;
+  }
 }
 
 const errorState = (e) => empty("Konnte nicht laden", esc(e.message),
@@ -114,7 +128,7 @@ async function loadProfiles() {
   const remembered = prefs.get("profile");
   if (remembered) {
     setProfile(remembered);
-    $("#profileName").textContent = prefs.get("profileName") || "Profil";
+    showProfileName(prefs.get("profileName") || "Profil");
     $("#profileDot").style.setProperty("--c", safeColor(prefs.get("profileColor")));
   }
   profiles = await api("profiles");
@@ -130,7 +144,7 @@ function applyProfile(id) {
   prefs.set("profile", p.id);
   prefs.set("profileName", p.name);
   prefs.set("profileColor", p.color);
-  $("#profileName").textContent = p.name;
+  showProfileName(p.name);
   $("#profileDot").style.setProperty("--c", safeColor(p.color));
 }
 

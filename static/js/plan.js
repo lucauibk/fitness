@@ -27,19 +27,24 @@ const daysLabel = (days) => (!days?.length ? "kein fester Tag"
   : days.length === 1 ? WEEKDAYS_LONG[days[0]] : days.map((d) => WEEKDAYS[d]).join(" · "));
 
 // -------------------------------------------------------------- Anzeige
-function exerciseRow(item) {
-  return `<div class="row-item" role="button" tabindex="0" data-edit-item="${item.id}">
-    <div class="row-main">
+function exerciseRow(item, sorting = false) {
+  const meta = `<div class="row-main">
       <div class="row-title">${esc(item.name)}</div>
       <div class="row-meta">
         <span>${item.target_sets} × ${range(item.target_reps_min, item.target_reps_max)} Whd.</span>
         ${item.target_weight != null ? `<span>${String(item.target_weight).replace(".", ",")} kg</span>` : ""}
         ${item.notes ? `<span>${esc(item.notes)}</span>` : ""}
       </div>
-    </div>
-    <span class="order-btns" aria-hidden="true">
-      <button type="button" class="icon-btn" data-move="${item.id}" data-dir="-1" aria-label="${esc(item.name)} nach oben" tabindex="-1">${icon("up")}</button>
-      <button type="button" class="icon-btn" data-move="${item.id}" data-dir="1" aria-label="${esc(item.name)} nach unten" tabindex="-1">${icon("down")}</button>
+    </div>`;
+  // Beim Sortieren ist die Zeile kein Knopf – sonst steckten die Pfeile in einem Knopf,
+  // und Tastatur/Screenreader kaemen nicht an sie heran.
+  if (!sorting) {
+    return `<div class="row-item" role="button" tabindex="0" data-edit-item="${item.id}">${meta}</div>`;
+  }
+  return `<div class="row-item">${meta}
+    <span class="order-btns">
+      <button type="button" class="icon-btn" data-move="${item.id}" data-dir="-1" aria-label="${esc(item.name)} nach oben">${icon("up")}</button>
+      <button type="button" class="icon-btn" data-move="${item.id}" data-dir="1" aria-label="${esc(item.name)} nach unten">${icon("down")}</button>
     </span>
   </div>`;
 }
@@ -54,7 +59,8 @@ function dayCard(day) {
       </div>
       <button type="button" class="icon-btn" data-edit-day="${day.id}" aria-label="Trainingstag bearbeiten">${icon("edit")}</button>
     </div>
-    <div class="list flush">${day.exercises.filter((e) => !isPendingDelete(`split-exercises/${e.id}`)).map(exerciseRow).join("")
+    <div class="list flush">${day.exercises.filter((e) => !isPendingDelete(`split-exercises/${e.id}`))
+      .map((e) => exerciseRow(e, sortingDay === day.id)).join("")
       || `<p class="hint pad">Noch keine Übungen.</p>`}</div>
     <div class="btn-row">
       <button type="button" class="btn small ghost" data-add-item="${day.id}">${icon("plus")} Übung</button>
@@ -76,12 +82,12 @@ function render() {
   const open = detail && visible.some((s) => s.id === detail.id) ? detail : null;
 
   root.innerHTML = `<div class="list">${visible.map((s) => `
-      <div class="row-item" role="button" tabindex="0" data-open-split="${s.id}">
-        <div class="row-main">
-          <div class="row-title">${esc(s.name)}</div>
-          <div class="row-meta"><span>${s.days.length} Tage</span>
-            <span>${s.days.map((d) => esc(d.label)).join(" · ") || "noch leer"}</span></div>
-        </div>
+      <div class="row-item">
+        <button type="button" class="row-main row-btn" data-open-split="${s.id}" aria-expanded="${open?.id === s.id}">
+          <span class="row-title">${esc(s.name)}</span>
+          <span class="row-meta"><span>${s.days.length} Tage</span>
+            <span>${s.days.map((d) => esc(d.label)).join(" · ") || "noch leer"}</span></span>
+        </button>
         ${s.active ? `<span class="pill ok">aktiv</span>` : `<button type="button" class="btn small tonal" data-activate="${s.id}">Wechseln</button>`}
       </div>`).join("")}</div>
     <div class="btn-row">
@@ -96,6 +102,7 @@ function render() {
       <div class="btn-row">
         <button type="button" class="btn ghost" data-add-day="${open.id}">${icon("plus")} Trainingstag</button>
       </div>` : `<p class="hint pad">Tippe auf einen Split, um seine Tage und Übungen zu sehen.</p>`}`;
+  if (refocus) { root.querySelector(refocus)?.focus({ preventScroll: true }); refocus = null; }
 }
 
 export async function load() {
@@ -276,19 +283,23 @@ async function editItem(item, dayId) {
 }
 
 /** Reihenfolge per Hoch/Runter – am Handy zuverlässiger als Ziehen. */
+let moving = false;      // schnelles Doppeltippen darf keine zweite Umsortierung anstossen
+let refocus = null;      // nach dem Neuzeichnen denselben Pfeil wieder fokussieren
 async function move(itemId, dir) {
   const day = detail?.days.find((d) => d.exercises.some((e) => e.id === itemId));
-  if (!day) return;
+  if (!day || moving) return;
   const list = [...day.exercises];
   const i = list.findIndex((e) => e.id === itemId);
   const j = i + dir;
   if (j < 0 || j >= list.length) return;
   [list[i], list[j]] = [list[j], list[i]];
+  moving = true;
   try {
     await Promise.all(list.map((e, pos) => (e.position === pos ? null
       : api(`split-exercises/${e.id}`, { method: "PATCH", body: { position: pos } }))));
+    refocus = `[data-move="${itemId}"][data-dir="${dir}"]`;
     changed();
-  } catch (e) { toast(e.message, { error: true }); }
+  } catch (e) { toast(e.message, { error: true }); } finally { moving = false; }
 }
 
 // ------------------------------------------------------- Übungs-Katalog
