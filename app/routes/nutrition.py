@@ -58,19 +58,40 @@ def add_water(body: WaterIn):
 
 
 # ---------------------------------------------------------- Lebensmittel
+def _local(q, profile_id):
+    """Eigene und schon verwendete Lebensmittel, sortiert nach Relevanz und Haeufigkeit.
+    Gefiltert wird in Python statt per LIKE, weil SQLite Umlaute und Gross/klein nur fuer
+    ASCII vergleicht – die Tabelle bleibt auf dem Pi klein genug dafuer."""
+    found = [f for f in db.rows("SELECT * FROM foods") if nutrition.matches(f, q)]
+    uses = {r["food_id"]: r["n"] for r in db.rows(
+        "SELECT food_id, COUNT(*) AS n FROM food_log WHERE profile_id=? GROUP BY food_id",
+        (profile_id,))}
+    last = {r["food_id"]: r["grams"] for r in db.rows(
+        "SELECT food_id, grams FROM food_log WHERE id IN"
+        " (SELECT MAX(id) FROM food_log WHERE profile_id=? GROUP BY food_id)", (profile_id,))}
+    for f in found:
+        f["uses"] = uses.get(f["id"], 0)
+        f["last_grams"] = last.get(f["id"])
+    return nutrition.rank(found, q, uses)[:15]
+
+
+@router.get("/foods/search/local")
+def search_local(q: str = Query(..., min_length=2, max_length=80),
+                 profile_id: int = Depends(current_profile)):
+    return {"local": _local(q.strip(), profile_id)}
+
+
 @router.get("/foods/search")
 def search(q: str = Query(..., min_length=2, max_length=80)):
+    """Nur Open Food Facts – die gespeicherten Lebensmittel liefert /foods/search/local."""
     q = q.strip()
-    like = f"%{q}%"
-    local = db.rows("SELECT * FROM foods WHERE name LIKE ? OR brand LIKE ? ORDER BY name LIMIT 15",
-                    (like, like))
     online, error = [], None
     try:
-        known = {f["barcode"] for f in local if f.get("barcode")}
+        known = {r["barcode"] for r in db.rows("SELECT barcode FROM foods WHERE barcode IS NOT NULL")}
         online = [f for f in nutrition.search_off(q) if f.get("barcode") not in known]
     except nutrition.FoodError as e:
         error = str(e)
-    return {"local": local, "online": online, "error": error}
+    return {"online": online, "error": error}
 
 
 @router.get("/foods/barcode/{code}")
@@ -87,6 +108,25 @@ def barcode(code: str):
     if not food:
         raise HTTPException(404, "Produkt nicht gefunden – du kannst es als eigenes Lebensmittel anlegen.")
     return {"food": nutrition.remember(food)}
+
+
+@router.get("/foods/portion/{code}")
+def portion(code: str):
+    """Portion eines Suchtreffers nachladen, wenn er angetippt wird."""
+    if not re.fullmatch(r"\d{6,14}", code):
+        raise HTTPException(400, "Barcode: ungültige Eingabe.")
+    try:
+        found = nutrition.portion_off(code)
+    except nutrition.FoodError as e:
+        raise HTTPException(503, str(e)) from e
+    # Frueher uebernommene Produkte hatten nie eine Portion – bei der Gelegenheit ergaenzen.
+    # Selbst angelegte Lebensmittel bleiben, wie sie eingetragen wurden.
+    with db.connect() as c:
+        c.execute("UPDATE foods SET serving_g=COALESCE(serving_g, ?),"
+                  " serving_label=COALESCE(serving_label, ?), pack_g=COALESCE(pack_g, ?)"
+                  " WHERE barcode=? AND source='off'",
+                  (found["serving_g"], found["serving_label"], found["pack_g"], code))
+    return found
 
 
 @router.get("/foods/recent")
@@ -109,6 +149,8 @@ class FoodIn(BaseModel):
     carbs: Optional[float] = Nutrient
     fat: Optional[float] = Nutrient
     serving_g: Optional[float] = Field(None, gt=0, le=2000, allow_inf_nan=False)
+    serving_label: Optional[str] = Field(None, max_length=60)
+    pack_g: Optional[float] = Field(None, gt=0, le=5000, allow_inf_nan=False)
     # Online gefundenes Produkt uebernehmen statt eigenes anlegen
     source: Literal["eigen", "off"] = "eigen"
 
@@ -117,6 +159,7 @@ class FoodIn(BaseModel):
 def add_food(body: FoodIn):
     data = body.model_dump()
     data["name"] = data["name"].strip()
+    data["serving_label"] = (data["serving_label"] or "").strip() or None
     return nutrition.remember(data)
 
 

@@ -823,3 +823,13 @@ body.training-fullscreen .rest-bar { bottom: calc(env(safe-area-inset-bottom) + 
 .feedback-list .icon { flex: none; width: 18px; height: 18px; margin-top: 1px; }
 .feedback-list.bad .icon { color: var(--soon); }
 .feedback-list.good .icon { color: var(--ok); }
+
+/* Ernaehrung: Trefferliste und Mengeneingabe */
+.food-row mark { background: var(--accent-soft); color: inherit; border-radius: 3px; padding: 0 1px; }
+.food-kcal { display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; line-height: 1.2; }
+.food-kcal b { color: var(--text); font-weight: 650; white-space: nowrap; }
+.food-kcal small { font-size: 11px; }
+.amount-mode { margin-bottom: var(--s2); }
+.stepper { display: flex; align-items: center; gap: var(--s2); }
+.stepper input { flex: 1; min-width: 0; text-align: center; font-variant-numeric: tabular-nums; }
+[data-amount] .chips { margin-top: var(--s2); }

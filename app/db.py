@@ -116,6 +116,8 @@ CREATE TABLE IF NOT EXISTS foods (
     brand TEXT,
     kcal REAL NOT NULL, protein REAL, carbs REAL, fat REAL,   -- je 100 g
     serving_g REAL,
+    serving_label TEXT,                                        -- z. B. "1 Riegel (40 g)"
+    pack_g REAL,                                               -- Packungsgroesse
     source TEXT DEFAULT 'eigen',                               -- off | eigen
     created_at TEXT
 );
@@ -183,6 +185,8 @@ MIGRATIONS = {
                   # Uebungsbibliothek
                   "instructions": "TEXT", "mistakes": "TEXT", "muscles_primary": "TEXT",
                   "muscles_secondary": "TEXT", "equipment": "TEXT", "video_query": "TEXT"},
+    # Portion mit Beschriftung und Packungsgroesse fuer die Mengeneingabe
+    "foods": {"serving_label": "TEXT", "pack_g": "REAL"},
 }
 
 
@@ -462,7 +466,7 @@ WRITABLE = {
                "notes", "client_id"),
     "mobility_log": ("profile_id", "date", "routine", "client_id"),
     "foods": ("barcode", "name", "brand", "kcal", "protein", "carbs", "fat", "serving_g",
-              "source", "created_at"),
+              "serving_label", "pack_g", "source", "created_at"),
     "food_log": ("profile_id", "date", "meal", "food_id", "name", "grams", "kcal", "protein",
                  "carbs", "fat", "client_id"),
     "water_log": ("profile_id", "date", "ml", "client_id"),

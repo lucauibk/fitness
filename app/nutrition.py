@@ -5,10 +5,14 @@ Suchbegriff bzw. der Barcode uebertragen. Ein Produkt landet erst in der lokalen
 Tabelle `foods`, wenn es ausgewaehlt wird – danach ist es auch offline verfuegbar."""
 import json
 import logging
+import re
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from difflib import SequenceMatcher
 
 from . import db
 from .activity import latest_weight
@@ -83,8 +87,10 @@ def goals(profile):
 
 
 def day(profile_id, day_iso):
-    entries = db.rows("SELECT * FROM food_log WHERE profile_id=? AND date=? ORDER BY id",
-                      (profile_id, day_iso))
+    # Portion des Lebensmittels mitliefern, damit ein Eintrag in Portionen bearbeitet werden kann
+    entries = db.rows("SELECT l.*, f.serving_g, f.serving_label, f.pack_g FROM food_log l"
+                      " LEFT JOIN foods f ON f.id = l.food_id"
+                      " WHERE l.profile_id=? AND l.date=? ORDER BY l.id", (profile_id, day_iso))
     totals = {k: round(sum(e[k] or 0 for e in entries), 1) for k in ("kcal", "protein", "carbs", "fat")}
     meals = {k: {"label": v, "entries": [e for e in entries if e["meal"] == k],
                  "kcal": round(sum(e["kcal"] or 0 for e in entries if e["meal"] == k))}
@@ -128,10 +134,10 @@ class FoodError(Exception):
     pass
 
 
-def _get(url):
+def _get(url, timeout=TIMEOUT):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
+        with urllib.request.urlopen(req, timeout=timeout) as res:
             return json.load(res)
     except urllib.error.HTTPError as e:
         if e.code == 404:
@@ -160,6 +166,21 @@ def _brand(value, name=""):
     return pick[:60] or None
 
 
+def _grams(text):
+    """Grammangabe aus einem Freitext wie "400 g", "0,5 l" oder "1 Riegel (40 g)"."""
+    m = re.search(r"(\d+(?:[.,]\d+)?)\s*(kg|g|ml|cl|l)\b", (text or "").lower())
+    if not m:
+        return None
+    value = float(m.group(1).replace(",", "."))
+    return round(value * {"kg": 1000, "g": 1, "ml": 1, "cl": 10, "l": 1000}[m.group(2)], 1) or None
+
+
+def _serving_label(text):
+    """Portions-Text aus Open Food Facts, sofern er mehr sagt als nur die Grammzahl."""
+    text = " ".join((text or "").split())[:60]
+    return text if re.search(r"[^\d\s.,gml()]", text.lower()) else None
+
+
 def _from_off(p):
     n = p.get("nutriments") or {}
     kcal = _num(n.get("energy-kcal_100g"))
@@ -179,36 +200,194 @@ def _from_off(p):
         "protein": _num(n.get("proteins_100g")),
         "carbs": _num(n.get("carbohydrates_100g")),
         "fat": _num(n.get("fat_100g")),
-        "serving_g": _num(p.get("serving_quantity")),
+        "serving_g": _num(p.get("serving_quantity")) or None,
+        "serving_label": _serving_label(p.get("serving_size")),
+        "pack_g": _num(p.get("product_quantity")) or _grams(p.get("quantity")),
         "source": "off",
+        # nur fuer die Reihenfolge der Treffer, wird nicht gespeichert
+        "dach": bool(DACH & set(p.get("countries_tags") or [])),
     }
 
 
-FIELDS = "code,product_name,product_name_de,brands,nutriments,serving_quantity"
-
-
+FIELDS = ("code,product_name,product_name_de,brands,nutriments,serving_quantity,serving_size,"
+          "quantity,product_quantity,countries_tags")
+SERVING_FIELDS = "code,serving_quantity,serving_size,product_quantity"
+DACH = {"en:germany", "en:austria", "en:switzerland"}
 SEARCH = "https://search.openfoodfacts.org/search"
+DETAIL_TIMEOUT = 4   # Portionen nachladen darf die Suche nicht lange aufhalten
+_servings = {}       # Barcode -> Portionsangaben, damit gleiche Suchen nichts nachladen
 
 
-def search_off(query, limit=20):
+# ------------------------------------------------------------ Relevanz
+def norm(text):
+    """Vergleichsform: klein, ohne Akzente/Umlaute, ohne Apostrophe und Satzzeichen.
+    "Müller" und "Mueller" ergeben beide "muller", "McDonald's" wird zu "mcdonalds"."""
+    text = (text or "").lower().replace("ß", "ss")
+    text = re.sub(r"(?<=[aou])e", "", text)   # ae/oe/ue wie ä/ö/ü – auf beiden Seiten gleich
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = re.sub(r"['’`´]", "", text)
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text).split())
+
+
+def compact(text):
+    return norm(text).replace(" ", "")
+
+
+def _similar(a, b):
+    return bool(a and b) and (a == b or SequenceMatcher(None, a, b).ratio() >= 0.8)
+
+
+def matches(food, query):
+    """Kommen alle Suchwoerter in Name oder Marke vor (als Wortanfang oder Teil)?"""
+    hay = norm(f"{food.get('name') or ''} {food.get('brand') or ''}")
+    return all(w in hay for w in norm(query).split())
+
+
+def score(food, query, uses=0):
+    """Relevanz eines Treffers: Name vor Marke, exakt vor Wortanfang vor Teilwort.
+    Marken werden ohne Leer- und Satzzeichen und etwas unscharf verglichen, damit
+    "macdonalds" auch "McDonald's" findet."""
+    q = norm(query)
+    words = q.split()
+    if not words:
+        return 0
+    name, brand = norm(food.get("name")), compact(food.get("brand"))
+    tokens = f"{name} {norm(food.get('brand'))}".split()
+    s = 0.0
+    if name == q:
+        s += 100
+    elif name.startswith(q):
+        s += 60
+    elif re.search(rf"\b{re.escape(q)}", name):
+        s += 40
+    elif q in name:
+        s += 20
+    hits = 0
+    for w in words:
+        if any(t.startswith(w) for t in tokens):
+            hits += 1
+        elif any(w in t or _similar(w, t) for t in tokens if len(w) >= 4):
+            hits += 0.6
+    s += 40 * hits / len(words)
+    long_words = [w for w in words if len(w) >= 4]
+    if brand and len(brand) >= 4 and (brand in compact(query) or _similar(brand, compact(query))
+                                      or any(_similar(brand, w) for w in long_words)):
+        s += 45
+    if food.get("dach"):
+        s += 25
+    if food.get("serving_g"):
+        s += 5
+    s += min(uses, 10) * 4   # oft gegessen -> weiter oben
+    return s - len(name) / 40   # bei Gleichstand das kuerzere, allgemeinere Produkt zuerst
+
+
+def rank(foods, query, uses=None):
+    uses = uses or {}
+    return sorted(foods, key=lambda f: -score(f, query, uses.get(f.get("id"), 0)))
+
+
+# --------------------------------------------------------------- Suche
+def brand_slugs(query):
+    """Moegliche Marken-Kuerzel von Open Food Facts ("McDonald's" heisst dort mcdonald-s)."""
+    words = norm(query).split()
+    if not words or len(words) > 2 or len("".join(words)) < 3:
+        return []
+    base = "-".join(words)
+    slugs = [base, "".join(words)]
+    if base.endswith("s") and len(base) > 4:
+        slugs.append(base[:-1] + "-s")   # Apostroph-s: mcdonalds -> mcdonald-s
+    if base.startswith("mac"):
+        slugs += [f"mc{x[3:]}" for x in list(slugs)]
+    return list(dict.fromkeys(slugs))
+
+
+def _search_hits(q, limit):
+    data = _get(f"{SEARCH}?" + urllib.parse.urlencode({
+        "q": q, "page_size": limit, "langs": "de", "fields": FIELDS})) or {}
+    return data.get("hits", [])
+
+
+def _main_search(query, limit):
     """Volltextsuche. Zuerst der neue Such-Dienst (schnell, kaum Limits), bei Problemen
     die klassische Suche als Rueckfall."""
     try:
-        data = _get(f"{SEARCH}?" + urllib.parse.urlencode({
-            "q": query, "page_size": limit, "langs": "de", "fields": FIELDS})) or {}
-        products = data.get("hits", [])
+        return _search_hits(query, limit)
     except FoodError:
         data = _get(f"{OFF}/cgi/search.pl?" + urllib.parse.urlencode({
             "search_terms": query, "search_simple": 1, "action": "process", "json": 1,
             "page_size": limit, "fields": FIELDS, "lc": "de", "cc": "de"})) or {}
-        products = data.get("products", [])
+        return data.get("products", [])
+
+
+def _brand_search(query):
+    """Alle Produkte einer Marke aus DE/AT/CH – die Volltextsuche findet Marken nur mit
+    exakter Schreibweise. Fehler hier sind egal, die Hauptsuche liefert trotzdem."""
+    slugs = brand_slugs(query)
+    if not slugs:
+        return []
+    tags = " OR ".join(f'"{s}"' for s in slugs)
+    countries = " OR ".join(f'"{c}"' for c in sorted(DACH))
+    try:
+        return _search_hits(f"brands_tags:({tags}) AND countries_tags:({countries})", 50)
+    except FoodError:
+        return []
+
+
+def _serving(barcode):
+    """Portion aus der Produktseite – der Such-Index kennt sie nicht."""
+    if barcode not in _servings:   # FoodError (z. B. HTTP 429) wird nicht gemerkt
+        if len(_servings) > 5000:
+            _servings.clear()
+        data = _get(f"{OFF}/api/v2/product/{urllib.parse.quote(barcode)}.json?fields={SERVING_FIELDS}",
+                    timeout=DETAIL_TIMEOUT) or {}
+        p = data.get("product") or {}
+        _servings[barcode] = {"serving_g": _num(p.get("serving_quantity")) or None,
+                              "serving_label": _serving_label(p.get("serving_size")),
+                              "pack_g": _num(p.get("product_quantity")) or None}
+    return _servings[barcode]
+
+
+def _add_servings(foods):
+    def one(food):
+        try:
+            extra = _serving(food["barcode"])
+        except FoodError:
+            return
+        for k, v in extra.items():
+            if v and not food.get(k):
+                food[k] = v
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        list(pool.map(one, [f for f in foods if f.get("barcode") and not f.get("serving_g")]))
+
+
+def search_off(query, limit=25, details=5):
+    """Treffer aus Open Food Facts, nach Relevanz sortiert, die ersten mit Portion.
+    Portionen nur fuer wenige Treffer nachladen: Open Food Facts begrenzt Produktabrufe
+    (HTTP 429), die restlichen holt die App erst beim Antippen (portion_off)."""
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        main = pool.submit(_main_search, query, 50)
+        brand = pool.submit(_brand_search, query)
+        products = brand.result() + main.result()   # main.result() wirft FoodError weiter
     out, seen = [], set()
     for p in products:
         food = _from_off(p)
-        if food and food["barcode"] not in seen:
-            seen.add(food["barcode"])
-            out.append(food)
-    return out
+        if not food:
+            continue
+        key = food["barcode"] or compact(f"{food['name']} {food['brand'] or ''}")
+        alt = compact(f"{food['name']} {food['brand'] or ''}")
+        if key in seen or alt in seen:
+            continue
+        seen.update((key, alt))
+        out.append(food)
+    out = rank(out, query)[:limit]
+    _add_servings(out[:details])
+    return rank(out, query)   # mit Portion zaehlt ein Treffer etwas mehr
+
+
+def portion_off(barcode):
+    """Portionsangaben eines einzelnen Produkts, ohne es lokal zu speichern."""
+    return _serving(barcode)
 
 
 def product_off(barcode):
@@ -220,6 +399,7 @@ def product_off(barcode):
 
 def remember(food):
     """Produkt lokal ablegen (einmal pro Barcode) und die gespeicherte Zeile liefern."""
+    food = {k: v for k, v in food.items() if k != "dach"}
     if food.get("barcode"):
         have = db.one("SELECT * FROM foods WHERE barcode=?", (food["barcode"],))
         if have:
