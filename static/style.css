@@ -717,13 +717,19 @@ button.chip { border: 0; font-family: inherit; }
 .wday.future:not(.planned) i { opacity: .5; }
 .wday .icon { width: 16px; height: 16px; }
 
-.checkin .scale { display: grid; grid-template-columns: 72px 1fr; align-items: center; gap: 4px var(--s2); margin: var(--s2) 0; }
+/* Stufen-Wort unter dem Label statt in eigener Zeile – drei Zeilen weniger im Check-in */
+.checkin .scale { display: grid; grid-template-columns: 76px 1fr; align-items: center; column-gap: var(--s2); margin: var(--s2) 0; }
+.checkin .scale .scale-label { grid-row: 1; grid-column: 1; align-self: end; }
+.checkin .scale .scale-dots { grid-row: 1 / span 2; grid-column: 2; }
 .scale-label { font-size: var(--fs-sm); font-weight: 600; }
 .scale-dots { display: flex; gap: 6px; }
 .dot-btn { flex: 1; min-height: var(--tap); border-radius: var(--r1); border: 1.5px solid var(--line-strong);
   background: var(--surface); color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
 .dot-btn.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-.scale-word { grid-column: 2; font-size: var(--fs-xs); color: var(--muted); }
+.scale-word { grid-row: 2; grid-column: 1; align-self: start; font-size: var(--fs-xs); color: var(--muted); }
+/* Vorbelegt, aber noch nicht gespeichert: nur umrandet */
+.dot-btn.pre { border-color: var(--accent); color: var(--accent); }
+.checkin .field-more { margin: var(--s2) 0; }
 .chips.sore { margin: var(--s2) 0 var(--s1); }
 .chips.sore .chip { min-height: var(--tap); flex-direction: column; justify-content: center; gap: 0; line-height: 1.15; padding: 4px 12px; }
 .chips.sore small { font-size: var(--fs-xs); opacity: .8; }
@@ -744,6 +750,13 @@ button.chip { border: 0; font-family: inherit; }
 
 .mini-card { display: flex; align-items: center; gap: var(--s3); color: inherit; text-decoration: none; cursor: pointer; }
 .mini-card .hint { margin: 0; }
+/* Ernaehrung auf "Heute": Link-Bereich plus Wasserzeile in einer Karte */
+.nutri-mini { display: grid; gap: var(--s3); }
+.water-line { display: flex; align-items: center; gap: var(--s2); padding-top: var(--s3); border-top: 1px solid var(--line); font-size: var(--fs-sm); }
+.water-line b { font-size: var(--fs-md); font-variant-numeric: tabular-nums; }
+.hero.is-done { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
+.hero.is-done .eyebrow { color: var(--ok); display: flex; align-items: center; gap: 4px; }
+.hero.is-done .eyebrow .icon { width: 14px; height: 14px; }
 .move-target { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; margin: var(--s4) 0; }
 .move-target b { font-size: 48px; font-variant-numeric: tabular-nums; line-height: 1; }
 .move-target .btn { margin-left: auto; }

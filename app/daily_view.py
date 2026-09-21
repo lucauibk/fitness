@@ -1,12 +1,26 @@
 """Die Startseite "Heute" in einer Antwort: Plan, Check-in, angepasstes Training,
 Mobility-Vorschlag, Wochen-Streak und Kalorienbilanz."""
-from . import activity, db, mobility, nutrition, readiness, stats
+from . import activity, db, mobility, nutrition, readiness, session_feedback, stats
 
 
 def adjusted_day(profile_id, day, checkin):
     plan = stats.day_plan(profile_id, day)
     plan["exercises"] = readiness.adjust(plan["exercises"], checkin)
     return plan
+
+
+def today_workout(profile_id, last):
+    """Die heute schon gespeicherte Einheit fuer die Erledigt-Karte auf "Heute" – mit Punktzahl.
+    Die Bewertung laeuft nur an Tagen, an denen wirklich trainiert wurde."""
+    if not last or stats._local_date(last["at"]) != stats.today():
+        return None
+    w = db.get_workout(last["id"])
+    if not w:
+        return None
+    fb = session_feedback.evaluate(profile_id, w)
+    return {"id": w["id"], "day_label": w.get("day_label") or "Training",
+            "sets": sum(1 for s in w["sets"] if not s.get("warmup")), "score": fb["score"],
+            "label": fb["label"]}
 
 
 def build(profile_id):
@@ -46,6 +60,7 @@ def build(profile_id):
     return {
         **base,
         "date": day_iso,
+        "today_workout": today_workout(profile_id, base.get("last_workout")),
         "checkin": checkin,
         "sore_today": sore,
         "alternative": alternative,

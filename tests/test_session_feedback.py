@@ -223,3 +223,37 @@ def test_nachgesendete_einheit_vergleicht_nach_datum_nicht_nach_reihenfolge(prof
     res = session_feedback.evaluate(profile_id, montag)
     # Gegen Sonntag (50 kg) ist 60 kg ein Fortschritt; gegen Dienstag (70 kg) waere es keiner.
     assert "kein Fortschritt" not in _texts(res), _texts(res)
+
+
+def test_heute_zeigt_die_heutige_einheit_mit_punktzahl(profile_id):
+    """Die Erledigt-Karte auf "Heute" braucht Tag, Arbeitssaetze und Punktzahl der Einheit von heute."""
+    from app import daily_view, stats
+    ex = _exercise("Heute-Bank")
+    day = _day(profile_id, [(ex, 3, 8, 12)])
+    start = datetime.now(timezone.utc) - timedelta(minutes=30)
+    w = _workout(profile_id, _sets(ex, 1, warmup=True) + _sets(ex, 3), day, start=start)
+
+    tw = daily_view.today_workout(profile_id, stats.today_view(profile_id)["last_workout"])
+    assert tw["id"] == w["id"]
+    assert tw["sets"] == 3            # Aufwaermsatz zaehlt nicht
+    assert tw["day_label"] == "Push"
+    assert 0 < tw["score"] <= 100
+
+
+def test_einheit_von_gestern_ist_nicht_heute_erledigt(profile_id):
+    from app import daily_view, stats
+    ex = _exercise("Gestern-Bank")
+    day = _day(profile_id, [(ex, 3, 8, 12)])
+    _workout(profile_id, _sets(ex, 3), day, start=datetime.now(timezone.utc) - timedelta(days=2))
+
+    assert daily_view.today_workout(profile_id, stats.today_view(profile_id)["last_workout"]) is None
+
+
+def test_gebuendelte_hinweise_stehen_in_einer_zeile(profile_id):
+    a = _exercise("Kniebeuge", kind="compound")
+    b = _exercise("Kreuzheben", kind="compound")
+    w = _workout(profile_id, _sets(a, 3) + _sets(b, 3))
+
+    warm = [m for m in session_feedback.evaluate(profile_id, w)["missing"] if m["key"] == "warmup"]
+    assert len(warm) == 1
+    assert "kein Aufwärmsatz" in warm[0]["text"]
