@@ -615,7 +615,9 @@ button.ex-head {
 .weekbars { display: flex; align-items: flex-end; gap: 5px; height: 72px; margin-top: var(--s2); }
 .weekbar { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 3px; height: 100%; }
 .weekbar i { display: block; width: 100%; border-radius: 4px 4px 2px 2px; background: var(--accent-soft); }
-.weekbar:last-child i { background: var(--accent); }
+.weekbar.now i { background: var(--accent); }
+.weekbar.now b { color: var(--accent); }
+.weekbar small { font-size: var(--fs-xs); color: var(--accent); font-weight: 650; line-height: 1; }
 .weekbar b { font-size: var(--fs-xs); font-weight: 650; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1em; }
 
 .spark { display: block; width: 100%; height: 64px; margin: var(--s2) 0; overflow: visible; }
@@ -696,6 +698,8 @@ button.chip { border: 0; font-family: inherit; }
 .kpis .big-number { display: flex; align-items: center; gap: 4px; font-size: var(--fs-lg); font-weight: 700; }
 .kpis span:not(.big-number) { display: block; font-size: var(--fs-xs); color: var(--muted); line-height: 1.3; }
 .kpis.compact { margin: var(--s2) 0; }
+/* Vier Kacheln am Handy als 2 × 2 – im automatischen Raster blieb eine allein in Zeile zwei */
+@media (max-width: 479px) { .kpis.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .big-number { font-size: 32px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .big-number .icon { color: var(--soon); }
 .center { text-align: center; }
@@ -826,6 +830,10 @@ button.chip { border: 0; font-family: inherit; }
 .badge-icon { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
   background: color-mix(in srgb, var(--soon) 18%, transparent); color: var(--soon); }
 .badge-icon .icon { width: 24px; height: 24px; }
+/* Farbe je Kategorie: Serien warm, Einheiten/Volumen Akzent, Cardio und Koerper gruen */
+.badge.m-workouts .badge-icon, .badge.m-volume_t .badge-icon { background: var(--accent-soft); color: var(--accent); }
+.badge.m-cardio_km .badge-icon, .badge.m-checkins .badge-icon, .badge.m-bodyfat .badge-icon {
+  background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
 .badge small { color: var(--muted); font-size: var(--fs-xs); text-align: center; line-height: 1.3; }
 @media (max-width: 379px) {
   .checkin .scale { grid-template-columns: 1fr auto; }
@@ -913,3 +921,4 @@ body.training-fullscreen.resting .content { padding-bottom: calc(var(--rest-h) +
 [data-amount] .chips { margin-top: var(--s2); }
 .feedback-more { margin-top: var(--s2); }
 .feedback-more .feedback-list { margin-top: var(--s2); }
+.page-actions { margin-bottom: var(--s4); }

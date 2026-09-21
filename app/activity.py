@@ -168,7 +168,7 @@ def achievements(profile_id):
     items = []
     for key, title, metric, threshold, desc in MILESTONES:
         value = m[metric]
-        items.append({"key": key, "title": title, "desc": desc, "value": value,
+        items.append({"key": key, "title": title, "desc": desc, "metric": metric, "value": value,
                       "threshold": threshold, "achieved": value >= threshold,
                       "progress": min(1, value / threshold) if threshold else 1})
     reached = [i for i in items if i["achieved"]]

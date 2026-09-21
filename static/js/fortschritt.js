@@ -1,7 +1,5 @@
-/** Fortschritt: Bestleistungen, Volumen und Häufigkeit, Körpergewicht, nächste Zielwerte. */
-import { $, api, closeSheet, empty, esc, fmtWeight, formData, formError, getProfile, icon,
-  openSheet, setsSummary, skeleton, submitOnce, toast } from "./util.js";
-import * as outbox from "./outbox.js";
+/** Fortschritt: fällige Steigerungen, Volumen und Häufigkeit, Bestleistungen, Körpergewicht. */
+import { api, empty, esc, fmtWeight, icon, openSheet, setsSummary, skeleton, toast } from "./util.js";
 
 let root;
 let data = null;
@@ -61,7 +59,7 @@ function frequencySection() {
   const maxCount = Math.max(1, ...weeks.map((w) => w.count));
   return `<div class="card">
     <p class="eyebrow">Diese Woche</p>
-    <div class="kpis compact">
+    <div class="kpis compact four">
       <div><span class="big-number">${f.this_week}</span><span>Einheiten</span></div>
       <div><span class="big-number">${vol.sets}</span><span>Sätze</span></div>
       <div><span class="big-number">${nf(vol.kg)}</span><span>kg bewegt</span></div>
@@ -74,71 +72,58 @@ function frequencySection() {
           <span class="bar-value">${g.sets}</span></div>`).join("")}</div>`
       : `<p class="hint">Diese Woche noch nichts eingetragen.</p>`}
     <h4 class="form-section">Letzte 8 Wochen</h4>
-    <div class="weekbars">${weeks.map((w) => `
-      <span class="weekbar" role="img" aria-label="Woche ab ${dm(w.week)}: ${w.count} Einheiten" title="Woche ab ${dm(w.week)}: ${w.count} Einheiten">
+    <div class="weekbars">${weeks.map((w, i) => {
+      const now = i === weeks.length - 1;   // laufende Woche immer beschriften, auch mit 0
+      return `<span class="weekbar ${now ? "now" : ""}" role="img" aria-label="${now ? "Diese Woche" : `Woche ab ${dm(w.week)}`}: ${w.count} Einheiten">
         <i style="height:${Math.max(4, (w.count / maxCount) * 100)}%"></i>
-        <b>${w.count || ""}</b></span>`).join("")}</div>
+        <b>${now ? w.count : w.count || ""}</b>${now ? "<small>jetzt</small>" : ""}</span>`;
+    }).join("")}</div>
   </div>`;
 }
 
+function bestRow(b) {
+  return `<div class="row-item" role="button" tabindex="0" data-history="${b.exercise_id}">
+    <div class="row-main">
+      <div class="row-title">${esc(b.exercise)}</div>
+      <div class="row-meta"><span>${esc(setsSummary([b], b.unit))}</span>
+        <span>${dm(b.date)}</span></div>
+    </div>
+    ${b.one_rm ? `<span class="row-aside">1RM ≈ <b>${String(b.one_rm).replace(".", ",")}</b></span>` : ""}
+    ${icon("right", "chev")}
+  </div>`;
+}
+
+/** Die fuenf juengsten Bestleistungen – das ist, was sich gerade bewegt. Der Rest klappt auf. */
 function bestSection() {
-  const best = data.best || [];
+  const best = [...(data.best || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)));
   if (!best.length) {
     return `<div class="card"><p class="eyebrow">Bestleistungen</p>
       <p class="hint">Sobald du die erste Einheit gespeichert hast, stehen hier deine Bestwerte.</p></div>`;
   }
+  const [top, rest] = [best.slice(0, 5), best.slice(5)];
   return `<div class="card">
-    <p class="eyebrow">Bestleistungen</p>
-    <div class="list flush">${best.map((b) => `
-      <div class="row-item" role="button" tabindex="0" data-history="${b.exercise_id}">
-        <div class="row-main">
-          <div class="row-title">${esc(b.exercise)}</div>
-          <div class="row-meta"><span>${esc(setsSummary([b], b.unit))}</span>
-            <span>${dm(b.date)}</span></div>
-        </div>
-        ${b.one_rm ? `<span class="row-aside">1RM ≈ <b>${String(b.one_rm).replace(".", ",")}</b></span>` : ""}
-        ${icon("right", "chev")}
-      </div>`).join("")}</div>
+    <p class="eyebrow">Bestleistungen · zuletzt verbessert</p>
+    <div class="list flush">${top.map(bestRow).join("")}</div>
+    ${rest.length ? `<details class="field-more"><summary>Alle ${best.length} anzeigen</summary>
+      <div class="list flush">${rest.map(bestRow).join("")}</div></details>` : ""}
   </div>`;
 }
 
+/** Nur Zahl und Trend – Verlauf und Eintragen gibt es unter Koerper. */
 function bodyweightSection() {
   const bw = data.bodyweight || [];
   const last = bw[bw.length - 1];
   const first = bw[0];
-  const diff = last && first && bw.length > 1 ? (last.kg - first.kg) : null;
-  const points = bw.map((p) => ({ value: p.avg, date: p.date }));
-  return `<div class="card">
-    <p class="eyebrow">Körpergewicht</p>
-    ${last ? `<div class="bw-head">
-        <span class="big-number">${String(last.kg).replace(".", ",")} kg</span>
-        <span class="hint">${dm(last.date)}${diff !== null
-          ? ` · ${diff >= 0 ? "+" : "−"}${String(Math.abs(Math.round(diff * 10) / 10)).replace(".", ",")} kg seit ${dm(first.date)}` : ""}</span>
-      </div>
-      ${sparkline(points, { label: (p) => `${p.value} kg` })}`
-      : `<p class="hint">Noch kein Gewicht eingetragen.</p>`}
-    <div class="btn-row">
-      <button type="button" class="btn small tonal" data-add-weight>${icon("plus")} Gewicht eintragen</button>
+  if (!last) return "";
+  const diff = first && bw.length > 1 ? (last.kg - first.kg) : null;
+  return `<a class="card mini-card" href="#fortschritt/koerper">
+    <span class="row-icon">${icon("weight")}</span>
+    <div class="grow"><p class="eyebrow">Körpergewicht</p>
+      <div class="card-title">${String(last.kg).replace(".", ",")} kg</div>
+      ${diff !== null ? `<p class="hint">${diff >= 0 ? "+" : "−"}${String(Math.abs(Math.round(diff * 10) / 10)).replace(".", ",")} kg seit ${dm(first.date)}</p>` : ""}
     </div>
-  </div>`;
-}
-
-function nextSection() {
-  const next = data.next || [];
-  if (!next.length) return "";
-  const block = next[0];
-  return `<div class="card">
-    <p class="eyebrow">Nächstes Mal · ${esc(block.day)}</p>
-    <div class="list flush">${block.items.map((i) => `
-      <div class="row-item">
-        <div class="row-main">
-          <div class="row-title">${esc(i.exercise)}</div>
-          <div class="row-meta"><span>${esc(i.reason)}</span></div>
-        </div>
-        <span class="row-aside">${i.sets} × ${i.reps}${i.weight != null
-          ? ` @ ${esc(fmtWeight(i.weight, i.unit))}` : ""}</span>
-      </div>`).join("")}</div>
-  </div>`;
+    ${icon("right", "chev")}
+  </a>`;
 }
 
 function render() {
@@ -148,8 +133,7 @@ function render() {
     ${readySection()}
     ${data.frequency.total ? frequencySection() : ""}
     ${nothing ? "" : bestSection()}
-    ${bodyweightSection()}
-    ${nextSection()}`;
+    ${bodyweightSection()}`;
 }
 
 export async function load() {
@@ -179,43 +163,10 @@ async function showHistory(exerciseId) {
   } catch (e) { toast(e.message, { error: true }); }
 }
 
-function addWeight() {
-  const today = new Date();
-  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const last = data.bodyweight[data.bodyweight.length - 1];
-  const sheet = openSheet({
-    title: "Gewicht eintragen",
-    body: `<form id="bwForm" class="form">
-      <div class="field-row">
-        <label class="field">Gewicht<input name="kg" type="number" inputmode="decimal" autofocus
-          min="1" max="500" step="0.1" required value="${last?.kg ?? ""}"> </label>
-        <label class="field">Datum<input name="date" type="date" required value="${iso}" max="${iso}"></label>
-      </div>
-      <p class="hint">Ein Eintrag pro Tag – ein zweiter überschreibt den ersten.</p>
-    </form>`,
-    footer: `<span class="grow"></span>
-      <button type="button" class="btn ghost" data-close>Abbrechen</button>
-      <button type="submit" class="btn primary" form="bwForm">Speichern</button>`,
-  });
-  const form = $("#bwForm", sheet);
-  submitOnce(form, async () => {
-    try {
-      const body = { ...formData(form), profile_id: getProfile() };
-      // Auch ohne Netz speicherbar: der Eintrag geht sonst in den Ausgang.
-      const res = await outbox.send({ path: "bodyweight", body });
-      closeSheet();
-      toast(res.queued ? "Gespeichert – wird gesendet, sobald wieder Verbindung da ist"
-        : "Gewicht gespeichert");
-      window.dispatchEvent(new CustomEvent("data-changed"));
-    } catch (e) { formError(form, e); }
-  });
-}
-
 export async function mount(el) {
   root = el;
   el.addEventListener("click", (ev) => {
     const h = ev.target.closest("[data-history]");
     if (h) return showHistory(Number(h.dataset.history));
-    if (ev.target.closest("[data-add-weight]")) return addWeight();
   });
 }

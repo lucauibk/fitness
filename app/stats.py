@@ -32,6 +32,9 @@ def today():
     return datetime.now(tz()).date()
 
 
+ONE_RM_MAX_REPS = 12
+
+
 def epley(weight, reps):
     """Geschätztes Einer-Maximum (Epley). Ohne Gewicht (Klimmzüge) nicht sinnvoll."""
     if not weight or not reps or reps <= 0:
@@ -80,7 +83,10 @@ def best_per_exercise(profile_id):
             best[key] = {
                 "exercise_id": key, "exercise": s["exercise"], "unit": s["unit"],
                 "muscle_group": s["muscle_group"], "reps": s["reps"], "weight": s["weight"],
-                "one_rm": epley(s["weight"], s["reps"]), "score": score,
+                # Die Schaetzung taugt nur bis etwa 12 Wiederholungen – aus 20 Wdh. hochgerechnet
+                # waere sie Fantasie. Gerankt wird weiter mit dem vollen Wert (score).
+                "one_rm": epley(s["weight"], s["reps"]) if s["reps"] <= ONE_RM_MAX_REPS else None,
+                "score": score,
                 "date": _local_date(s["at"]).isoformat() if _local_date(s["at"]) else None,
             }
     out = sorted(best.values(), key=lambda b: (b["muscle_group"] or "", b["exercise"]))

@@ -36,7 +36,7 @@ function render() {
   const pend = outbox.pending("measurements");
   const hasAny = Object.keys(data.latest).length;
   const girths = GIRTHS.filter((k) => data.latest[k]);
-  root.innerHTML = `<div class="btn-row wide">
+  root.innerHTML = `<div class="btn-row wide page-actions">
       <button type="button" class="btn primary" data-new>${icon("plus")} Messung eintragen</button>
       ${data.ai_available ? `<button type="button" class="btn tonal" data-scan>${icon("camera")} ViCoach-Screenshot</button>` : ""}
     </div>

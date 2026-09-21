@@ -12,16 +12,27 @@ const MAX_LIMIT = 200;
 const dateLabel = (iso) => parseYmd(iso).toLocaleDateString("de-AT",
   { weekday: "short", day: "numeric", month: "short" });
 
+/** Dauer aus Start und Ende; fehlt eins oder ist es unplausibel, keine Angabe. */
+function minutes(w) {
+  if (!w.started_at || !w.finished_at) return null;
+  const m = Math.round((new Date(w.finished_at) - new Date(w.started_at)) / 60000);
+  return m > 0 && m < 600 ? m : null;
+}
+
 function workoutRow(w) {
-  const sets = w.sets || [];
+  const sets = (w.sets || []).filter((s) => !s.warmup);
   const kg = sets.reduce((n, s) => n + (s.weight || 0) * (s.reps || 0), 0);
   const when = w.started_at || w.finished_at;
+  const dauer = minutes(w);
   return `<div class="row-item ${w.pending ? "is-pending" : ""}" ${w.pending ? "" : `role="button" tabindex="0" data-workout="${w.id}"`}>
     <span class="row-icon">${icon("dumbbell")}</span>
     <div class="row-main">
       <div class="row-title">${esc(w.day_label || w.title || "Training")}</div>
       <div class="row-meta">
         <span>${when ? dateLabel(when) : ""}</span>
+        ${dauer ? `<span>${dauer} min</span>` : ""}
+      </div>
+      <div class="row-meta">
         <span>${sets.length} Sätze</span>
         ${kg ? `<span>${Math.round(kg).toLocaleString("de-AT")} kg bewegt</span>` : ""}
       </div>
@@ -54,8 +65,18 @@ function render() {
   ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
   // Voll ausgeschoepft heisst: es gibt vermutlich noch aeltere Eintraege.
   const more = limit < MAX_LIMIT && ((workouts || []).length >= limit || (cardio || []).length >= limit);
+  // Nach Monat gruppiert – eine endlose Liste ohne Ueberschrift laesst sich nicht ueberfliegen.
+  const months = [];
+  for (const i of items) {
+    const key = String(i.at || "").slice(0, 7);
+    if (months[months.length - 1]?.key !== key) months.push({ key, items: [] });
+    months[months.length - 1].items.push(i);
+  }
+  const monthLabel = (key) => (key.length === 7
+    ? parseYmd(`${key}-01`).toLocaleDateString("de-AT", { month: "long", year: "numeric" }) : "");
   root.innerHTML = items.length
-    ? `<div class="list">${items.map((i) => i.html).join("")}</div>
+    ? `${months.map((m) => `<h3 class="group-title">${esc(monthLabel(m.key))}</h3>
+      <div class="list">${m.items.map((i) => i.html).join("")}</div>`).join("")}
       ${more ? `<div class="btn-row"><button type="button" class="btn ghost" data-more>Ältere laden</button></div>` : ""}`
     : empty("Noch nichts trainiert", "Gespeicherte Einheiten und Cardio erscheinen hier.");
 }
