@@ -1,6 +1,10 @@
 """Die Startseite "Heute" in einer Antwort: Plan, Check-in, angepasstes Training,
 Mobility-Vorschlag, Wochen-Streak und Kalorienbilanz."""
+import logging
+
 from . import activity, db, mobility, nutrition, readiness, session_feedback, stats
+
+log = logging.getLogger(__name__)
 
 
 def adjusted_day(profile_id, day, checkin):
@@ -17,7 +21,11 @@ def today_workout(profile_id, last):
     w = db.get_workout(last["id"])
     if not w:
         return None
-    fb = session_feedback.evaluate(profile_id, w)
+    try:
+        fb = session_feedback.evaluate(profile_id, w)
+    except Exception:   # noqa: BLE001 – die Karte ist Beiwerk, die Startseite darf daran nicht haengen
+        log.exception("Bewertung fuer die Heute-Karte fehlgeschlagen (Einheit %s)", w["id"])
+        return None
     return {"id": w["id"], "day_label": w.get("day_label") or "Training",
             "sets": sum(1 for s in w["sets"] if not s.get("warmup")), "score": fb["score"],
             "label": fb["label"]}
