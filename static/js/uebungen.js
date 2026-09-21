@@ -17,8 +17,12 @@ function listHtml() {
   if (!items.length) return `<p class="hint pad">Keine Übung passt.</p>`;
   const byGroup = {};
   for (const e of items) (byGroup[e.muscle_group || "sonstige"] ||= []).push(e);
+  // Ohne Suche und Filter nur die Gruppenkoepfe – 49 Zeilen am Stueck sind keine Bibliothek,
+  // sondern eine Wand. Suche oder Chip klappt die Treffer direkt auf.
+  const open = Boolean(q || group);
   return Object.entries(byGroup).map(([g, list]) => `
-    <h3 class="group-title">${esc(GROUPS[g] || "Sonstige")}<span class="count-muted">${list.length}</span></h3>
+    <details class="group-details" ${open ? "open" : ""}>
+    <summary class="group-title">${esc(GROUPS[g] || "Sonstige")}<span class="count-muted">${list.length}</span>${icon("down", "chev")}</summary>
     <div class="list">${list.map((e) => `
       <div class="row-item" role="button" tabindex="0" data-ex="${e.id}">
         <div class="row-main">
@@ -26,7 +30,7 @@ function listHtml() {
           <div class="row-meta">${e.equipment ? `<span>${esc(e.equipment)}</span>` : ""}
             ${e.instructions ? "" : `<span class="faint">ohne Anleitung</span>`}</div>
         </div>${icon("right", "chev")}
-      </div>`).join("")}</div>`).join("");
+      </div>`).join("")}</div></details>`).join("");
 }
 
 function render() {

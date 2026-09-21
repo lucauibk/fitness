@@ -261,6 +261,24 @@ export function openSheet({ title = "", body = "", footer = "", wide = false } =
   return sheet;
 }
 
+/** Kleines Aktionsmenue als Sheet: seltene Aktionen hinter einem "⋯" statt einer Knopfreihe.
+ *  items: [{ label, icon, run, danger }] – run laeuft nach dem Schliessen. */
+export function actionMenu(title, items) {
+  const list = items.filter(Boolean);
+  const sheet = openSheet({
+    title,
+    body: `<div class="menu-list">${list.map((it, i) => `<button type="button"
+      class="menu-item ${it.danger ? "danger" : ""}" data-menu-item="${i}">${icon(it.icon || "right")} ${esc(it.label)}</button>`).join("")}</div>`,
+  });
+  sheet.addEventListener("click", (ev) => {
+    const b = ev.target.closest("[data-menu-item]");
+    if (!b) return;
+    closeSheet();
+    list[Number(b.dataset.menuItem)].run();
+  });
+  return sheet;
+}
+
 export function focusSheet(sheet = document.querySelector("#sheet .sheet")) {
   if (!sheet) return;
   // Am Handy nur in Anlege-Formularen ([autofocus]) direkt die Tastatur oeffnen

@@ -257,3 +257,19 @@ def test_gebuendelte_hinweise_stehen_in_einer_zeile(profile_id):
     warm = [m for m in session_feedback.evaluate(profile_id, w)["missing"] if m["key"] == "warmup"]
     assert len(warm) == 1
     assert "kein Aufwärmsatz" in warm[0]["text"]
+
+
+def test_1rm_wird_ueber_12_wiederholungen_nicht_angezeigt(profile_id):
+    """Aus 20 Wdh. hochgerechnet ist die Schaetzung wertlos. Die Bestleistung bleibt trotzdem
+    der Satz mit dem hoechsten Wert – die Rangfolge aendert sich nicht."""
+    from app import stats
+    ex = _exercise("Wadenheben-1rm")
+    _workout(profile_id, _sets(ex, 1, reps=20, weight=60))
+    best = next(b for b in stats.best_per_exercise(profile_id) if b["exercise_id"] == ex)
+    assert best["reps"] == 20
+    assert best["one_rm"] is None
+
+    ex2 = _exercise("Bank-1rm")
+    _workout(profile_id, _sets(ex2, 1, reps=10, weight=60))
+    best2 = next(b for b in stats.best_per_exercise(profile_id) if b["exercise_id"] == ex2)
+    assert best2["one_rm"] == 80.0

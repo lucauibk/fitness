@@ -1,7 +1,7 @@
 /** Plan: Splits anlegen und wechseln, Trainingstage und Übungen samt Wiederholungs-Bereich. */
 import { openWizard } from "./wizard.js";
-import { $, api, armDelete, busy, closeSheet, deleteLater, empty, esc, formData, formError, icon,
-  getProfile, isPendingDelete, openSheet, skeleton, submitOnce, toast, WEEKDAYS,
+import { $, actionMenu, api, armDelete, busy, closeSheet, deleteLater, empty, esc, formData, formError, icon,
+  getProfile, isPendingDelete, openSheet, prefs, skeleton, submitOnce, toast, WEEKDAYS,
   WEEKDAYS_LONG } from "./util.js";
 
 let root;
@@ -11,6 +11,9 @@ let openSplitId = null;
 let sortingDay = null;   // Pfeile nur in dem Tag zeigen, den man gerade sortiert
 let exercises = null;
 let confirmActivate = null;   // { id, timer } – zweiter Tipp auf "Wechseln" bestaetigt
+// Aufgeklappte Trainingstage – eingeklappt ist der Plan eine Uebersicht statt einer langen Liste.
+const openDays = new Set(prefs.get("plan.openDays") || []);
+const saveOpenDays = () => prefs.set("plan.openDays", [...openDays]);
 const PATTERNS = {
   h_push: "Drücken nach vorn (Bankdrücken …)", v_push: "Drücken über Kopf",
   chest_iso: "Brust isoliert (Butterfly …)", h_pull: "Rudern", v_pull: "Ziehen von oben (Latzug …)",
@@ -51,15 +54,16 @@ function exerciseRow(item, sorting = false) {
 }
 
 function dayCard(day) {
-  return `<div class="card ${sortingDay === day.id ? "sorting" : ""}">
-    <div class="ex-head">
+  const open = openDays.has(day.id) || sortingDay === day.id;
+  return `<details class="card day-details ${sortingDay === day.id ? "sorting" : ""}" data-day="${day.id}" ${open ? "open" : ""}>
+    <summary class="ex-head">
       <div>
         <div class="card-title">${esc(day.label)}</div>
         <div class="row-meta"><span>${daysLabel(day.weekdays)}</span>
           <span>${day.exercises.length} Übungen</span></div>
       </div>
-      <button type="button" class="icon-btn" data-edit-day="${day.id}" aria-label="Trainingstag bearbeiten">${icon("edit")}</button>
-    </div>
+      ${icon("down", "chev")}
+    </summary>
     <div class="list flush">${day.exercises.filter((e) => !isPendingDelete(`split-exercises/${e.id}`))
       .map((e) => exerciseRow(e, sortingDay === day.id)).join("")
       || `<p class="hint pad">Noch keine Übungen.</p>`}</div>
@@ -67,8 +71,10 @@ function dayCard(day) {
       <button type="button" class="btn small ghost" data-add-item="${day.id}">${icon("plus")} Übung</button>
       ${day.exercises.length > 1 ? `<button type="button" class="btn small ghost" data-sort="${day.id}">${
         sortingDay === day.id ? "Fertig" : "Reihenfolge"}</button>` : ""}
+      <span class="grow"></span>
+      <button type="button" class="btn small ghost" data-edit-day="${day.id}">${icon("edit")} Tag</button>
     </div>
-  </div>`;
+  </details>`;
 }
 
 function render() {
@@ -91,18 +97,15 @@ function render() {
         </button>
         ${s.active ? `<span class="pill ok">aktiv</span>` : `<button type="button" class="btn small tonal" data-activate="${s.id}">Wechseln</button>`}
       </div>`).join("")}</div>
-    <div class="btn-row">
-      <button type="button" class="btn ghost" data-add-split>${icon("plus")} Split</button>
-      <button type="button" class="btn ghost" data-wizard>${icon("spark")} Mit Assistent</button>
-      <button type="button" class="btn ghost" data-exercises>Übungen verwalten</button>
-      ${open?.days.length ? `<button type="button" class="btn ghost" data-check>${icon("spark")} Plan verbessern</button>` : ""}
-    </div>
-    ${open ? `<h3 class="group-title">${esc(open.name)}
-        <button type="button" class="link-btn" data-edit-split="${open.id}">Umbenennen</button></h3>
+    ${open ? `<div class="plan-head">
+        <h3 class="group-title">${esc(open.name)}</h3>
+        <button type="button" class="btn small ghost" data-plan-menu aria-label="Aktionen für den Plan">⋯ Plan</button>
+      </div>
       ${open.days.filter((d) => !isPendingDelete(`split-days/${d.id}`)).map(dayCard).join("")}
       <div class="btn-row">
         <button type="button" class="btn ghost" data-add-day="${open.id}">${icon("plus")} Trainingstag</button>
-      </div>` : `<p class="hint pad">Tippe auf einen Split, um seine Tage und Übungen zu sehen.</p>`}`;
+      </div>` : `<p class="hint pad">Tippe auf einen Split, um seine Tage und Übungen zu sehen.</p>
+      <div class="btn-row"><button type="button" class="btn small ghost" data-plan-menu>⋯ Plan</button></div>`}`;
   if (refocus) { root.querySelector(refocus)?.focus({ preventScroll: true }); refocus = null; }
 }
 
@@ -521,9 +524,32 @@ async function improvePlan() {
   });
 }
 
+/** Seltene Plan-Aktionen – vorher vier Knoepfe ueber dem Plan. */
+function openPlanMenu() {
+  const open = detail && splits?.some((s) => s.id === detail.id) ? detail : null;
+  actionMenu(open ? esc(open.name) : "Plan", [
+    open?.days.length && { label: "Plan verbessern", icon: "spark", run: improvePlan },
+    open && { label: "Split umbenennen", icon: "edit", run: () => editSplit(splits.find((s) => s.id === open.id)) },
+    { label: "Neuen Plan mit Assistent", icon: "spark", run: async () => {
+      const profile = await api(`profiles/${getProfile()}`).catch(() => null);
+      openWizard(profile);
+    } },
+    { label: "Leeren Split anlegen", icon: "plus", run: () => editSplit(null) },
+    { label: "Übungskatalog bearbeiten", icon: "dumbbell", run: manageExercises },
+  ]);
+}
+
 // --------------------------------------------------------------- Mount
 export async function mount(el) {
   root = el;
+  // toggle blubbert nicht – im Capture mitlesen, welche Tage offen sind.
+  el.addEventListener("toggle", (ev) => {
+    const d = ev.target.closest?.("[data-day]");
+    if (!d || ev.target !== d) return;
+    const id = Number(d.dataset.day);
+    if (d.open) openDays.add(id); else openDays.delete(id);
+    saveOpenDays();
+  }, true);
   el.addEventListener("click", async (ev) => {
     const t = (sel) => ev.target.closest(sel);
     const act = t("[data-activate]");
@@ -586,13 +612,14 @@ export async function mount(el) {
     const editD = t("[data-edit-day]");
     if (editD) return editDay(detail.days.find((d) => d.id === Number(editD.dataset.editDay)));
     const addItem = t("[data-add-item]");
-    if (addItem) return editItem(null, Number(addItem.dataset.addItem));
+    if (addItem) { openDays.add(Number(addItem.dataset.addItem)); saveOpenDays(); return editItem(null, Number(addItem.dataset.addItem)); }
     const editI = t("[data-edit-item]");
     if (editI) {
       const id = Number(editI.dataset.editItem);
       const item = detail.days.flatMap((d) => d.exercises).find((e) => e.id === id);
       if (item) return editItem(item);
     }
+    if (t("[data-plan-menu]")) return openPlanMenu();
     if (t("[data-exercises]")) return manageExercises();
     if (t("[data-check]")) return improvePlan();
     if (t("[data-wizard]")) {

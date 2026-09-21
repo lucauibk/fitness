@@ -922,3 +922,13 @@ body.training-fullscreen.resting .content { padding-bottom: calc(var(--rest-h) +
 .feedback-more { margin-top: var(--s2); }
 .feedback-more .feedback-list { margin-top: var(--s2); }
 .page-actions { margin-bottom: var(--s4); }
+
+/* Plan: Trainingstage eingeklappt, Aktionen hinter "⋯ Plan" */
+.day-details > summary { list-style: none; cursor: pointer; min-height: var(--tap); align-items: center; }
+.day-details > summary::-webkit-details-marker { display: none; }
+.day-details > summary .chev { transition: transform 0.2s; }
+.day-details[open] > summary .chev { transform: rotate(180deg); }
+.day-details[open] > summary { margin-bottom: var(--s2); }
+.day-details:not([open]) { padding-block: var(--s3); }
+.plan-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); margin-top: var(--s4); }
+.plan-head .group-title { margin: 0; }
