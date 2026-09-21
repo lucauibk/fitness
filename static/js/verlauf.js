@@ -1,13 +1,15 @@
 /** Verlauf: Krafteinheiten und Cardio gemischt nach Datum. */
 import { $, $$, api, armDelete, closeSheet, deleteLater, empty, esc, feedbackHtml, icon,
-  isPendingDelete, openSheet, setsSummary, skeleton, toast } from "./util.js";
+  isPendingDelete, openSheet, parseYmd, setsSummary, skeleton, toast } from "./util.js";
 import * as outbox from "./outbox.js";
 
 let root;
 let workouts = null;
 let cardio = null;
+let limit = 60;          // "Ältere laden" erhoeht in Schritten; die API liefert bis 200 Einheiten
+const MAX_LIMIT = 200;
 
-const dateLabel = (iso) => new Date(iso).toLocaleDateString("de-AT",
+const dateLabel = (iso) => parseYmd(iso).toLocaleDateString("de-AT",
   { weekday: "short", day: "numeric", month: "short" });
 
 function workoutRow(w) {
@@ -50,15 +52,25 @@ function render() {
     ...(cardio || []).filter((c) => !isPendingDelete(`cardio/${c.id}`))
       .map((c) => ({ at: c.date, html: cardioRow(c) })),
   ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  // Voll ausgeschoepft heisst: es gibt vermutlich noch aeltere Eintraege.
+  const more = limit < MAX_LIMIT && ((workouts || []).length >= limit || (cardio || []).length >= limit);
   root.innerHTML = items.length
-    ? `<div class="list">${items.map((i) => i.html).join("")}</div>`
+    ? `<div class="list">${items.map((i) => i.html).join("")}</div>
+      ${more ? `<div class="btn-row"><button type="button" class="btn ghost" data-more>Ältere laden</button></div>` : ""}`
     : empty("Noch nichts trainiert", "Gespeicherte Einheiten und Cardio erscheinen hier.");
 }
 
 export async function load() {
   if (!workouts) root.innerHTML = skeleton(4);
-  [workouts, cardio] = await Promise.all([api("workouts?limit=60"), api("cardio?limit=60")]);
+  [workouts, cardio] = await Promise.all([api(`workouts?limit=${limit}`), api(`cardio?limit=${limit}`)]);
   render();
+}
+
+async function loadMore(btn) {
+  limit = Math.min(MAX_LIMIT, limit + 60);
+  btn.disabled = true;
+  btn.textContent = "Lädt …";
+  try { await load(); } catch (e) { toast(e.message, { error: true }); render(); }
 }
 
 function openWorkout(id) {
@@ -149,7 +161,7 @@ function openCardio(id) {
       <div class="kpis compact">
         <div><span class="big-number">${Math.round(c.minutes)}</span><span>Minuten</span></div>
         ${c.distance_km ? `<div><span class="big-number">${String(c.distance_km).replace(".", ",")}</span><span>km</span></div>` : ""}
-        ${c.kcal ? `<div><span class="big-number">${Math.round(c.kcal)}</span><span>kcal (geschätzt)</span></div>` : ""}
+        ${c.kcal ? `<div><span class="big-number">${Math.round(c.kcal)}</span><span>kcal</span></div>` : ""}
         ${c.avg_hr ? `<div><span class="big-number">${c.avg_hr}</span><span>Puls ⌀</span></div>` : ""}
       </div>${c.notes ? `<p class="hint pad">${esc(c.notes)}</p>` : ""}`,
     footer: `<button type="button" class="btn danger ghost" data-delete>${icon("trash")} Löschen</button>
@@ -164,6 +176,8 @@ function openCardio(id) {
 export async function mount(el) {
   root = el;
   el.addEventListener("click", (ev) => {
+    const more = ev.target.closest("[data-more]");
+    if (more) return loadMore(more);
     const w = ev.target.closest("[data-workout]");
     if (w) return openWorkout(Number(w.dataset.workout));
     const c = ev.target.closest("[data-cardio]");

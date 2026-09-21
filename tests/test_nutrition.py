@@ -1,5 +1,8 @@
+import os
 import urllib.parse
 from datetime import date
+
+import pytest
 
 from app import db, nutrition
 
@@ -121,3 +124,40 @@ def test_local_search_ignores_case_umlauts_and_prefers_used(profile_id):
     ids = [f["id"] for f in found]
     assert a["id"] in ids and ids.index(b["id"]) < ids.index(a["id"])
     assert found[0]["uses"] == 3 and found[0]["last_grams"] == 60
+
+
+# ------------------------------------------------ eigene Lebensmittel
+def _own(name="Haferbrei", **kw):
+    from app.routes import nutrition as routes
+    body = routes.FoodIn(name=name, kcal=kw.pop("kcal", 100), **kw)
+    return routes, routes.add_food(body)
+
+
+def test_eigenes_lebensmittel_ohne_barcode_wird_nicht_doppelt_angelegt():
+    name = f"Brei-{os.urandom(3).hex()}"
+    routes, first = _own(name, kcal=100)
+    _, again = _own(name.upper(), kcal=120)
+    assert again["id"] == first["id"]
+    assert again["kcal"] == 120
+
+
+def test_eigenes_lebensmittel_bearbeiten_und_loeschen(profile_id):
+    routes, food = _own(f"Brot-{os.urandom(3).hex()}", kcal=250)
+    changed = routes.patch_food(food["id"], routes.FoodIn(name=food["name"], kcal=260, serving_g=40))
+    assert changed["kcal"] == 260 and changed["serving_g"] == 40
+    with db.connect() as c:
+        c.execute("INSERT INTO food_log (profile_id, date, meal, food_id, name, grams, kcal)"
+                  " VALUES (?,?,?,?,?,?,?)", (profile_id, "2026-09-01", "abend", food["id"], food["name"], 80, 208))
+    routes.delete_food(food["id"])
+    assert db.get_row("foods", food["id"]) is None
+    row = db.one("SELECT * FROM food_log WHERE name=?", (food["name"],))
+    assert row["food_id"] is None and row["kcal"] == 208   # der alte Eintrag bleibt
+
+
+def test_fremde_produkte_sind_nicht_aenderbar():
+    from fastapi import HTTPException
+    from app.routes import nutrition as routes
+    food = db.insert_row("foods", {"name": "OFF-Produkt", "kcal": 50, "source": "off",
+                                   "barcode": str(10**12 + int.from_bytes(os.urandom(3), "big"))})
+    with pytest.raises(HTTPException):
+        routes.delete_food(food["id"])

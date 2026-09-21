@@ -872,6 +872,7 @@ body.training-fullscreen.resting .content { padding-bottom: calc(var(--rest-h) +
 
 /* Ernaehrung: Trefferliste und Mengeneingabe */
 .food-row mark { background: var(--accent-soft); color: inherit; border-radius: 3px; padding: 0 1px; }
+.meal .copy-meal { margin-top: var(--s2); font-size: var(--fs-sm); }
 .food-kcal { display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; line-height: 1.2; }
 .food-kcal b { color: var(--text); font-weight: 650; white-space: nowrap; }
 .food-kcal small { font-size: var(--fs-xs); }

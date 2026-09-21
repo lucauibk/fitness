@@ -408,4 +408,13 @@ def remember(food):
         have = db.one("SELECT * FROM foods WHERE barcode=?", (food["barcode"],))
         if have:
             return have
+    elif food.get("source", "eigen") == "eigen":
+        # Ohne Barcode entstand frueher bei jedem Anlegen eine Dublette. Gleicher Name und
+        # gleiche Marke = dasselbe Lebensmittel: die neuen Werte uebernehmen.
+        have = next((f for f in db.rows("SELECT * FROM foods WHERE source='eigen' AND barcode IS NULL")
+                     if f["name"].casefold() == food["name"].casefold()
+                     and (f["brand"] or "").casefold() == (food.get("brand") or "").casefold()), None)
+        if have:
+            return db.update_row("foods", have["id"], {k: v for k, v in food.items()
+                                                       if k not in ("source", "barcode")})
     return db.insert_row("foods", {**food, "created_at": db.now()})

@@ -33,6 +33,7 @@ function exerciseRow(item, sorting = false) {
       <div class="row-meta">
         <span>${item.target_sets} × ${range(item.target_reps_min, item.target_reps_max)} Whd.</span>
         ${item.target_weight != null ? `<span>${String(item.target_weight).replace(".", ",")} kg</span>` : ""}
+        ${item.rest_seconds ? `<span>Pause ${item.rest_seconds} s</span>` : ""}
         ${item.notes ? `<span>${esc(item.notes)}</span>` : ""}
       </div>
     </div>`;
@@ -233,9 +234,12 @@ function itemFields(item, exList, dayId) {
     <p class="hint">Schaffst du in <b>allen</b> Sätzen die obere Zahl, schlägt die App beim
       nächsten Mal mehr Gewicht vor und startet wieder bei der unteren.</p>
     <details class="field-more">
-      <summary>Startgewicht und Notiz</summary>
+      <summary>Startgewicht, Pause und Notiz</summary>
       <label class="field">Gewicht<input name="target_weight" type="number" inputmode="decimal"
         min="0" max="1000" step="0.5" value="${item?.target_weight ?? ""}" placeholder="optional"></label>
+      <label class="field">Pause (Sekunden)<input name="rest_seconds" type="number" inputmode="numeric"
+        min="30" max="300" step="15" value="${item?.rest_seconds ?? ""}"
+        placeholder="Standard: 120 Grundübung, 75 sonst"></label>
       <label class="field">Notiz<input name="notes" maxlength="200"
         value="${esc(item?.notes || "")}" placeholder="z. B. langsam ablassen"></label>
     </details>

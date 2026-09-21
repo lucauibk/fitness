@@ -59,7 +59,9 @@ function render() {
           <label class="field">Puls ⌀<input name="avg_hr" type="number" inputmode="numeric" min="30" max="240" placeholder="optional"></label>
           <label class="field">Datum<input name="date" type="date" value="${todayIso()}" max="${todayIso()}" required></label>
         </div>
-        <p class="hint" data-estimate>Kalorien werden aus Aktivität, Dauer und Gewicht geschätzt.</p>
+        <label class="field">Kalorien (kcal)<input name="kcal" type="number" inputmode="numeric" min="0" max="10000"
+          placeholder="leer = schätzen" aria-describedby="cardioEstimate"></label>
+        <p class="hint" id="cardioEstimate" data-estimate>Kalorien werden aus Aktivität, Dauer und Gewicht geschätzt – oder den Wert der Pulsuhr eintragen.</p>
         <div class="btn-row"><button type="submit" class="btn primary">${icon("check")} Speichern</button></div>
       </form>
     </div>
@@ -78,8 +80,9 @@ function render() {
   const form = $("#cardioForm", root);
   const upd = () => {
     const k = estimate(form);
-    $("[data-estimate]", root).textContent = k ? `≈ ${k} kcal (geschätzt)`
-      : "Kalorien werden aus Aktivität, Dauer und Gewicht geschätzt.";
+    $("[data-estimate]", root).textContent = form.kcal.value ? "Eigener Wert wird übernommen."
+      : k ? `≈ ${k} kcal geschätzt – oder den Wert der Pulsuhr eintragen.`
+        : "Kalorien werden aus Aktivität, Dauer und Gewicht geschätzt – oder den Wert der Pulsuhr eintragen.";
   };
   form.addEventListener("input", upd);
   submitOnce(form, async () => {

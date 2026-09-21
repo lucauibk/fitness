@@ -119,9 +119,38 @@ function render() {
             <div class="row-title">${esc(e.preview?.name || "Eintrag")}</div>
             <div class="row-meta"><span>${num(e.grams)} g</span><span class="pill">wartet</span></div></div>
             <span class="row-aside">${num(e.preview?.kcal)} kcal</span></div>`).join("")}
-        </div>` : ""}
+        </div>` : `<button type="button" class="link-btn copy-meal" data-copy-meal="${key}">${icon("refresh")} Wie am Vortag</button>`}
       </div>`;
     }).join("")}`;
+}
+
+/** Dieselbe Mahlzeit wie am Vortag eintragen – das Fruehstueck ist oft jeden Tag gleich.
+ *  Jeder Eintrag geht einzeln durch den Ausgang, also auch offline. */
+async function copyMeal(meal, btn) {
+  const prev = parseYmd(data.date);
+  prev.setDate(prev.getDate() - 1);
+  await busy(btn, async () => {
+    let before;
+    try {
+      before = await api(`nutrition/day?date=${iso(prev)}`);
+    } catch (e) {
+      return toast(e.offline ? "Der Vortag ist offline nicht geladen." : e.message, { error: true });
+    }
+    const entries = (before.meals[meal]?.entries || []).filter((e) => e.food_id);
+    if (!entries.length) return toast(`Am Vortag ist bei „${MEALS[meal]}“ nichts eingetragen.`, { error: true });
+    let queued = 0;
+    try {
+      for (const e of entries) {
+        const res = await outbox.send({ path: "food-log", body: {
+          profile_id: getProfile(), food_id: e.food_id, grams: e.grams, meal, date: data.date,
+          client_id: outbox.uuid(), preview: { name: e.name, kcal: Math.round(e.kcal || 0) } } });
+        if (res.queued) queued += 1;
+      }
+    } catch (e) { return toast(e.message, { error: true }); }
+    toast(queued ? `${entries.length} Einträge übernommen – werden gesendet, sobald wieder Verbindung da ist`
+      : `${MEALS[meal]} vom Vortag übernommen (${entries.length} ${entries.length === 1 ? "Eintrag" : "Einträge"})`);
+    window.dispatchEvent(new CustomEvent("data-changed"));
+  });
 }
 
 export async function load() {
@@ -341,6 +370,7 @@ function openAdd(meal) {
     const s = servingOf(f);
     body.innerHTML = `<button type="button" class="link-btn" data-back>${icon("left")} Zurück</button>
       <h3 class="card-title">${esc(f.name)}</h3>
+      ${f.source === "eigen" && f.id ? `<button type="button" class="link-btn" data-edit-food>${icon("edit")} Lebensmittel bearbeiten</button>` : ""}
       <p class="hint">${f.brand ? `${esc(f.brand)} · ` : ""}je 100 g: ${num(f.kcal)} kcal · E ${num(f.protein, 1)} · K ${num(f.carbs, 1)} · F ${num(f.fat, 1)}
         ${s ? `<br>${esc(s.text)}: ${num(kcalFor(f, s.g))} kcal` : ""}</p>
       <div data-amount></div>
@@ -410,35 +440,57 @@ function openAdd(meal) {
     }
   }
 
+  /** Eigenes Lebensmittel anlegen – oder, mit preset.id, ein selbst angelegtes bearbeiten. */
   function openOwn(preset = {}) {
+    const edit = Boolean(preset.id);
+    const v = (k) => esc(preset[k] ?? "");
     body.innerHTML = `<button type="button" class="link-btn" data-back>${icon("left")} Zurück</button>
       <form id="foodForm" class="form">
         <label class="field">Name<input name="name" maxlength="120" required autofocus value="${esc(preset.name || st.query || "")}"></label>
-        <label class="field">Marke<input name="brand" maxlength="60" placeholder="optional"></label>
+        <label class="field">Marke<input name="brand" maxlength="60" placeholder="optional" value="${v("brand")}"></label>
         <p class="hint">Nährwerte je 100 g (stehen auf der Packung):</p>
         <div class="field-row">
-          <label class="field">kcal<input name="kcal" type="number" inputmode="decimal" min="0" max="950" step="0.1" required></label>
-          <label class="field">Eiweiß<input name="protein" type="number" inputmode="decimal" min="0" max="100" step="0.1"></label>
+          <label class="field">kcal<input name="kcal" type="number" inputmode="decimal" min="0" max="950" step="0.1" required value="${v("kcal")}"></label>
+          <label class="field">Eiweiß<input name="protein" type="number" inputmode="decimal" min="0" max="100" step="0.1" value="${v("protein")}"></label>
         </div>
         <div class="field-row">
-          <label class="field">Kohlenhydrate<input name="carbs" type="number" inputmode="decimal" min="0" max="100" step="0.1"></label>
-          <label class="field">Fett<input name="fat" type="number" inputmode="decimal" min="0" max="100" step="0.1"></label>
+          <label class="field">Kohlenhydrate<input name="carbs" type="number" inputmode="decimal" min="0" max="100" step="0.1" value="${v("carbs")}"></label>
+          <label class="field">Fett<input name="fat" type="number" inputmode="decimal" min="0" max="100" step="0.1" value="${v("fat")}"></label>
         </div>
         <p class="hint">Portion – dann trägst du später einfach „1 Scheibe“ statt Gramm ein:</p>
         <div class="field-row">
-          <label class="field">Portion heißt<input name="serving_label" maxlength="60" placeholder="z. B. 1 Scheibe"></label>
-          <label class="field">Portion (g)<input name="serving_g" type="number" inputmode="decimal" min="1" max="2000" placeholder="optional"></label>
+          <label class="field">Portion heißt<input name="serving_label" maxlength="60" placeholder="z. B. 1 Scheibe" value="${v("serving_label")}"></label>
+          <label class="field">Portion (g)<input name="serving_g" type="number" inputmode="decimal" min="1" max="2000" placeholder="optional" value="${v("serving_g")}"></label>
         </div>
         <input type="hidden" name="barcode" value="${esc(preset.barcode || "")}">
-        <div class="btn-row"><button type="submit" class="btn primary">Weiter</button></div>
+        ${edit ? `<p class="hint">Schon eingetragene Mahlzeiten behalten ihre Werte.</p>` : ""}
+        <div class="btn-row">
+          ${edit ? `<button type="button" class="btn danger ghost" data-delete-food>${icon("trash")} Löschen</button><span class="grow"></span>` : ""}
+          <button type="submit" class="btn primary">${edit ? "Speichern" : "Weiter"}</button>
+        </div>
       </form>`;
     const form = $("#foodForm", sheet);
     submitOnce(form, async () => {
       try {
-        const food = await api("foods", { method: "POST", body: formData(form) });
-        pick(food);
+        const food = edit
+          ? await api(`foods/${preset.id}`, { method: "PATCH", body: formData(form) })
+          : await api("foods", { method: "POST", body: formData(form) });
+        if (edit) toast("Lebensmittel gespeichert");
+        pick({ ...preset, ...food });
       } catch (e) { formError(form, e); }
     });
+    if (edit) {
+      armDelete($("[data-delete-food]", sheet), async () => {
+        try {
+          await api(`foods/${preset.id}`, { method: "DELETE" });
+          st.recent = st.recent.filter((f) => f.id !== preset.id);
+          st.local = st.local.filter((f) => f.id !== preset.id);
+          st.food = null;
+          toast("Lebensmittel gelöscht – eingetragene Mahlzeiten bleiben");
+          paintSearch();
+        } catch (e) { toast(e.message, { error: true }); }
+      }, "Löschen", "Wirklich löschen?");
+    }
   }
 
   sheet.addEventListener("click", async (ev) => {
@@ -446,6 +498,7 @@ function openAdd(meal) {
     const p = t("[data-pick]");
     if (p) return pick(st.items[Number(p.dataset.pick)]);
     if (t("[data-back]")) { st.food = null; return paintSearch(); }
+    if (t("[data-edit-food]") && st.food) return openOwn(st.food);
     const s = t("[data-save]");
     if (s) return save(s);
     if (t("[data-own]")) return openOwn();
@@ -510,6 +563,8 @@ export async function mount(el) {
     }
     const add = ev.target.closest("[data-add]");
     if (add) return openAdd(add.dataset.add);
+    const copy = ev.target.closest("[data-copy-meal]");
+    if (copy) return copyMeal(copy.dataset.copyMeal, copy);
     const entry = ev.target.closest("[data-entry]");
     if (entry) openEntry(Number(entry.dataset.entry));
     const water = ev.target.closest("[data-water]");

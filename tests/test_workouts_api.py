@@ -84,3 +84,25 @@ def test_nachgesendeter_checkin_landet_am_eigenen_tag(profile_id):
     daily.post_checkin(body)
     assert daily.get_checkin(profile_id, gestern)["checkin"]["sleep"] == 2
     assert daily.get_checkin(profile_id, date.isoformat(today()))["checkin"] is None
+
+
+def test_export_saetze_im_deutschen_format(profile_id):
+    from app import export
+    ex = _exercise()
+    main.api_add_workout(main.WorkoutIn(profile_id=profile_id, started_at="2026-09-01T18:00:00",
+                                        sets=[{"exercise_id": ex, "set_no": 1, "reps": 8, "weight": 62.5}]))
+    name, text = export.to_csv("saetze", profile_id)
+    lines = text.lstrip("﻿").splitlines()
+    assert name == "saetze.csv"
+    assert lines[0].startswith("Datum;Einheit;Übung")
+    assert lines[1].startswith("2026-09-01;Training;") and ";8;62,5;" in lines[1]
+
+
+def test_export_koerper_mischt_gewicht_und_messungen(profile_id):
+    from app import export
+    with db.connect() as c:
+        c.execute("INSERT INTO bodyweight (profile_id, date, kg) VALUES (?,?,?)", (profile_id, "2026-09-02", 80.4))
+        c.execute("INSERT INTO body_measurements (profile_id, date, waist_cm) VALUES (?,?,?)", (profile_id, "2026-09-01", 85.0))
+    _, text = export.to_csv("koerper", profile_id)
+    rows = text.lstrip("﻿").splitlines()[1:]
+    assert rows[0].startswith("2026-09-01;manuell") and rows[1].startswith("2026-09-02;Gewicht;80,4")

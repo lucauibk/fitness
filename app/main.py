@@ -21,8 +21,8 @@ from pydantic import BaseModel, Field
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-from . import (activity, ai, analysis, checker, daily_view, db, generator, readiness,  # noqa: E402
-               session_feedback, stats)
+from . import (activity, ai, analysis, checker, daily_view, db, export, generator,  # noqa: E402
+               readiness, session_feedback, stats)
 from .common import FIELD_NAMES, NOT_NULL, _data, _found, current_profile  # noqa: E402,F401
 
 STATIC = Path(__file__).parent.parent / "static"
@@ -287,6 +287,13 @@ def api_profile(profile_id: int):
 def api_update_profile(profile_id: int, body: ProfileIn):
     _found(db.get_row("profiles", profile_id))
     return db.profile_out(_found(db.update_row("profiles", profile_id, _profile_in(_data(body)))))
+
+
+@app.get("/api/export/{kind}.csv")
+def api_export(kind: Literal[tuple(export.EXPORTS)], profile_id: int = Depends(current_profile)):  # type: ignore[valid-type]
+    filename, text = export.to_csv(kind, profile_id)
+    return Response(text, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 # -------------------------------------------------------------- Übungen

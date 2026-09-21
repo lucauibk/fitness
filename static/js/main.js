@@ -157,6 +157,7 @@ function resetViews() {
 
 function openProfiles() {
   const active = getProfile();
+  const current = profiles.find((p) => p.id === active);
   const sheet = openSheet({
     title: "Profil",
     body: `<div class="list">${profiles.map((p) => `
@@ -165,6 +166,14 @@ function openProfiles() {
           <div class="row-main"><div class="row-title">${esc(p.name)}</div></div>
           ${p.id === active ? `<span class="pill ok">aktiv</span>` : ""}
         </div>`).join("")}</div>
+      ${current ? `<details class="field-more">
+        <summary>„${esc(current.name)}“ bearbeiten</summary>
+        <form id="profileEditForm" class="form">
+          <label class="field">Name<input name="name" maxlength="40" required value="${esc(current.name)}"></label>
+          <label class="field">Farbe<input name="color" type="color" value="${esc(/^#[0-9a-f]{6}$/i.test(current.color || "") ? current.color : "#3a63d8")}"></label>
+          <div class="btn-row"><button type="submit" class="btn primary">Speichern</button></div>
+        </form>
+      </details>` : ""}
       <details class="field-more">
         <summary>Neues Profil</summary>
         <form id="profileForm" class="form">
@@ -185,6 +194,20 @@ function openProfiles() {
     resetViews();
     show();
   });
+  // Umbenennen/Umfaerben – Loeschen bewusst nicht: an einem Profil haengt die ganze Historie.
+  const editForm = $("#profileEditForm", sheet);
+  if (editForm) {
+    submitOnce(editForm, async () => {
+      try {
+        const saved = await api(`profiles/${active}`, { method: "PATCH", body: formData(editForm) });
+        Object.assign(current, saved);
+        applyProfile(active);
+        closeSheet();
+        toast("Profil gespeichert");
+        window.dispatchEvent(new CustomEvent("profile-changed", { detail: saved }));
+      } catch (e) { formError(editForm, e); }
+    });
+  }
   const form = $("#profileForm", sheet);
   submitOnce(form, async () => {
     try {

@@ -163,6 +163,35 @@ def add_food(body: FoodIn):
     return nutrition.remember(data)
 
 
+def _own_food(food_id):
+    """Nur selbst angelegte Lebensmittel sind aenderbar – Open-Food-Facts-Produkte gehoeren
+    der Datenbank dort, und beide Profile teilen sich den Vorrat."""
+    food = _found(db.get_row("foods", food_id))
+    if food.get("source") != "eigen":
+        raise HTTPException(403, "Nur selbst angelegte Lebensmittel lassen sich ändern.")
+    return food
+
+
+@router.patch("/foods/{food_id}")
+def patch_food(food_id: int, body: FoodIn):
+    _own_food(food_id)
+    data = body.model_dump(exclude={"source", "barcode"})
+    data["name"] = data["name"].strip()
+    data["serving_label"] = (data["serving_label"] or "").strip() or None
+    # Eingetragene Mahlzeiten behalten ihre Werte (food_log friert sie ein).
+    return db.update_row("foods", food_id, data)
+
+
+@router.delete("/foods/{food_id}")
+def delete_food(food_id: int):
+    _own_food(food_id)
+    with db.connect() as c:
+        # Alte Eintraege bleiben mit Name und Werten erhalten, nur der Verweis faellt weg.
+        c.execute("UPDATE food_log SET food_id=NULL WHERE food_id=?", (food_id,))
+    db.delete_row("foods", food_id)
+    return {"deleted": food_id}
+
+
 # ------------------------------------------------------------ Eintraege
 class LogIn(BaseModel):
     profile_id: int

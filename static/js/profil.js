@@ -118,6 +118,12 @@ function render() {
         <div class="btn-row"><button type="submit" class="btn">Speichern</button></div>
       </form>
     </div>
+    <div class="card">
+      <p class="eyebrow">Daten exportieren</p>
+      <p class="hint">Als CSV für Excel oder Numbers – nur die Daten dieses Profils.</p>
+      <div class="btn-row">${[["saetze", "Sätze"], ["cardio", "Cardio"], ["koerper", "Körper"], ["ernaehrung", "Ernährung"]]
+        .map(([k, l]) => `<a class="btn small ghost" href="/api/export/${k}.csv?profile=${getProfile()}" download>${icon("down")} ${l}</a>`).join("")}</div>
+    </div>
     <p class="hint pad">Farbe und weitere Profile: oben rechts auf den Namen tippen.</p>`;
 
   const nf = $("#nutriForm", root);

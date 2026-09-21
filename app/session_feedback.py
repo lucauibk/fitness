@@ -15,7 +15,7 @@ Zwei Eigenheiten, die Absicht sind:
   alte Einheiten. Das liesse sich nur durch Speichern vermeiden, und genau das soll hier
   nicht passieren.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 from . import db, volume
 
@@ -238,6 +238,9 @@ def _minutes(workout):
         b = datetime.fromisoformat(end.replace("Z", "+00:00"))
     except ValueError:
         return None
+    # Eine Seite ohne Zeitzone (z. B. per API nachgetragen, Ende vom Server gesetzt):
+    # als UTC lesen statt beim Abziehen abzustuerzen.
+    a, b = (x if x.tzinfo else x.replace(tzinfo=timezone.utc) for x in (a, b))
     dauer = (b - a).total_seconds() / 60
     return dauer if dauer > 0 else None
 
