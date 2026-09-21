@@ -65,11 +65,11 @@ function frequencySection() {
       <div><span class="big-number">${nf(vol.kg)}</span><span>kg bewegt</span></div>
       <div><span class="big-number">${f.streak}</span><span>${f.streak === 1 ? "Woche" : "Wochen"} in Folge</span></div>
     </div>
-    ${vol.groups.length ? `<h4 class="form-section">Sätze je Muskelgruppe</h4>
+    ${vol.groups.length ? `<details class="field-more"><summary>Sätze je Muskelgruppe</summary>
       <div class="bars">${vol.groups.map((g) => `
         <div class="bar-row"><span class="bar-label">${esc(g.label)}</span>
           <span class="bar"><i style="width:${(g.sets / maxSets) * 100}%"></i></span>
-          <span class="bar-value">${g.sets}</span></div>`).join("")}</div>`
+          <span class="bar-value">${g.sets}</span></div>`).join("")}</div></details>`
       : `<p class="hint">Diese Woche noch nichts eingetragen.</p>`}
     <h4 class="form-section">Letzte 8 Wochen</h4>
     <div class="weekbars">${weeks.map((w, i) => {

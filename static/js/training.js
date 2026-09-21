@@ -80,7 +80,9 @@ function setRow(ex, exIndex, s, i) {
   // Das letzte Mal nur dort, wo es vom eingetragenen Wert abweicht – die Felder sind
   // ohnehin mit dem Vorschlag vorbelegt, eine Wiederholung derselben Zahl ist nur Rauschen.
   const last = ex.last?.[i];
-  const hint = (prev, cur) => (prev != null && prev !== cur
+  // Waren letztes Mal alle Saetze gleich, steht das schon in der Kopfzeile ("4×10 @ 65 kg").
+  const uniform = ex.last?.length > 1 && ex.last.every((x) => x.reps === ex.last[0].reps && x.weight === ex.last[0].weight);
+  const hint = (prev, cur) => (!uniform && prev != null && prev !== cur
     ? `<small class="set-last">zuletzt ${String(prev).replace(".", ",")}</small>` : "");
   return `<div class="set-row ${s.done ? "is-done" : ""}" data-ex="${exIndex}" data-set="${i}">
     <button type="button" class="set-no ${s.warmup ? "is-warmup" : ""}" data-warmup

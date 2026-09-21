@@ -934,5 +934,11 @@ body.training-fullscreen.resting .content { padding-bottom: calc(var(--rest-h) +
 .plan-head .group-title { margin: 0; }
 .wizard-step { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); }
 .link-btn.danger-text { color: var(--urgent); font-size: var(--fs-sm); }
-/* Der Titel bekommt nach dem Tab-Wechsel den Fokus (Screenreader) – ohne Tastatur kein Rahmen */
-#pageTitle:focus:not(:focus-visible) { outline: none; }
+/* Der Titel bekommt nach dem Tab-Wechsel den Fokus fuer Screenreader. Er ist kein
+   Bedienelement, ein Rahmen darum sieht nur nach Fehler aus. */
+#pageTitle:focus { outline: none; }
+/* Uebungskatalog: eingeklappte Muskelgruppen als Zeilen einer Karte */
+.lib-group { background: var(--surface); border-radius: var(--r2); box-shadow: var(--shadow); margin-bottom: var(--s2); }
+.lib-group > summary.group-title { margin: 0; min-height: 52px; padding: 0 var(--s4); display: flex; align-items: center; gap: var(--s2);
+  font-size: var(--fs-md); color: var(--text); }
+.lib-group > .list { box-shadow: none; border-top: 1px solid var(--line); border-radius: 0 0 var(--r2) var(--r2); margin: 0; }

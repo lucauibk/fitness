@@ -21,7 +21,7 @@ function listHtml() {
   // sondern eine Wand. Suche oder Chip klappt die Treffer direkt auf.
   const open = Boolean(q || group);
   return Object.entries(byGroup).map(([g, list]) => `
-    <details class="group-details" ${open ? "open" : ""}>
+    <details class="group-details lib-group" ${open ? "open" : ""}>
     <summary class="group-title">${esc(GROUPS[g] || "Sonstige")}<span class="count-muted">${list.length}</span>${icon("down", "chev")}</summary>
     <div class="list">${list.map((e) => `
       <div class="row-item" role="button" tabindex="0" data-ex="${e.id}">
