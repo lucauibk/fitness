@@ -30,6 +30,9 @@ export function subTabs(name, subs, fallback) {
     current: () => current,
     async mount(el) {
       root = el;
+      // Neu einhaengen (Profilwechsel ersetzt die Ansicht): die Unterseiten muessen in die
+      // neuen Panels, sonst zeichnen sie weiter in die alten, ausgehaengten Elemente.
+      mounted.clear();
       el.innerHTML = `<nav class="subnav" aria-label="Bereich">
           ${Object.entries(subs).map(([k, [label]]) => `<a href="#${name}/${k}" data-sub="${k}">${label}</a>`).join("")}
         </nav>

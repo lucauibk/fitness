@@ -463,7 +463,7 @@ function openAdd(meal) {
           <label class="field">Portion (g)<input name="serving_g" type="number" inputmode="decimal" min="1" max="2000" placeholder="optional" value="${v("serving_g")}"></label>
         </div>
         <input type="hidden" name="barcode" value="${esc(preset.barcode || "")}">
-        ${edit ? `<p class="hint">Schon eingetragene Mahlzeiten behalten ihre Werte.</p>` : ""}
+        ${edit ? `<p class="hint">Gilt für alle Profile – eigene Lebensmittel sind gemeinsam. Schon eingetragene Mahlzeiten behalten ihre Werte.</p>` : ""}
         <div class="btn-row">
           ${edit ? `<button type="button" class="btn danger ghost" data-delete-food>${icon("trash")} Löschen</button><span class="grow"></span>` : ""}
           <button type="submit" class="btn primary">${edit ? "Speichern" : "Weiter"}</button>
