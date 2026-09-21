@@ -480,15 +480,25 @@ def api_workout(workout_id: int, profile_id: int = Depends(current_profile)):
 def api_add_workout(body: WorkoutIn):
     if not db.exists("profiles", body.profile_id):
         raise HTTPException(400, "Dieses Profil gibt es nicht (mehr).")
-    if body.split_day_id is not None:
-        _owns_day(body.split_day_id, body.profile_id)
     payload = body.model_dump()
-    for s in payload["sets"]:
-        if not db.exists("exercises", s["exercise_id"]):
-            raise HTTPException(400, "Diese Übung gibt es nicht (mehr).")
+    # Eine Einheit kann Stunden im Ausgang liegen. Wurde der Trainingstag inzwischen
+    # geloescht, zaehlt sie trotzdem – nur ohne Bezug zum Tag. Ein fremder Tag bleibt verboten.
+    if body.split_day_id is not None:
+        if db.exists("split_days", body.split_day_id):
+            _owns_day(body.split_day_id, body.profile_id)
+        else:
+            log.info("Trainingstag %s gibt es nicht mehr – Einheit ohne Tag gespeichert",
+                     body.split_day_id)
+            payload["split_day_id"] = None
+    # Dasselbe fuer inzwischen geloeschte Uebungen: deren Saetze fallen weg, der Rest bleibt.
+    gone = {s["exercise_id"] for s in payload["sets"] if not db.exists("exercises", s["exercise_id"])}
+    if gone:
+        log.info("Übungen %s gibt es nicht mehr – ihre Sätze werden nicht gespeichert", sorted(gone))
     # Sätze ohne Wiederholungen sind nicht absolviert – die schickt die Oberfläche gar
     # nicht erst, hier zur Sicherheit noch einmal.
-    payload["sets"] = [s for s in payload["sets"] if s.get("reps")]
+    payload["sets"] = [s for s in payload["sets"] if s.get("reps") and s["exercise_id"] not in gone]
+    if gone and not payload["sets"]:
+        raise HTTPException(400, "Die Übungen dieser Einheit gibt es nicht mehr.")
     before = activity.reached_keys(body.profile_id)
     workout, created = db.save_workout(payload)
     return {"workout": workout, "created": created,

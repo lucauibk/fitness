@@ -28,25 +28,33 @@ const NO_LIMIT = 0;   // "egal" – dann bestimmt das Zielvolumen den Umfang
 let st = null;       // Entwurf
 let sheet = null;
 
-export const hasWizardDraft = () => {
-  const d = prefs.get("wizard");
-  return Boolean(d && d.profileId === getProfile() && Array.isArray(d.weekdays));
-};
+// Ein Assistenten-Entwurf je Profil (wie der Einheit-Entwurf in training.js).
+const wizardKey = (profileId) => `wizard.${profileId}`;
+function loadWizard() {
+  const legacy = prefs.get("wizard");
+  if (legacy) {
+    if (!prefs.get(wizardKey(legacy.profileId))) prefs.set(wizardKey(legacy.profileId), legacy);
+    prefs.set("wizard", null);
+  }
+  const d = prefs.get(wizardKey(getProfile()));
+  return d && d.profileId === getProfile() && Array.isArray(d.weekdays) ? d : null;
+}
+export const hasWizardDraft = () => Boolean(loadWizard());
 const save = () => {
-  prefs.set("wizard", st);
+  prefs.set(wizardKey(st.profileId), st);
   window.dispatchEvent(new CustomEvent("wizard-changed"));
 };
 const clear = () => {
+  prefs.set(wizardKey(st?.profileId ?? getProfile()), null);
   st = null;
-  prefs.set("wizard", null);
   window.dispatchEvent(new CustomEvent("wizard-changed"));
 };
 const range = (lo, hi) => (lo === hi ? `${lo}` : `${lo}–${hi}`);
 const daysLabel = (d) => (d?.length ? d.map((i) => WEEKDAYS[i]).join(" · ") : "frei");
 
 export function openWizard(profile) {
-  const draft = prefs.get("wizard");
-  if (draft && draft.profileId === getProfile() && Array.isArray(draft.weekdays)) {
+  const draft = loadWizard();
+  if (draft) {
     st = draft;
     // Entwurf aus einer älteren Version: Vorschläge neu holen
     if (st.options && !st.options.every((o) => o.frequency)) {

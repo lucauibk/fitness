@@ -338,6 +338,8 @@ body.sheet-open .fab { display: none; }
 .toast button { border: 0; background: none; color: #9fb7ff; font-weight: 700; padding: 6px 4px; }
 .toast.error { background: var(--urgent); color: #fff; }
 .toast.error button { color: #fff; }
+.toast .toast-close { display: grid; place-items: center; min-width: 32px; padding: 4px; color: inherit; opacity: .8; }
+.toast .toast-close .icon { width: 18px; height: 18px; }
 .toast.leave { opacity: 0; transform: translateY(6px); transition: all 0.2s; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
@@ -787,7 +789,10 @@ body.training-fullscreen .topbar,
 body.training-fullscreen #nav { display: none; }
 body.training-fullscreen .content { padding-bottom: var(--s4); }
 body.training-fullscreen .sticky-actions { bottom: calc(env(safe-area-inset-bottom) + var(--s2)); }
-body.training-fullscreen .rest-bar { bottom: calc(env(safe-area-inset-bottom) + var(--s2)); }
+/* Die Pause sitzt ueber der Aktionsleiste, nicht auf ihr – "Einheit beenden" bleibt
+   waehrend der Pause antippbar. --sticky-h = Knopf plus Innenabstand der Leiste. */
+body.training-fullscreen { --sticky-h: calc(var(--tap) + 2 * var(--s2)); }
+body.training-fullscreen .rest-bar { bottom: calc(env(safe-area-inset-bottom) + var(--sticky-h) + 2 * var(--s2)); }
 
 /* PR-Moment */
 .celebrate {

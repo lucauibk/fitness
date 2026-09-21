@@ -10,15 +10,23 @@ let today = null;     // /api/today fuer den Startbildschirm
 let timer = null;
 
 // ------------------------------------------------------------- Entwurf
-// Der Entwurf liegt geraeteweit im prefs-Speicher; ohne den Profil-Abgleich wuerde bei
-// einem Profilwechsel mitten in einer Einheit der Entwurf des anderen Profils erscheinen.
+// Ein Entwurf je Profil: teilen sich zwei Personen ein Geraet, darf der Start einer
+// Einheit unter Profil B den offenen Entwurf von Profil A nicht ueberschreiben.
+const draftKey = (profileId) => `draft.${profileId}`;
 export function getDraft() {
-  const d = prefs.get("draft");
-  return d && d.profile_id === getProfile() ? d : null;
+  const id = getProfile();
+  // Frueher gab es nur einen Platz "draft" fuers ganze Geraet – einmalig umziehen.
+  const legacy = prefs.get("draft");
+  if (legacy) {
+    if (!prefs.get(draftKey(legacy.profile_id))) prefs.set(draftKey(legacy.profile_id), legacy);
+    prefs.set("draft", null);
+  }
+  const d = prefs.get(draftKey(id));
+  return d && d.profile_id === id ? d : null;
 }
 export const hasDraft = () => Boolean(getDraft());
-const saveDraft = (d) => { prefs.set("draft", d); };
-const clearDraft = () => { prefs.set("draft", null); };
+const saveDraft = (d) => { prefs.set(draftKey(d.profile_id), d); };
+const clearDraft = () => { prefs.set(draftKey(getProfile()), null); };
 
 /** Aus einem Trainingstag (mit Vorschlägen) einen Entwurf bauen. */
 export function startDraft(day) {
@@ -409,6 +417,8 @@ async function finish() {
   };
   try {
     const res = await outbox.send({ path: "workouts", body });
+    // Erst nach dem Speichern: scheitert die Pruefung oben, laeuft die Pause weiter.
+    stopRest();
     clearDraft();
     today = null;
     toast(res.queued ? "Gespeichert – wird gesendet, sobald du wieder Empfang hast"
@@ -557,15 +567,19 @@ export async function mount(el) {
     if (toggle) {
       const row = toggle.closest(".set-row");
       const [i, j] = [Number(row.dataset.ex), Number(row.dataset.set)];
-      // Ein Satz gilt nur mit Wiederholungen als gemacht.
+      // Ein Satz gilt nur mit Wiederholungen als gemacht. Den Haken entfernen geht immer –
+      // sonst haengt ein Satz fest, dessen Feld nach dem Abhaken geleert wurde.
       const reps = row.querySelector('[data-field="reps"]').value;
-      if (!reps) {
+      if (!reps && !row.classList.contains("is-done")) {
         toast("Trag zuerst die Wiederholungen ein.", { error: true });
         row.querySelector('[data-field="reps"]').focus();
         return;
       }
       const res = updateSet(i, j, (s) => { s.done = !s.done; });
-      if (res?.s.done) {
+      // Nach dem letzten Satz der Einheit keine Pause mehr – als Naechstes kommt "Beenden".
+      const d = getDraft();
+      const allDone = d && doneCount(d) === totalCount(d);
+      if (res?.s.done && !allDone) {
         const rest = res.ex.rest || (res.ex.kind === "compound" ? REST.compound : REST.isolation);
         startRest(rest);
       }
@@ -590,7 +604,7 @@ export async function mount(el) {
     // data-drop-ex und data-cancel sind zweistufig (armDelete) und werden einmal pro
     // renderDraft() registriert, nicht hier im delegierten Handler.
     if (t("[data-add-ex]")) return addExercise();
-    if (t("[data-finish]")) { stopRest(); return finish(); }
+    if (t("[data-finish]")) return finish();
     const plates = t("[data-plates]");
     if (plates) return openPlates(Number(plates.dataset.plates));
     const swap = t("[data-swap]");

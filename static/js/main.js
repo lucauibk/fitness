@@ -216,10 +216,10 @@ function updateBanner(detail) {
   const waiting = outbox.count();
   if (waiting) {
     setBanner({
-      text: waiting === 1 ? "1 Einheit wartet auf Verbindung"
+      text: waiting === 1 ? `1 ${outbox.label(outbox.list()[0].path)} wartet auf Verbindung`
         : `${waiting} Einträge warten auf Verbindung`,
       action: "Jetzt senden",
-      onAction: () => outbox.flush({ silent: false }).then(() => { updateBanner(); reload(); }),
+      onAction: () => outbox.flush().then(() => { updateBanner(); reload(); }),
     });
     return;
   }

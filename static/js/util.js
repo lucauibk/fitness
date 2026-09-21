@@ -56,7 +56,9 @@ export async function api(path, { method = "GET", body, timeout = TIMEOUT_MS } =
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const detail = Array.isArray(data.detail) ? "Ungültige Eingabe." : data.detail;
-    throw new Error(detail || `Fehler ${res.status}`);
+    const err = new Error(detail || `Fehler ${res.status}`);
+    err.status = res.status;
+    throw err;
   }
   return data;
 }
@@ -168,6 +170,12 @@ export const prefs = {
 // ------------------------------------------------------------ Sheet
 let lastFocus = null;
 let ignorePop = false;
+let popDone = null;   // loest auf, sobald das history.back() aus closeSheet() durch ist
+
+/** Wer nach dem Schliessen eines Sheets navigiert, muss hierauf warten: closeSheet() geht
+ *  per history.back() einen Schritt zurueck, und das passiert asynchron – ein sofort
+ *  gesetzter location.hash wuerde von diesem Zurueck gleich wieder verschluckt. */
+export const sheetClosed = () => popDone?.promise ?? Promise.resolve();
 const coarse = () => window.matchMedia("(pointer: coarse)").matches;
 
 /**
@@ -256,7 +264,12 @@ export function closeSheet(restoreFocus = true, { fromHistory = false, replacing
   el.remove();
   if (replacing) return;
   document.body.classList.remove("sheet-open");
-  if (!fromHistory && history.state?.sheet) { ignorePop = true; history.back(); }
+  if (!fromHistory && history.state?.sheet) {
+    ignorePop = true;
+    let resolve;
+    popDone = { promise: new Promise((r) => { resolve = r; }), resolve };
+    history.back();
+  }
   if (restoreFocus && lastFocus?.isConnected) lastFocus.focus({ preventScroll: true });
 }
 
@@ -290,7 +303,12 @@ function askDiscard(wrap) {
 }
 
 window.addEventListener("popstate", () => {
-  if (ignorePop) { ignorePop = false; return; }
+  if (ignorePop) {
+    ignorePop = false;
+    popDone?.resolve();
+    popDone = null;
+    return;
+  }
   const wrap = document.getElementById("sheet");
   if (!wrap) return;
   if (wrap.dataset.dirty) {
@@ -340,25 +358,29 @@ if (window.visualViewport) {
 }
 
 // ------------------------------------------------------------ Toast
-/** toast("Erledigt", { action: "Rückgängig", onAction: fn, error: false }) */
-export function toast(message, { action, onAction, error = false, duration } = {}) {
+/** toast("Erledigt", { action: "Rückgängig", onAction: fn, error: false, sticky: false })
+ *  Fehler bleiben laenger und lassen sich wegtippen; sticky bleibt, bis man es wegtippt –
+ *  fuer Meldungen, bei denen etwas nicht gespeichert wurde. */
+export function toast(message, { action, onAction, error = false, duration, sticky = false } = {}) {
   const box = document.getElementById("toasts");
   const t = document.createElement("div");
   t.className = `toast${error ? " error" : ""}`;
   t.setAttribute("role", error ? "alert" : "status");
-  t.innerHTML = `<span>${esc(message)}</span>${action ? `<button type="button">${esc(action)}</button>` : ""}`;
+  t.innerHTML = `<span>${esc(message)}</span>${action ? `<button type="button" data-action>${esc(action)}</button>` : ""}${
+    error || sticky ? `<button type="button" class="toast-close" data-close aria-label="Meldung schließen">${icon("x")}</button>` : ""}`;
   box.appendChild(t);
   const remove = () => { t.classList.add("leave"); setTimeout(() => t.remove(), 200); };
-  const ms = duration ?? (action ? 5000 : 2800);
-  let timer = setTimeout(remove, ms);
+  const ms = duration ?? (action ? 5000 : error ? 7000 : 2800);
+  let timer = sticky ? null : setTimeout(remove, ms);
   // Beim Zeigen/Fokussieren anhalten, damit "Rückgängig" erreichbar bleibt
   const pause = () => clearTimeout(timer);
-  const resume = () => { clearTimeout(timer); timer = setTimeout(remove, 2000); };
+  const resume = () => { clearTimeout(timer); if (!sticky) timer = setTimeout(remove, 2000); };
   t.addEventListener("mouseenter", pause);
   t.addEventListener("mouseleave", resume);
   t.addEventListener("focusin", pause);
   t.addEventListener("focusout", resume);
-  t.querySelector("button")?.addEventListener("click", async () => {
+  t.querySelector("[data-close]")?.addEventListener("click", () => { clearTimeout(timer); remove(); });
+  t.querySelector("[data-action]")?.addEventListener("click", async () => {
     clearTimeout(timer);
     remove();
     try { await onAction?.(); } catch (e) { toast(e.message, { error: true }); }
@@ -396,7 +418,8 @@ export function deleteLater(path, message, { onDone } = {}) {
 window.addEventListener("pagehide", () => {
   for (const [path, timer] of pendingDeletes) {
     clearTimeout(timer);
-    fetch(`/api/${path}`, { method: "DELETE", keepalive: true }).catch(() => {});
+    // withProfile: alle Loesch-Routen verlangen das Profil, sonst lehnt der Server ab
+    fetch(withProfile(path), { method: "DELETE", keepalive: true }).catch(() => {});
   }
   pendingDeletes.clear();
 });

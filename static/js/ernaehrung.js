@@ -9,6 +9,9 @@ let data = null;
 let day = null;   // YYYY-MM-DD, null = heute
 let waterExtra = 0;   // optimistisch, bis der Klick bestaetigt oder in den Ausgang gelegt ist
 
+// Der Pi wartet bei Open Food Facts bis zu 12 s je Abruf (app/nutrition.py) – das
+// Standard-Zeitlimit von api() wuerde vorher aufgeben und "offline" melden.
+const OFF_TIMEOUT = 30000;
 const MEALS = { fruehstueck: "Frühstück", mittag: "Mittagessen", abend: "Abendessen", snack: "Snacks" };
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const todayIso = () => iso(new Date());
@@ -315,7 +318,7 @@ function openAdd(meal) {
   async function searchOnline() {
     const q = st.query;
     try {
-      const res = await api(`foods/search?q=${encodeURIComponent(q)}`);
+      const res = await api(`foods/search?q=${encodeURIComponent(q)}`, { timeout: OFF_TIMEOUT });
       if (q !== st.query) return;
       st.online = res.online;
       st.error = res.error;
@@ -351,7 +354,7 @@ function openAdd(meal) {
     // Die Suche kennt die Portion nur fuer die ersten Treffer – bei Bedarf jetzt nachladen
     if (food.barcode && !food.serving_g && (food.source === "off" || !food.id)) {
       try {
-        const p = await api(`foods/portion/${food.barcode}`);
+        const p = await api(`foods/portion/${food.barcode}`, { timeout: OFF_TIMEOUT });
         if (st.food?.barcode !== food.barcode || !(p.serving_g || p.pack_g)) return;
         const before = servingOf(st.food);
         Object.entries(p).forEach(([k, v]) => { if (v && !st.food[k]) st.food[k] = v; });
@@ -390,7 +393,7 @@ function openAdd(meal) {
 
   async function byBarcode(code) {
     try {
-      const res = await api(`foods/barcode/${code}`);
+      const res = await api(`foods/barcode/${code}`, { timeout: OFF_TIMEOUT });
       pick(res.food);
     } catch (e) {
       if (/nicht gefunden/.test(e.message)) {

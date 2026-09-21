@@ -11,6 +11,7 @@ const ASSETS = __ASSETS__;
 const SHELL = `shell-${VERSION}`;
 const API = "api-v1"; // Daten ueberleben App-Updates
 const NETWORK_TIMEOUT_MS = 6000;
+const OFF_PATHS = /^\/api\/foods\/(search$|portion\/|barcode\/)/;
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
@@ -80,6 +81,9 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (request.method !== "GET" || url.origin !== self.location.origin) return;
   if (url.pathname === "/sw.js") return;
+  // Open Food Facts braucht ohnehin Netz und darf serverseitig laenger als NETWORK_TIMEOUT_MS
+  // brauchen – sonst meldet die App "offline", obwohl der Pi nur auf OFF wartet.
+  if (OFF_PATHS.test(url.pathname)) return;
   const isApi = url.pathname.startsWith("/api/");
   const { race, network } = fromNetwork(request, isApi ? API : SHELL, isApi);
   // waitUntil: der Browser darf den Worker nicht beenden, bevor die Kopie im Cache liegt –
