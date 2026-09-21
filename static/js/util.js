@@ -68,6 +68,10 @@ const pad = (n) => String(n).padStart(2, "0");
 export const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 export const hm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 export const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+/** "2026-09-21" als lokaler Tag. new Date("2026-09-21") waere UTC-Mitternacht – westlich
+ *  von UTC schon der Vortag. Volle Zeitstempel gehen unveraendert durch. */
+export const parseYmd = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s || "")
+  ? new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10))) : new Date(s));
 
 /** "Heute 10:00", "Morgen 23:59", "Mi 16.09.", "Gestern", "Mo 3.11.2027" */
 export function relDate(iso, { time = true } = {}) {
@@ -162,8 +166,9 @@ export const prefs = {
   get(key, fallback = null) {
     try { const v = localStorage.getItem(`fit.${key}`); return v === null ? fallback : JSON.parse(v); } catch { return fallback; }
   },
+  /** Gibt zurueck, ob es geklappt hat (privater Modus oder voller Speicher: nein). */
   set(key, value) {
-    try { localStorage.setItem(`fit.${key}`, JSON.stringify(value)); } catch { /* privat/voll – egal */ }
+    try { localStorage.setItem(`fit.${key}`, JSON.stringify(value)); return true; } catch { return false; }
   },
 };
 

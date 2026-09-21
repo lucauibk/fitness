@@ -774,7 +774,10 @@ def service_worker():
     for p in files:
         stat = p.stat()
         digest.update(f"{p.relative_to(STATIC)}:{stat.st_size}:{stat.st_mtime_ns}".encode())
-    assets = ["/"] + ["/" + str(p.relative_to(STATIC)) for p in files if p.name != "index.html"]
+    # vendor/ (ZXing, ~340 KB) nicht vorladen: scanner.js holt ihn bei Bedarf, und ohne
+    # Netz nuetzt der Scanner nichts – die Barcode-Abfrage braucht den Pi.
+    assets = ["/"] + ["/" + str(p.relative_to(STATIC)) for p in files
+                      if p.name != "index.html" and p.relative_to(STATIC).parts[0] != "vendor"]
     body = ((STATIC / "sw.js").read_text()
             .replace('"__VERSION__"', json.dumps(digest.hexdigest()[:12]))
             .replace("__ASSETS__", json.dumps(assets)))

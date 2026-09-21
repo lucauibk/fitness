@@ -1,6 +1,6 @@
 /** Profil: persönliche Angaben und der Einstieg in den Plan-Assistenten. */
 import { $, api, esc, formData, formError, getProfile, hasDirtyForm, icon, skeleton, submitOnce, toast,
-  WEEKDAYS } from "./util.js";
+  WEEKDAYS, parseYmd } from "./util.js";
 import { openWizard, GOALS, EXPERIENCE, FOCUS, hasWizardDraft } from "./wizard.js";
 
 let root;
@@ -105,7 +105,7 @@ function render() {
         </label>
         <div class="field">
           <span>Körpergewicht</span>
-          <p class="hint">${weight ? `${String(weight.kg).replace(".", ",")} kg · ${new Date(weight.date).toLocaleDateString("de-AT")}`
+          <p class="hint">${weight ? `${String(weight.kg).replace(".", ",")} kg · ${parseYmd(weight.date).toLocaleDateString("de-AT")}`
             : "noch nicht eingetragen"}</p>
           <a class="btn small ghost" href="#fortschritt/koerper">Gewicht &amp; Maße eintragen</a>
         </div>

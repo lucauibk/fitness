@@ -12,6 +12,9 @@ const SHELL = `shell-${VERSION}`;
 const API = "api-v1"; // Daten ueberleben App-Updates
 const NETWORK_TIMEOUT_MS = 6000;
 const OFF_PATHS = /^\/api\/foods\/(search$|portion\/|barcode\/)/;
+// Ohne Netz ohnehin nutzlos (Assistent speichert auf dem Pi) – nicht abfangen, nicht cachen.
+const NO_CACHE = /^\/api\/wizard\//;
+const KEEP_DAYS = 14;   // so weit zurueck bleiben Tagesansichten (nutrition/day?date=) im Cache
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
@@ -27,9 +30,23 @@ self.addEventListener("activate", (event) => {
     for (const key of await caches.keys()) {
       if (key.startsWith("shell-") && key !== SHELL) await caches.delete(key);
     }
+    await pruneApiCache();
     await self.clients.claim();
   })());
 });
+
+/** Der API-Cache wuchs ohne Grenze: jede Suche, jeder angesehene Tag. Beim Update
+ *  aufraeumen – alte Tagesansichten und alles, was inzwischen gar nicht mehr gecacht wird. */
+async function pruneApiCache() {
+  const cache = await caches.open(API);
+  const cutoff = new Date(Date.now() - KEEP_DAYS * 86400000).toISOString().slice(0, 10);
+  for (const req of await cache.keys()) {
+    const url = new URL(req.url);
+    const day = url.searchParams.get("date");
+    const stale = (day && day < cutoff) || OFF_PATHS.test(url.pathname) || NO_CACHE.test(url.pathname);
+    if (stale) await cache.delete(req);
+  }
+}
 
 /** Netz mit Zeitlimit; bei Erfolg Kopie in den Cache. Das Netz laeuft nach dem Zeitlimit weiter
  *  und aktualisiert den Cache trotzdem, falls es doch noch antwortet. */
@@ -83,7 +100,7 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname === "/sw.js") return;
   // Open Food Facts braucht ohnehin Netz und darf serverseitig laenger als NETWORK_TIMEOUT_MS
   // brauchen – sonst meldet die App "offline", obwohl der Pi nur auf OFF wartet.
-  if (OFF_PATHS.test(url.pathname)) return;
+  if (OFF_PATHS.test(url.pathname) || NO_CACHE.test(url.pathname)) return;
   const isApi = url.pathname.startsWith("/api/");
   const { race, network } = fromNetwork(request, isApi ? API : SHELL, isApi);
   // waitUntil: der Browser darf den Worker nicht beenden, bevor die Kopie im Cache liegt –

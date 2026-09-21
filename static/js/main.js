@@ -321,6 +321,18 @@ function warmOfflineCache() {
     `nutrition/day?date=${today}&${q}`, `nutrition/goals?${q}`, `cardio/activities?${q}`, `cardio?limit=30&${q}`,
     `cardio?limit=60&${q}`, `mobility?${q}`, `checkin?${q}`];
   paths.forEach((p, i) => setTimeout(() => fetch(`/api/${p}`).catch(() => {}), 300 * i));
+  // Aktiver Plan und seine Uebungs-Anleitungen: sonst zeigt der Plan-Tab im Gym nur
+  // "Tippe auf einen Split" und die Anleitung "offline nicht verfuegbar".
+  setTimeout(async () => {
+    try {
+      const splits = await (await fetch(`/api/splits?${q}`)).json();
+      const active = splits.find((s) => s.active) || splits[0];
+      if (!active) return;
+      const detail = await (await fetch(`/api/splits/${active.id}?${q}`)).json();
+      const ids = [...new Set(detail.days.flatMap((d) => d.exercises.map((e) => e.exercise_id)))];
+      ids.forEach((id, i) => setTimeout(() => fetch(`/api/exercises/${id}?${q}`).catch(() => {}), 300 * i));
+    } catch { /* naechstes Mal */ }
+  }, 300 * paths.length);
 }
 
 // -------------------------------------------------------------- PR-Moment
@@ -341,8 +353,18 @@ window.addEventListener("milestones", (ev) => {
 });
 
 if ("serviceWorker" in navigator) {
+  // Ein Wechsel des Workers bei schon kontrollierter Seite heisst: neue Version ausgerollt.
+  // Die offene Seite laeuft aber noch mit den alten Modulen – Neuladen anbieten, nicht
+  // erzwingen (eine laufende Einheit liegt ohnehin sicher im Geraetespeicher).
+  const hadController = Boolean(navigator.serviceWorker.controller);
   navigator.serviceWorker.register("/sw.js").catch((e) => console.warn("Service Worker:", e));
-  navigator.serviceWorker.addEventListener("controllerchange", () => setTimeout(warmOfflineCache, 1000));
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    setTimeout(warmOfflineCache, 1000);
+    if (hadController) {
+      toast("Neue Version der App verfügbar.", { action: "Neu laden", sticky: true, onAction: () => location.reload() });
+    }
+  });
+  navigator.storage?.persist?.().catch(() => {});   // Ausgang nicht vom Browser wegraeumen lassen
   setTimeout(warmOfflineCache, 4000);
 }
 

@@ -1,7 +1,7 @@
 /** Körper: Gewicht, Körperfett, Muskelmasse, Umfänge – manuell oder aus einem
  *  Screenshot der Studio-Körperanalyse (ViCoach), den die KI ausliest. */
 import { $, api, armDelete, closeSheet, deleteLater, esc, formData, formError, getProfile,
-  icon, isPendingDelete, openSheet, skeleton, submitOnce, toast } from "./util.js";
+  icon, isPendingDelete, openSheet, skeleton, submitOnce, toast, parseYmd } from "./util.js";
 import * as outbox from "./outbox.js";
 import { sparkline } from "./fortschritt.js";
 
@@ -15,7 +15,7 @@ const MAIN = ["weight_kg", "body_fat_pct", "muscle_mass_kg", "water_pct", "visce
   "bmr_kcal", "bio_age"];
 const GIRTHS = ["waist_cm", "hip_cm", "chest_cm", "arm_cm", "thigh_cm", "neck_cm"];
 const fmt = (v, key) => `${Number(v).toLocaleString("de-AT", { maximumFractionDigits: 1 })}${UNITS[key] ? ` ${UNITS[key]}` : ""}`;
-const dm = (d) => new Date(d).toLocaleDateString("de-AT", { day: "numeric", month: "short" });
+const dm = (d) => parseYmd(d).toLocaleDateString("de-AT", { day: "numeric", month: "short" });
 
 function tile(key) {
   const latest = data.latest[key];

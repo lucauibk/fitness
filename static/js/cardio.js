@@ -1,6 +1,6 @@
 /** Cardio: Einheit eintragen (mit kcal-Schätzung) und die letzten Einheiten. */
 import { $, api, esc, formData, formError, getProfile, hasDirtyForm, icon, prefs, skeleton, submitOnce,
-  toast } from "./util.js";
+  toast, parseYmd } from "./util.js";
 import * as outbox from "./outbox.js";
 
 let root;
@@ -23,7 +23,7 @@ function weekSummary(list) {
   const monday = new Date();
   monday.setHours(0, 0, 0, 0);
   monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-  const week = list.filter((c) => new Date(c.date) >= monday);
+  const week = list.filter((c) => parseYmd(c.date) >= monday);
   return {
     minutes: Math.round(week.reduce((n, c) => n + c.minutes, 0)),
     km: Math.round(week.reduce((n, c) => n + (c.distance_km || 0), 0) * 10) / 10,
@@ -67,7 +67,7 @@ function render() {
       <div class="row-item ${c.pending ? "is-pending" : ""}">
         <span class="row-icon">${icon("run")}</span>
         <div class="row-main"><div class="row-title">${esc(c.label || c.activity)}</div>
-          <div class="row-meta"><span>${new Date(c.date).toLocaleDateString("de-AT", { weekday: "short", day: "numeric", month: "short" })}</span>
+          <div class="row-meta"><span>${parseYmd(c.date).toLocaleDateString("de-AT", { weekday: "short", day: "numeric", month: "short" })}</span>
             <span>${Math.round(c.minutes)} min</span>
             ${c.distance_km ? `<span>${String(c.distance_km).replace(".", ",")} km</span>` : ""}
             ${c.kcal ? `<span>≈ ${Math.round(c.kcal)} kcal</span>` : ""}</div></div>

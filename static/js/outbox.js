@@ -29,7 +29,8 @@ function changed() {
 export function queue(entry) {
   const items = list();
   items.push({ ...entry, queued_at: new Date().toISOString(), tries: 0 });
-  save(items);
+  // Ohne Platz im Geraetespeicher waere "wird gesendet" gelogen – lieber laut scheitern.
+  if (!save(items)) throw new Error("Gerätespeicher voll – der Eintrag konnte nicht zwischengespeichert werden.");
   changed();
   flush();
   return entry;

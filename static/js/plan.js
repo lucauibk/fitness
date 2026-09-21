@@ -569,8 +569,12 @@ export async function mount(el) {
     if (editS) return editSplit(splits.find((s) => s.id === Number(editS.dataset.editSplit)));
     const openS = t("[data-open-split]");
     if (openS) {
-      openSplitId = Number(openS.dataset.openSplit);
-      detail = await api(`splits/${openSplitId}`);
+      try {
+        detail = await api(`splits/${Number(openS.dataset.openSplit)}`);
+        openSplitId = detail.id;
+      } catch (e) {
+        return toast(e.offline ? "Dieser Split ist offline noch nicht geladen – einmal mit Netz öffnen." : e.message, { error: true });
+      }
       return render();
     }
     const addDay = t("[data-add-day]");

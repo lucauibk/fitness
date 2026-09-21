@@ -1,6 +1,6 @@
 /** Ernährung: Tagesbilanz, Mahlzeiten, Lebensmittel suchen/scannen/anlegen. */
 import { $, api, armDelete, closeSheet, deleteLater, esc, formData, formError, getProfile, icon,
-  isPendingDelete, openSheet, skeleton, submitOnce, toast, busy } from "./util.js";
+  isPendingDelete, openSheet, skeleton, submitOnce, toast, busy, parseYmd } from "./util.js";
 import * as outbox from "./outbox.js";
 import { scanBarcode } from "./scanner.js";
 
@@ -82,7 +82,7 @@ function render() {
   const pend = pendingEntries();
   const pendKcal = pend.reduce((n, e) => n + (e.preview?.kcal || 0), 0);
   const isToday = data.date === todayIso();
-  const dateLabel = isToday ? "Heute" : new Date(data.date).toLocaleDateString("de-AT", { weekday: "long", day: "numeric", month: "long" });
+  const dateLabel = isToday ? "Heute" : parseYmd(data.date).toLocaleDateString("de-AT", { weekday: "long", day: "numeric", month: "long" });
   root.innerHTML = `<div class="date-switch">
       <button type="button" class="icon-btn" data-day="-1" aria-label="Vorheriger Tag">${icon("left")}</button>
       <b>${esc(dateLabel)}</b>
@@ -502,7 +502,7 @@ export async function mount(el) {
   el.addEventListener("click", (ev) => {
     const d = ev.target.closest("[data-day]");
     if (d) {
-      const cur = new Date(data.date);
+      const cur = parseYmd(data.date);
       cur.setDate(cur.getDate() + Number(d.dataset.day));
       day = iso(cur) >= todayIso() ? null : iso(cur);
       data = null;
