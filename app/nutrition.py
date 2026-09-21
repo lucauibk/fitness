@@ -121,7 +121,8 @@ def water_goals(profile):
     computed = _water_goal_computed(profile)
     manual = profile.get("water_goal_ml")
     auto = manual is None
-    return {"auto": auto, "goal": manual if manual is not None else computed, "computed": computed}
+    return {"auto": auto, "goal": manual if manual is not None else computed, "computed": computed,
+            "from_weight": latest_weight(profile["id"]) is not None}
 
 
 def portion(food, grams):
@@ -142,6 +143,9 @@ def _get(url, timeout=TIMEOUT):
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
+        if e.code == 429:
+            raise FoodError("Open Food Facts bremst gerade (zu viele Anfragen) – "
+                            "in einer Minute noch einmal versuchen.") from e
         raise FoodError(f"Lebensmittel-Datenbank antwortet nicht (HTTP {e.code}).") from e
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
         log.warning("Open Food Facts nicht erreichbar: %s", e)

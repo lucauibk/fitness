@@ -494,13 +494,35 @@ input:not([type=checkbox]):not([type=radio]):focus, select:focus, textarea:focus
 /* Uebung waehrend der Einheit */
 .exercise-card { padding: var(--s3) var(--s4); }
 .exercise-card.is-done { background: color-mix(in srgb, var(--ok) 5%, var(--surface)); }
-.ex-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); }
-.ex-head > div { min-width: 0; }
+/* Die Kopfzeile ist ein Knopf: zugeklappt reicht sie, um zu sehen, wo man steht. */
+.ex-head { display: flex; align-items: flex-start; gap: var(--s3); }
+button.ex-head {
+  width: 100%; min-height: var(--tap); padding: 0; border: 0; background: none;
+  color: inherit; text-align: left; cursor: pointer;
+}
+.ex-head > div { min-width: 0; flex: 1; }
+.ex-head .pill { margin-top: 2px; }
+.ex-head .chev { margin-top: 4px; transition: transform 0.2s; }
+.exercise-card.is-open .ex-head .chev { transform: rotate(180deg); }
+.exercise-card.is-closed { padding-block: var(--s2); }
+.exercise-card.is-closed .ex-head { align-items: center; }
+.exercise-card.is-closed.is-done .card-title { color: var(--muted); }
+
+/* Menue einer Uebung (Sheet) */
+.menu-list { display: grid; gap: var(--s1); }
+.menu-item {
+  display: flex; align-items: center; gap: var(--s3); min-height: 52px; padding: 0 var(--s3);
+  border: 0; border-radius: var(--r2); background: var(--surface-2); color: var(--text);
+  font-weight: 600; text-align: left; cursor: pointer;
+}
+.menu-item.danger { color: var(--urgent); }
+.menu-item.armed { background: var(--urgent); color: #fff; }
+.btn.primary.armed { background: var(--urgent); color: #fff; white-space: normal; }
 .sets { display: grid; gap: var(--s2); margin: var(--s3) 0 var(--s2); }
 
 .set-row { display: flex; align-items: flex-end; gap: var(--s2); }
 .set-no {
-  width: 26px; flex: none; padding-bottom: 12px; color: var(--faint);
+  width: 34px; height: var(--tap); flex: none; color: var(--muted);
   font-size: var(--fs-sm); font-weight: 650; font-variant-numeric: tabular-nums; text-align: center;
   background: none; border: 0; cursor: pointer; border-radius: var(--r1);
 }
@@ -789,10 +811,15 @@ body.training-fullscreen .topbar,
 body.training-fullscreen #nav { display: none; }
 body.training-fullscreen .content { padding-bottom: var(--s4); }
 body.training-fullscreen .sticky-actions { bottom: calc(env(safe-area-inset-bottom) + var(--s2)); }
-/* Die Pause sitzt ueber der Aktionsleiste, nicht auf ihr – "Einheit beenden" bleibt
-   waehrend der Pause antippbar. --sticky-h = Knopf plus Innenabstand der Leiste. */
-body.training-fullscreen { --sticky-h: calc(var(--tap) + 2 * var(--s2)); }
-body.training-fullscreen .rest-bar { bottom: calc(env(safe-area-inset-bottom) + var(--sticky-h) + 2 * var(--s2)); }
+/* Waehrend der Pause sitzt die Pause ganz unten und die Aktionsleiste rueckt darueber –
+   "Einheit beenden" bleibt antippbar. Der Innenabstand sorgt dafuer, dass das auch ganz
+   unten gescrollt gilt, wo die Leiste nicht klebt, sondern im Fluss steht. */
+body.training-fullscreen { --rest-h: 52px; }
+body.training-fullscreen .rest-bar { bottom: calc(env(safe-area-inset-bottom) + var(--s2)); }
+body.training-fullscreen.resting .sticky-actions {
+  bottom: calc(env(safe-area-inset-bottom) + var(--rest-h) + 2 * var(--s2));
+}
+body.training-fullscreen.resting .content { padding-bottom: calc(var(--rest-h) + 3 * var(--s2) + var(--s4)); }
 
 /* PR-Moment */
 .celebrate {

@@ -25,7 +25,7 @@ function checkinForm(c) {
   const v = { sleep: c?.sleep ?? 3, energy: c?.energy ?? 3, stress: c?.stress ?? 3 };
   const sore = c?.soreness || {};
   return `<div class="card checkin" data-checkin-form>
-    <p class="eyebrow">Wie geht's dir heute?</p>
+    <p class="eyebrow">${c ? "Check-in ändern" : "Noch nicht eingecheckt · Wie geht's dir heute?"}</p>
     ${Object.entries(SCALES).map(([k, [label, words]]) => `
       <div class="scale" data-scale="${k}">
         <span class="scale-label">${label}</span>
@@ -158,6 +158,11 @@ function render() {
       ${d.split ? `<span class="hint">${esc(d.split.name)}</span>` : ""}
     </div>
     ${weekStrip(d.streak.week)}
+    ${d.profile_missing?.length ? `<a class="card mini-card" href="#profil">
+      <span class="row-icon">${icon("user")}</span>
+      <div class="grow"><p class="eyebrow">Profil vervollständigen</p>
+        <p class="hint">Für Kalorien- und Trinkziel fehlen noch: ${esc(d.profile_missing.join(", "))}.</p></div>
+      ${icon("right", "chev")}</a>` : ""}
     ${showForm ? checkinForm(d.checkin) : readinessCard(d.checkin)}
     ${workoutCard()}
     ${mobilityCard()}
@@ -362,20 +367,28 @@ export async function mount(el) {
   });
 }
 
+/** Nur die Wasserkarte neu zeichnen: ein render() wuerde einen halb angetippten
+ *  Check-in darueber zuruecksetzen. */
+function paintWater() {
+  const card = root.querySelector(".water-mini");
+  if (card) card.outerHTML = waterCard();
+  else render();
+}
+
 async function addWater(ml) {
   const body = { profile_id: getProfile(), ml, date: data.date, client_id: outbox.uuid() };
   waterExtra += ml;   // sofort sichtbar, nicht erst nach der Antwort vom Pi
-  render();
+  paintWater();
   try {
     const res = await outbox.send({ path: "water-log", body });
     waterExtra -= ml;
     // Erfolgreich gespeichert: gleich in die Bilanz einrechnen statt neu vom Server zu laden.
     // Im Ausgang gelandet (offline): pendingWater() (in waterCard) zaehlt den Eintrag ab jetzt mit.
     if (!res.queued) data.nutrition.water_ml = Math.max(0, data.nutrition.water_ml + ml);
-    render();
+    paintWater();
   } catch (e) {
     waterExtra -= ml;
-    render();
+    paintWater();
     toast(e.message, { error: true });
   }
 }

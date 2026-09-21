@@ -6,7 +6,8 @@ from . import db
 
 LEVELS = (  # (ab Score, Schluessel, Titel, Empfehlung)
     (60, "voll", "Bereit für volles Training",
-     "Du bist gut erholt – zieh den Plan wie vorgesehen durch."),
+     # Ab 60 zaehlt schon ein ganz normaler Tag (alles 3) – "gut erholt" waere zu viel versprochen.
+     "Nichts spricht dagegen – zieh den Plan wie vorgesehen durch."),
     (40, "leichter", "Heute etwas leichter",
      "Ein Satz weniger je Übung und etwa 5 % weniger Gewicht. Technik vor Last."),
     (0, "erholung", "Erholung empfohlen",

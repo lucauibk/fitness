@@ -74,36 +74,49 @@ const totalCount = (draft) => draft.exercises.reduce((n, e) => n + e.sets.length
 
 // ------------------------------------------------------------ Anzeige
 function setRow(ex, exIndex, s, i) {
+  // Aufwaermsaetze zaehlen nicht mit: nach "W" kommt Satz 1, nicht Satz 2.
+  const no = ex.sets.slice(0, i + 1).filter((x) => !x.warmup).length;
+  const name = s.warmup ? "Aufwärmsatz" : `Satz ${no}`;
   const unitLabel = ex.unit === "koerper" ? "kg extra" : "kg";
   // Das letzte Mal direkt an der Zeile statt nur einmal in der Kartenkopfzeile – das ist
   // der Unterschied zwischen Zahlen eintippen und sich gezielt steigern.
   const last = ex.last?.[i];
   return `<div class="set-row ${s.done ? "is-done" : ""}" data-ex="${exIndex}" data-set="${i}">
     <button type="button" class="set-no ${s.warmup ? "is-warmup" : ""}" data-warmup
-            aria-label="Satz ${s.set_no}${s.warmup ? ", Aufwärmsatz – antippen für normalen Satz" : " – antippen für Aufwärmsatz"}"
-            aria-pressed="${Boolean(s.warmup)}">${s.warmup ? "W" : s.set_no}</button>
+            aria-label="${s.warmup ? "Aufwärmsatz – antippen für normalen Satz" : `Satz ${no} – antippen für Aufwärmsatz`}"
+            aria-pressed="${Boolean(s.warmup)}">${s.warmup ? "W" : no}</button>
     <label class="set-field"><span>Whd.${last?.reps != null ? ` · zuletzt ${last.reps}` : ""}</span>
       <input type="number" inputmode="numeric" min="0" max="1000" step="1"
-             value="${s.reps ?? ""}" data-field="reps" aria-label="Wiederholungen Satz ${s.set_no}">
+             value="${s.reps ?? ""}" data-field="reps" aria-label="Wiederholungen ${name}">
     </label>
     <label class="set-field"><span>${unitLabel}${last?.weight != null ? ` · zuletzt ${String(last.weight).replace(".", ",")}` : ""}</span>
       <input type="number" inputmode="decimal" min="0" max="1000" step="0.5"
-             value="${s.weight ?? ""}" data-field="weight" aria-label="Gewicht Satz ${s.set_no}">
+             value="${s.weight ?? ""}" data-field="weight" aria-label="Gewicht ${name}">
     </label>
     <label class="set-field set-field-rpe"><span>RPE</span>
       <input type="number" inputmode="decimal" min="0" max="10" step="0.5"
-             value="${s.rpe ?? ""}" data-field="rpe" aria-label="Anstrengung (RPE) Satz ${s.set_no}, 0 bis 10">
+             value="${s.rpe ?? ""}" data-field="rpe" aria-label="Anstrengung (RPE) ${name}, 0 bis 10">
     </label>
     <button type="button" class="set-check" data-toggle aria-pressed="${s.done}"
-            aria-label="Satz ${s.set_no} ${s.done ? "nicht erledigt" : "erledigt"}">${icon("check")}</button>
+            aria-label="${name} ${s.done ? "nicht erledigt" : "erledigt"}">${icon("check")}</button>
   </div>`;
 }
 
-function exerciseCard(ex, index) {
+/** Welche Uebung offen ist: die zuletzt angetippte, sonst die erste mit einem offenen Satz.
+ *  -1 = alle zu (alles erledigt oder bewusst zugeklappt). */
+function focusIndex(draft) {
+  const f = draft.focus;
+  if (Number.isInteger(f) && (f === -1 || draft.exercises[f])) return f;
+  return draft.exercises.findIndex((e) => e.sets.some((x) => !x.done));
+}
+
+function exerciseCard(ex, index, open) {
   const range = ex.reps_min === ex.reps_max ? `${ex.reps_min}` : `${ex.reps_min}–${ex.reps_max}`;
   const done = ex.sets.filter((s) => s.done).length;
-  return `<div class="card exercise-card ${done === ex.sets.length ? "is-done" : ""}">
-    <div class="ex-head">
+  const complete = done === ex.sets.length;
+  // Die Kopfzeile ist der Schalter: zugeklappt zeigt sie genug, um zu wissen, wo man steht.
+  return `<div class="card exercise-card ${complete ? "is-done" : ""} ${open ? "is-open" : "is-closed"}">
+    <button type="button" class="ex-head" data-focus="${index}" aria-expanded="${open}">
       <div>
         <div class="card-title">${esc(ex.name)}</div>
         <div class="row-meta">
@@ -112,18 +125,59 @@ function exerciseCard(ex, index) {
           ${ex.last?.length ? `<span>letztes Mal ${esc(setsSummary(ex.last, ex.unit))}</span>` : ""}
         </div>
       </div>
-      <span class="pill ${done === ex.sets.length ? "ok" : ""}">${done}/${ex.sets.length}</span>
-    </div>
-    <div class="sets">${ex.sets.map((s, i) => setRow(ex, index, s, i)).join("")}</div>
+      <span class="pill ${complete ? "ok" : ""}">${done}/${ex.sets.length}</span>
+      ${icon("down", "chev")}
+    </button>
+    ${open ? `<div class="sets">${ex.sets.map((s, i) => setRow(ex, index, s, i)).join("")}</div>
     <div class="btn-row">
       <button type="button" class="btn small ghost" data-add-set="${index}">${icon("plus")} Satz</button>
-      ${ex.sets.length > 1 ? `<button type="button" class="btn small ghost" data-drop-set="${index}">Satz weniger</button>` : ""}
-      ${ex.unit === "kg" ? `<button type="button" class="btn small ghost" data-plates="${index}">${icon("weight")} Scheiben</button>` : ""}
-      ${ex.pattern ? `<button type="button" class="btn small ghost" data-swap="${index}">${icon("swap")} Tauschen</button>` : ""}
       <span class="grow"></span>
-      <button type="button" class="btn small ghost danger" data-drop-ex="${index}">${icon("trash")} Entfernen</button>
-    </div>
+      <button type="button" class="btn small ghost" data-ex-menu="${index}" aria-label="Weitere Aktionen für ${esc(ex.name)}">⋯ Mehr</button>
+    </div>` : ""}
   </div>`;
+}
+
+/** Seltene Aktionen einer Uebung – vorher fuenf Knoepfe unter jeder Karte. */
+function openExerciseMenu(index) {
+  const draft = getDraft();
+  const ex = draft?.exercises[index];
+  if (!ex) return;
+  const last = ex.sets[ex.sets.length - 1];
+  // Icon + Text als letzter Knoten: armDelete tauscht genau diesen Text aus.
+  const item = (attrs, name, label, cls = "") =>
+    `<button type="button" class="menu-item ${cls}" ${attrs}>${icon(name)} ${label}</button>`;
+  const sheet = openSheet({
+    title: esc(ex.name),
+    body: `<div class="menu-list">
+      ${item("data-m-warmup", "plus", "Aufwärmsatz vorne einfügen")}
+      ${ex.sets.length > 1 ? item("data-m-drop-set", "x", `Letzten Satz entfernen${last.done ? " (abgehakt)" : ""}`) : ""}
+      ${ex.unit === "kg" ? item("data-m-plates", "weight", "Scheiben ausrechnen") : ""}
+      ${ex.pattern ? item("data-m-swap", "swap", "Übung tauschen") : ""}
+      ${item("data-m-drop-ex", "trash", "Übung entfernen", "danger")}
+    </div>`,
+  });
+  const after = (fn) => () => { closeSheet(); fn(); };
+  sheet.querySelector("[data-m-warmup]").addEventListener("click", after(() => update((d) => {
+    const e = d.exercises[index];
+    const first = e.sets.find((x) => !x.warmup) || e.sets[0];
+    // Aufwaermen mit etwa der Haelfte, auf 2,5 kg gerundet – anpassen kann man es danach.
+    const w = first?.weight != null ? Math.round(first.weight / 2 / 2.5) * 2.5 : null;
+    e.sets.unshift({ reps: first?.reps ?? null, weight: w, rpe: null, done: false, warmup: true });
+    e.sets.forEach((x, i) => { x.set_no = i + 1; });
+  })));
+  const dropSet = sheet.querySelector("[data-m-drop-set]");
+  if (dropSet) {
+    const drop = after(() => update((d) => { const e = d.exercises[index]; if (e.sets.length > 1) e.sets.pop(); }));
+    // Ein schon abgehakter Satz ist gemachte Arbeit – nur mit zweitem Tipp entfernen.
+    if (last.done) armDelete(dropSet, drop, "Letzten Satz entfernen (abgehakt)", "Wirklich entfernen?");
+    else dropSet.addEventListener("click", drop);
+  }
+  sheet.querySelector("[data-m-plates]")?.addEventListener("click", after(() => openPlates(index)));
+  sheet.querySelector("[data-m-swap]")?.addEventListener("click", after(() => openSwap(index)));
+  armDelete(sheet.querySelector("[data-m-drop-ex]"), after(() => update((d) => {
+    d.exercises.splice(index, 1);
+    if (Number.isInteger(d.focus) && d.focus >= index) d.focus = null;
+  })), "Übung entfernen", "Wirklich entfernen?");
 }
 
 // -------------------------------------------------------- Hantelscheiben
@@ -177,7 +231,7 @@ function renderDraft(draft) {
       <p class="page-sub"><span data-elapsed>${elapsed(draft)}</span> · ${done}/${total} Sätze</p>
     </div>
     <div class="progress lg"><i style="width:${total ? (done / total) * 100 : 0}%"></i></div>
-    ${draft.exercises.map(exerciseCard).join("")}
+    ${draft.exercises.map((ex, i) => exerciseCard(ex, i, i === focusIndex(draft))).join("")}
     <div class="btn-row wide">
       <button type="button" class="btn ghost" data-add-ex>${icon("plus")} Übung</button>
     </div>
@@ -205,11 +259,10 @@ function renderDraft(draft) {
     window.dispatchEvent(new CustomEvent("outbox-changed"));
     load();
   }, "Verwerfen", "Alles verwerfen?");
-  $$("[data-drop-ex]", root).forEach((btn) => {
-    armDelete(btn, () => update((d) => {
-      d.exercises.splice(Number(btn.dataset.dropEx), 1);
-    }), "Entfernen", "Entfernen?");
-  });
+  if (!prefs.get("hint.warmup") && draft.exercises.length) {
+    prefs.set("hint.warmup", true);
+    toast("Tipp: Satznummer antippen macht daraus einen Aufwärmsatz.", { duration: 6000 });
+  }
 }
 
 function renderStart() {
@@ -318,7 +371,9 @@ function setValue(exIndex, setIndex, field, raw) {
 }
 
 function addExercise() {
+  const wait = openSheet({ title: "Übung hinzufügen", body: skeleton(5) });
   api("exercises").then((all) => {
+    if (!wait.isConnected) return;   // inzwischen weggetippt
     const active = all.filter((e) => !e.archived);
     const sheet = openSheet({
       title: "Übung hinzufügen",
@@ -338,13 +393,13 @@ function addExercise() {
       if (!t) return;
       const ex = active.find((e) => e.id === Number(t.dataset.pickEx));
       closeSheet();
-      update((d) => d.exercises.push({
+      update((d) => d.focus = d.exercises.push({
         exercise_id: ex.id, name: ex.name, unit: ex.unit, pattern: ex.pattern, kind: ex.kind,
         reps_min: 8, reps_max: 12, last: [],
         sets: [{ set_no: 1, reps: null, weight: null, rpe: null, done: false }],
-      }));
+      }) - 1);
     });
-  }).catch((e) => toast(e.message, { error: true }));
+  }).catch((e) => { closeSheet(); toast(e.message, { error: true }); });
 }
 
 const exOption = (e) => `<div class="row-item" role="button" tabindex="0" data-pick-ex="${e.id}">
@@ -386,7 +441,49 @@ async function openSwap(exIndex) {
   });
 }
 
+/** Nach der zuletzt fertigen Uebung die naechste offene aufklappen und hinscrollen. */
+function advanceFocus(fromIndex) {
+  const draft = getDraft();
+  if (!draft) return;
+  const n = draft.exercises.length;
+  let next = -1;
+  for (let k = 1; k <= n; k += 1) {
+    const i = (fromIndex + k) % n;
+    if (draft.exercises[i].sets.some((x) => !x.done)) { next = i; break; }
+  }
+  draft.focus = next;
+  saveDraft(draft);
+  renderDraft(draft);
+  if (next >= 0) {
+    const card = $$(".exercise-card", root)[next];
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    card?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }
+}
+
 // --------------------------------------------------------- Beenden
+/** Frueh beenden (weniger als die Haelfte geschafft) braucht einen zweiten Tipp – ein
+ *  Fehltipp auf "Einheit beenden" wuerde sonst eine halbe Einheit abschliessen. */
+let finishArmed = null;
+function confirmFinish(btn) {
+  const draft = getDraft();
+  if (!draft) return;
+  const done = doneCount(draft);
+  const total = totalCount(draft);
+  if (done === 0 || done * 2 >= total || finishArmed) {
+    clearTimeout(finishArmed);
+    finishArmed = null;
+    return finish();
+  }
+  const label = btn.innerHTML;
+  btn.classList.add("armed");
+  btn.textContent = `Erst ${done} von ${total} – trotzdem beenden?`;
+  finishArmed = setTimeout(() => {
+    finishArmed = null;
+    if (btn.isConnected) { btn.classList.remove("armed"); btn.innerHTML = label; }
+  }, 3500);
+}
+
 async function finish() {
   const draft = getDraft();
   if (!draft) return;
@@ -515,6 +612,7 @@ function tick() {
   bar.querySelector("[data-rest-time]").textContent =
     `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   bar.hidden = false;
+  document.body.classList.add("resting");
 }
 
 function startRest(seconds) {
@@ -534,6 +632,7 @@ function stopRest() {
   restTick = null;
   const bar = document.getElementById("restBar");
   if (bar) bar.hidden = true;
+  document.body.classList.remove("resting");
 }
 
 // Laeuft nach einem Neuladen weiter
@@ -583,8 +682,17 @@ export async function mount(el) {
         const rest = res.ex.rest || (res.ex.kind === "compound" ? REST.compound : REST.isolation);
         startRest(rest);
       }
+      // Letzter Satz einer Uebung: gleich die naechste offene aufklappen.
+      if (res?.s.done && res.ex.sets.every((x) => x.done)) advanceFocus(i);
       return;
     }
+    const focus = t("[data-focus]");
+    if (focus) {
+      const i = Number(focus.dataset.focus);
+      return update((d) => { d.focus = focusIndex(d) === i ? -1 : i; });
+    }
+    const menu = t("[data-ex-menu]");
+    if (menu) return openExerciseMenu(Number(menu.dataset.exMenu));
     const add = t("[data-add-set]");
     if (add) {
       return update((d) => {
@@ -594,21 +702,11 @@ export async function mount(el) {
           weight: last?.weight ?? null, rpe: null, done: false });
       });
     }
-    const drop = t("[data-drop-set]");
-    if (drop) {
-      return update((d) => {
-        const ex = d.exercises[Number(drop.dataset.dropSet)];
-        if (ex.sets.length > 1) ex.sets.pop();
-      });
-    }
-    // data-drop-ex und data-cancel sind zweistufig (armDelete) und werden einmal pro
-    // renderDraft() registriert, nicht hier im delegierten Handler.
+    // data-cancel ist zweistufig (armDelete) und wird einmal pro renderDraft() registriert,
+    // nicht hier im delegierten Handler; Entfernen, Scheiben, Tauschen stecken im Menue.
     if (t("[data-add-ex]")) return addExercise();
-    if (t("[data-finish]")) return finish();
-    const plates = t("[data-plates]");
-    if (plates) return openPlates(Number(plates.dataset.plates));
-    const swap = t("[data-swap]");
-    if (swap) return openSwap(Number(swap.dataset.swap));
+    const fin = t("[data-finish]");
+    if (fin) return confirmFinish(fin);
   });
 
   // Zahlen und Notiz direkt in den Entwurf schreiben – bei jedem Tastendruck, damit
@@ -625,4 +723,40 @@ export async function mount(el) {
       if (draft) { draft.notes = ev.target.value; saveDraft(draft); }
     }
   });
+
+  // Gewicht/Wiederholungen an die folgenden Saetze weitergeben – erst beim Verlassen des
+  // Felds (change), nicht pro Tastendruck: sonst wuerde schon das Leeren zum Neu-Tippen
+  // die Saetze darunter mitreissen. Uebernommen wird nur, was noch leer ist oder noch
+  // denselben Wert hatte wie dieses Feld vorher (also nicht selbst angepasst wurde).
+  let before = null;
+  el.addEventListener("focusin", (ev) => {
+    const field = ev.target.closest('[data-field="weight"], [data-field="reps"]');
+    before = field ? { field, value: field.value === "" ? null : Number(field.value) } : null;
+  });
+  el.addEventListener("change", (ev) => {
+    const field = ev.target.closest('[data-field="weight"], [data-field="reps"]');
+    if (!field || before?.field !== field) return;
+    const value = field.value === "" ? null : Number(field.value);
+    if (value === null || Number.isNaN(value) || value === before.value) return;
+    const row = field.closest(".set-row");
+    fillFollowing(Number(row.dataset.ex), Number(row.dataset.set), field.dataset.field, before.value, value);
+    before = { field, value };
+  });
+}
+
+function fillFollowing(exIndex, setIndex, key, old, value) {
+  const draft = getDraft();
+  if (!draft) return;
+  const sets = draft.exercises[exIndex].sets;
+  const src = sets[setIndex];
+  for (let j = setIndex + 1; j < sets.length; j += 1) {
+    const s = sets[j];
+    if (s.done || Boolean(s.warmup) !== Boolean(src.warmup)) continue;
+    if (s[key] !== null && s[key] !== old) continue;
+    s[key] = value;
+    // Nur das Feld nachziehen, nicht neu zeichnen – die Tastatur bleibt offen.
+    const input = root.querySelector(`.set-row[data-ex="${exIndex}"][data-set="${j}"] [data-field="${key}"]`);
+    if (input) input.value = value;
+  }
+  saveDraft(draft);
 }

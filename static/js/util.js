@@ -167,6 +167,16 @@ export const prefs = {
   },
 };
 
+// ------------------------------------------------- Angefangene Formulare
+// Jede Eingabe markiert ihr Formular. Ansichten, die sich beim Zurueckkehren in die App
+// neu laden, lassen markierte Formulare in Ruhe – ein Blick in die Uhr-App soll keine
+// halb eingetragene Cardio-Einheit kosten. Nach dem Speichern: delete form.dataset.dirty.
+document.addEventListener("input", (e) => {
+  const form = e.target.closest?.("form");
+  if (form) form.dataset.dirty = "1";
+}, true);
+export const hasDirtyForm = (root) => Boolean(root?.querySelector("form[data-dirty]"));
+
 // ------------------------------------------------------------ Sheet
 let lastFocus = null;
 let ignorePop = false;

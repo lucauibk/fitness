@@ -1,5 +1,5 @@
 /** Profil: persönliche Angaben und der Einstieg in den Plan-Assistenten. */
-import { $, api, esc, formData, formError, getProfile, icon, skeleton, submitOnce, toast,
+import { $, api, esc, formData, formError, getProfile, hasDirtyForm, icon, skeleton, submitOnce, toast,
   WEEKDAYS } from "./util.js";
 import { openWizard, GOALS, EXPERIENCE, FOCUS, hasWizardDraft } from "./wizard.js";
 
@@ -53,7 +53,7 @@ function nutritionCard() {
         <label class="field">Fett (g)<input name="fat_goal" type="number" inputmode="numeric" min="0" max="500" value="${g.fat ?? ""}"></label>
       </div>
       <p class="eyebrow">Trinkziel</p>
-      ${w.auto ? `<p class="hint">Berechnet aus Gewicht und Aktivität: ${liters(w.computed)} L pro Tag.</p>` : ""}
+      ${w.auto ? `<p class="hint">${w.from_weight ? "Berechnet aus Gewicht und Aktivität" : "Richtwert, solange kein Körpergewicht eingetragen ist"}: ${liters(w.computed)} L pro Tag.</p>` : ""}
       <div class="toggles"><label class="toggle"><input type="checkbox" name="water_auto" ${w.auto ? "checked" : ""}>
         <span></span>Trinkziel automatisch berechnen</label></div>
       <label class="field" data-water-manual ${w.auto ? "hidden" : ""}>Trinkziel (ml)
@@ -157,6 +157,7 @@ function render() {
 export async function load() {
   // Nicht neu zeichnen, während jemand im Formular tippt
   if (data && root.contains(document.activeElement) && document.activeElement.matches("input, textarea, select")) return;
+  if (data && hasDirtyForm(root)) return;
   if (!data) root.innerHTML = skeleton(4);
   const [profile, bw, nutrition] = await Promise.all([api(`profiles/${getProfile()}`),
     api("bodyweight"), api("nutrition/goals")]);

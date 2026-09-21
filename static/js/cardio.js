@@ -1,5 +1,5 @@
 /** Cardio: Einheit eintragen (mit kcal-Schätzung) und die letzten Einheiten. */
-import { $, api, esc, formData, formError, getProfile, icon, prefs, skeleton, submitOnce,
+import { $, api, esc, formData, formError, getProfile, hasDirtyForm, icon, prefs, skeleton, submitOnce,
   toast } from "./util.js";
 import * as outbox from "./outbox.js";
 
@@ -88,6 +88,7 @@ function render() {
       prefs.set("cardio.last", data.activity);
       const body = { ...data, profile_id: getProfile(), client_id: outbox.uuid() };
       const res = await outbox.send({ path: "cardio", body });
+      delete form.dataset.dirty;
       toast(res.queued ? "Gespeichert – wird gesendet, sobald wieder Verbindung da ist" : "Cardio gespeichert");
       window.dispatchEvent(new CustomEvent("data-changed"));
     } catch (e) { formError(form, e); }
@@ -96,6 +97,7 @@ function render() {
 
 export async function load() {
   if (root.contains(document.activeElement) && document.activeElement.matches("input, select")) return;
+  if (hasDirtyForm(root)) return;
   if (!activities) root.innerHTML = skeleton(4);
   const [acts, list, bw] = await Promise.all([
     activities || api("cardio/activities"), api("cardio?limit=30"), api("bodyweight")]);

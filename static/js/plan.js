@@ -54,7 +54,7 @@ function dayCard(day) {
       </div>
       <button type="button" class="icon-btn" data-edit-day="${day.id}" aria-label="Trainingstag bearbeiten">${icon("edit")}</button>
     </div>
-    <div class="list flush">${day.exercises.map(exerciseRow).join("")
+    <div class="list flush">${day.exercises.filter((e) => !isPendingDelete(`split-exercises/${e.id}`)).map(exerciseRow).join("")
       || `<p class="hint pad">Noch keine Übungen.</p>`}</div>
     <div class="btn-row">
       <button type="button" class="btn small ghost" data-add-item="${day.id}">${icon("plus")} Übung</button>
@@ -92,7 +92,7 @@ function render() {
     </div>
     ${open ? `<h3 class="group-title">${esc(open.name)}
         <button type="button" class="link-btn" data-edit-split="${open.id}">Umbenennen</button></h3>
-      ${open.days.map(dayCard).join("")}
+      ${open.days.filter((d) => !isPendingDelete(`split-days/${d.id}`)).map(dayCard).join("")}
       <div class="btn-row">
         <button type="button" class="btn ghost" data-add-day="${open.id}">${icon("plus")} Trainingstag</button>
       </div>` : `<p class="hint pad">Tippe auf einen Split, um seine Tage und Übungen zu sehen.</p>`}`;
@@ -191,13 +191,10 @@ function editDay(day, splitId) {
     } catch (e) { formError(form, e); }
   });
   if (!isNew) {
-    armDelete($("[data-delete]", sheet), async () => {
+    // Wie beim Split: erst ausblenden, nach dem Rueckgaengig-Toast wirklich loeschen.
+    armDelete($("[data-delete]", sheet), () => {
       closeSheet();
-      try {
-        await api(`split-days/${day.id}`, { method: "DELETE" });
-        toast(`„${day.label}“ gelöscht`);
-        changed();
-      } catch (e) { toast(e.message, { error: true }); }
+      deleteLater(`split-days/${day.id}`, `„${day.label}“ gelöscht`);
     }, "Löschen", "Trainingstag löschen?");
   }
 }
@@ -239,8 +236,13 @@ function itemFields(item, exList, dayId) {
 }
 
 async function editItem(item, dayId) {
-  if (!exercises) exercises = await api("exercises");
   const isNew = !item;
+  if (!exercises) {
+    // Sheet sofort zeigen – auf dem Pi kann die Liste ein paar Sekunden dauern.
+    const wait = openSheet({ title: isNew ? "Übung hinzufügen" : esc(item.name), body: skeleton(4) });
+    try { exercises = await api("exercises"); } catch (e) { closeSheet(); return toast(e.message, { error: true }); }
+    if (!wait.isConnected) return;   // inzwischen weggetippt
+  }
   const sheet = openSheet({
     title: isNew ? "Übung hinzufügen" : esc(item.name),
     body: `<form id="itemForm" class="form">${itemFields(item, exercises, dayId ?? item.split_day_id)}</form>`,
@@ -266,13 +268,9 @@ async function editItem(item, dayId) {
     } catch (e) { formError(form, e); }
   });
   if (!isNew) {
-    armDelete($("[data-delete]", sheet), async () => {
+    armDelete($("[data-delete]", sheet), () => {
       closeSheet();
-      try {
-        await api(`split-exercises/${item.id}`, { method: "DELETE" });
-        toast("Übung aus dem Plan entfernt");
-        changed();
-      } catch (e) { toast(e.message, { error: true }); }
+      deleteLater(`split-exercises/${item.id}`, "Übung aus dem Plan entfernt");
     }, "Löschen", "Aus dem Plan entfernen?");
   }
 }
@@ -295,7 +293,9 @@ async function move(itemId, dir) {
 
 // ------------------------------------------------------- Übungs-Katalog
 async function manageExercises() {
-  exercises = await api("exercises");
+  const wait = openSheet({ title: "Übungen verwalten", body: skeleton(6) });
+  try { exercises = await api("exercises"); } catch (e) { closeSheet(); return toast(e.message, { error: true }); }
+  if (!wait.isConnected) return;
   const labels = { brust: "Brust", ruecken: "Rücken", beine: "Beine", schultern: "Schultern",
     arme: "Arme", rumpf: "Rumpf" };
   const listHtml = (q = "") => {
@@ -377,6 +377,7 @@ export function editExercise(ex) {
     } catch (e) { formError(form, e); }
   });
   if (!isNew) {
+    // Der Katalog ist fuer alle Profile gemeinsam – geloescht wird auch aus fremden Plaenen.
     armDelete($("[data-delete]", sheet), async () => {
       closeSheet();
       try {
@@ -387,7 +388,7 @@ export function editExercise(ex) {
           : "Übung gelöscht");
         changed();
       } catch (e) { toast(e.message, { error: true }); }
-    }, "Löschen", "Übung löschen?");
+    }, "Löschen", "Aus allen Plänen löschen?");
   }
 }
 
@@ -438,10 +439,12 @@ function adviceCard(data) {
 
 async function improvePlan() {
   let data;
+  const wait = openSheet({ title: "Plan verbessern", body: skeleton(5), wide: true });
   try {
     data = await api("plan/analyze");
-  } catch (e) { return toast(e.message, { error: true }); }
-  if (!data.split) return toast("Es gibt noch keinen Plan zum Verbessern.", { error: true });
+  } catch (e) { closeSheet(); return toast(e.message, { error: true }); }
+  if (!wait.isConnected) return;
+  if (!data.split) { closeSheet(); return toast("Es gibt noch keinen Plan zum Verbessern.", { error: true }); }
   const sheet = openSheet({ title: "Plan verbessern", body: "", wide: true });
   const body = $(".sheet-body", sheet);
 

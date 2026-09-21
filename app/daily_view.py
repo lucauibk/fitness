@@ -36,7 +36,8 @@ def build(profile_id):
     profile = db.get_row("profiles", profile_id)
     day_nutrition = nutrition.day(profile_id, day_iso)
     kcal_day = day_nutrition["totals"]
-    goals = nutrition.goals(profile)["goals"]
+    goal_info = nutrition.goals(profile)
+    goals = goal_info["goals"]
     water_goal = nutrition.water_goals(profile)["goal"]
     ach = activity.achievements(profile_id)
     done_mobility = db.one("SELECT 1 AS x FROM mobility_log WHERE profile_id=? AND date=? AND routine=?",
@@ -52,6 +53,8 @@ def build(profile_id):
                      "done": bool(done_mobility)},
         "streak": {"daily": ach["daily_streak"], "weekly": ach["weekly_streak"],
                    "week": ach["week"], "trained_today": trained_today},
+        # Was fuer Kalorien-/Trinkziel noch fehlt – Heute zeigt dann "Profil vervollstaendigen".
+        "profile_missing": goal_info["missing"],
         "nutrition": {"totals": kcal_day, "goals": goals,
                      "water_ml": day_nutrition["water_ml"], "water_goal": water_goal},
     }

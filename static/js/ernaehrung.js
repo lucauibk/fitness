@@ -173,7 +173,7 @@ function foodRow(f, i, q) {
   return `<div class="row-item food-row" role="button" tabindex="0" data-pick="${i}">
     <div class="row-main"><div class="row-title">${highlight(f.name, q)}</div>
       ${meta.length ? `<div class="row-meta">${meta.map((m) => `<span>${m}</span>`).join("")}</div>` : ""}</div>
-    <span class="row-aside food-kcal">${s ? `<b>${num(kcalFor(f, s.g))} kcal</b><small>pro ${s.text.startsWith("Packung") ? "Packung" : "Portion"}</small>`
+    <span class="row-aside food-kcal">${s ? `<b>${num(kcalFor(f, s.g))} kcal</b><small>pro ${s.text.startsWith("Packung") ? "Packung" : "Portion"}</small><small>${num(f.kcal)} / 100 g</small>`
       : `<b>${num(f.kcal)} kcal</b><small>pro 100 g</small>`}</span></div>`;
 }
 
@@ -271,7 +271,8 @@ function openAdd(meal) {
       box.innerHTML = (st.local.length || st.searchingLocal
         ? section("Gespeicherte Lebensmittel", st.local, `<p class="hint pad">Suche …</p>`) : "")
         + section("Produkte (Open Food Facts)", online,
-          `<p class="hint pad">${st.searchingOnline ? "Weitere Produkte werden gesucht …" : st.error ? "" : "Nichts gefunden."}</p>`)
+          `<p class="hint pad">${st.searchingOnline ? "Weitere Produkte werden gesucht …" : st.error ? ""
+            : st.query.length < 3 ? "Ab drei Buchstaben wird auch hier gesucht." : "Nichts gefunden."}</p>`)
         + (online.length && st.searchingOnline ? `<p class="hint pad">Weitere Produkte werden gesucht …</p>` : "");
     }
     $("[data-error]", sheet).textContent = st.error || "";
@@ -294,11 +295,15 @@ function openAdd(meal) {
       clearTimeout(onlineTimer);
       st.error = null;
       if (st.query.length < 2) { st.local = []; st.online = []; st.searchingOnline = false; return paintList(); }
-      // Eigene Lebensmittel sofort, Open Food Facts erst, wenn nicht mehr getippt wird
-      st.searchingLocal = st.searchingOnline = true;
+      // Eigene Lebensmittel sofort, Open Food Facts erst ab drei Zeichen und wenn nicht
+      // mehr getippt wird – jede Suche kostet dort mehrere Abrufe (429-Gefahr).
+      st.searchingLocal = true;
+      st.searchingOnline = st.query.length >= 3;
       localTimer = setTimeout(searchLocal, 200);
-      onlineTimer = setTimeout(searchOnline, 600);
+      if (st.searchingOnline) onlineTimer = setTimeout(searchOnline, 700);
+      else st.online = [];
     });
+    if (!st.query) input.focus({ preventScroll: true });
   }
 
   async function searchLocal() {
