@@ -182,18 +182,21 @@ def _check_progression(profile_id, workout, done_by_ex, names):
         return {"lost": 0.0, "missing": [],
                 "good": [f"gesteigert bei {', '.join(besser)}"] if besser else []}
     return {"lost": min(1.0, len(fehlt) / vergleichbar),
+            # Gleichartige Hinweise in einer Zeile – drei fast gleiche Saetze lesen sich wie ein Tadel.
             "missing": [{"key": "progression",
-                         "text": f"{n}: kein Fortschritt gegenüber dem letzten Mal"} for n in fehlt],
+                         "text": f"{', '.join(fehlt)}: kein Fortschritt gegenüber dem letzten Mal"}],
             "good": [f"gesteigert bei {', '.join(besser)}"] if besser else []}
 
 
 def _check_intensity(work_sets):
     """Anstrengung (RPE): ohne Notiz lässt sich nicht beurteilen, ob hart genug trainiert
-    wurde – das ist ein Mangel, aber kein Totalausfall."""
+    wurde – das ist ein Mangel, aber kein Totalausfall. Die App fragt RPE einmal pro Übung
+    ab (nach dem letzten Satz), deshalb zählt der Anteil der Übungen, nicht der Sätze."""
     rpes = [_num(s.get("rpe")) for s in work_sets if _num(s.get("rpe")) is not None]
     if not rpes:
-        return {"lost": 0.6, "missing": [{"key": "rpe",
-                "text": "Anstrengung (RPE) bei keinem Satz notiert"}], "good": []}
+        return {"lost": 0.3, "missing": [{"key": "rpe",
+                "text": "Anstrengung (RPE) nicht notiert – ein Tipp nach dem letzten Satz reicht"}],
+                "good": []}
     schnitt = sum(rpes) / len(rpes)
     zahl = f"{schnitt:.1f}".replace(".", ",")   # deutsche Schreibweise wie in fmtWeight()
     fehlt = []
@@ -206,10 +209,12 @@ def _check_intensity(work_sets):
         lost = 0.5
         fehlt.append({"key": "rpe",
                       "text": f"⌀ RPE {zahl} – dauerhaft am Limit, das rächt sich"})
-    if len(rpes) < len(work_sets) / 2:
-        lost = max(lost, 0.3)
+    uebungen = {s["exercise_id"] for s in work_sets}
+    mit_rpe = {s["exercise_id"] for s in work_sets if _num(s.get("rpe")) is not None}
+    if len(mit_rpe) < len(uebungen) / 2:
+        lost = max(lost, 0.2)
         fehlt.append({"key": "rpe",
-                      "text": f"Anstrengung nur bei {len(rpes)} von {len(work_sets)} Sätzen notiert"})
+                      "text": f"Anstrengung nur bei {len(mit_rpe)} von {len(uebungen)} Übungen notiert"})
     good = [] if fehlt else [f"Intensität passt (⌀ RPE {zahl})"]
     return {"lost": lost, "missing": fehlt, "good": good}
 
@@ -225,8 +230,8 @@ def _check_warmup(sets, done_by_ex, names):
         return {"lost": 0.0, "missing": [], "good": ["Grundübungen aufgewärmt"]}
     return {"lost": len(fehlt) / len(compounds),
             "missing": [{"key": "warmup",
-                         "text": f"{names[ex]['name']}: kein Aufwärmsatz vor der Grundübung"}
-                        for ex in fehlt], "good": []}
+                         "text": f"{', '.join(names[ex]['name'] for ex in fehlt)}: "
+                                 "kein Aufwärmsatz vor der Grundübung"}], "good": []}
 
 
 def _minutes(workout):

@@ -537,23 +537,37 @@ button.ex-head {
 .btn.primary.armed { background: var(--urgent); color: var(--on-urgent); white-space: normal; }
 .sets { display: grid; gap: var(--s2); margin: var(--s3) 0 var(--s2); }
 
-.set-row { display: flex; align-items: flex-end; gap: var(--s2); }
+/* Ein Raster fuer Kopfzeile und Saetze: die Spaltennamen stehen einmal oben statt
+   ueber jedem Satz – bei fuenf Saetzen spart das eine ganze Bildschirmhoehe. */
+.set-row, .set-head {
+  display: grid; grid-template-columns: var(--tap) minmax(0, 1fr) minmax(0, 1fr) var(--tap);
+  align-items: start; gap: var(--s2);
+}
+.set-head { margin-bottom: calc(-1 * var(--s1)); }
+.set-head span { color: var(--muted); font-size: var(--fs-xs); font-weight: 600; text-align: center; }
 .set-no {
-  width: 34px; height: var(--tap); flex: none; color: var(--muted);
+  width: var(--tap); height: var(--tap); color: var(--muted);
   font-size: var(--fs-sm); font-weight: 650; font-variant-numeric: tabular-nums; text-align: center;
   background: none; border: 0; cursor: pointer; border-radius: var(--r1);
 }
 .set-no.is-warmup { color: var(--accent); }
-.set-field { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.set-field > span { color: var(--muted); font-size: var(--fs-xs); font-weight: 600; }
+.set-field { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .set-field input {
   width: 100%; min-height: var(--tap); padding: 0 10px; font-size: var(--fs-md);
   font-variant-numeric: tabular-nums; text-align: center;
 }
-/* Anstrengung ist optional und seltener als Whd./Gewicht – schmaler, damit die
-   Haupt-Eingaben den Platz behalten. */
-.set-field-rpe { flex: 0 0 56px; }
-.set-field-rpe input { padding: 0 4px; }
+.set-last { color: var(--muted); font-size: var(--fs-xs); text-align: center; }
+
+/* Anstrengung einmal pro Uebung, nach dem letzten Satz */
+.rpe-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s2); margin-top: var(--s2); }
+.rpe-row .hint { margin: 0; }
+.rpe-chips { display: flex; gap: 6px; }
+.chip-btn {
+  min-width: 40px; min-height: 36px; padding: 0 10px; border: 1.5px solid var(--line-strong); border-radius: 999px;
+  background: var(--surface); color: var(--muted); font: inherit; font-size: var(--fs-sm); font-weight: 650;
+  font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.chip-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .set-check {
   width: var(--tap); height: var(--tap); flex: none; display: grid; place-items: center;
   border: 1.5px solid var(--line-strong); border-radius: var(--r2);
@@ -822,7 +836,11 @@ button.chip { border: 0; font-family: inherit; }
 /* Vollbildmodus waehrend der Einheit: Topbar und Nav brauchen die 45 Minuten nicht,
    renderDraft() hat schon eine kompakte eigene Kopfzeile. */
 body.training-fullscreen .topbar,
-body.training-fullscreen #nav { display: none; }
+body.training-fullscreen #nav,
+body.training-fullscreen .subnav { display: none; }
+/* Meldungen ueber der Aktionsleiste statt mitten in den Saetzen */
+body.training-fullscreen #toasts { bottom: calc(env(safe-area-inset-bottom) + var(--tap) + 3 * var(--s2)); }
+body.training-fullscreen.resting #toasts { bottom: calc(env(safe-area-inset-bottom) + var(--rest-h) + var(--tap) + 4 * var(--s2)); }
 body.training-fullscreen .content { padding-bottom: var(--s4); }
 body.training-fullscreen .sticky-actions { bottom: calc(env(safe-area-inset-bottom) + var(--s2)); }
 /* Waehrend der Pause sitzt die Pause ganz unten und die Aktionsleiste rueckt darueber –
@@ -880,3 +898,5 @@ body.training-fullscreen.resting .content { padding-bottom: calc(var(--rest-h) +
 .stepper { display: flex; align-items: center; gap: var(--s2); }
 .stepper input { flex: 1; min-width: 0; text-align: center; font-variant-numeric: tabular-nums; }
 [data-amount] .chips { margin-top: var(--s2); }
+.feedback-more { margin-top: var(--s2); }
+.feedback-more .feedback-list { margin-top: var(--s2); }

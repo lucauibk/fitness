@@ -77,28 +77,43 @@ function setRow(ex, exIndex, s, i) {
   // Aufwaermsaetze zaehlen nicht mit: nach "W" kommt Satz 1, nicht Satz 2.
   const no = ex.sets.slice(0, i + 1).filter((x) => !x.warmup).length;
   const name = s.warmup ? "Aufwärmsatz" : `Satz ${no}`;
-  const unitLabel = ex.unit === "koerper" ? "kg extra" : "kg";
-  // Das letzte Mal direkt an der Zeile statt nur einmal in der Kartenkopfzeile – das ist
-  // der Unterschied zwischen Zahlen eintippen und sich gezielt steigern.
+  // Das letzte Mal nur dort, wo es vom eingetragenen Wert abweicht – die Felder sind
+  // ohnehin mit dem Vorschlag vorbelegt, eine Wiederholung derselben Zahl ist nur Rauschen.
   const last = ex.last?.[i];
+  const hint = (prev, cur) => (prev != null && prev !== cur
+    ? `<small class="set-last">zuletzt ${String(prev).replace(".", ",")}</small>` : "");
   return `<div class="set-row ${s.done ? "is-done" : ""}" data-ex="${exIndex}" data-set="${i}">
     <button type="button" class="set-no ${s.warmup ? "is-warmup" : ""}" data-warmup
             aria-label="${s.warmup ? "Aufwärmsatz – antippen für normalen Satz" : `Satz ${no} – antippen für Aufwärmsatz`}"
             aria-pressed="${Boolean(s.warmup)}">${s.warmup ? "W" : no}</button>
-    <label class="set-field"><span>Whd.${last?.reps != null ? ` · zuletzt ${last.reps}` : ""}</span>
+    <label class="set-field">
       <input type="number" inputmode="numeric" min="0" max="1000" step="1"
              value="${s.reps ?? ""}" data-field="reps" aria-label="Wiederholungen ${name}">
+      ${hint(last?.reps, s.reps)}
     </label>
-    <label class="set-field"><span>${unitLabel}${last?.weight != null ? ` · zuletzt ${String(last.weight).replace(".", ",")}` : ""}</span>
+    <label class="set-field">
       <input type="number" inputmode="decimal" min="0" max="1000" step="0.5"
              value="${s.weight ?? ""}" data-field="weight" aria-label="Gewicht ${name}">
-    </label>
-    <label class="set-field set-field-rpe"><span>RPE</span>
-      <input type="number" inputmode="decimal" min="0" max="10" step="0.5"
-             value="${s.rpe ?? ""}" data-field="rpe" aria-label="Anstrengung (RPE) ${name}, 0 bis 10">
+      ${hint(last?.weight, s.weight)}
     </label>
     <button type="button" class="set-check" data-toggle aria-pressed="${s.done}"
             aria-label="${name} ${s.done ? "nicht erledigt" : "erledigt"}">${icon("check")}</button>
+  </div>`;
+}
+
+/** Der letzte abgehakte Arbeitssatz – an ihm haengt die Anstrengung (RPE) der Uebung. */
+const lastWorkSet = (ex) => [...ex.sets].reverse().find((x) => x.done && !x.warmup);
+
+/** RPE einmal pro Uebung statt als Spalte in jeder Zeile: erscheint, sobald die Uebung
+ *  fertig ist, auch in der zugeklappten Karte – optional, ein Tipp. */
+function rpeRow(ex, index) {
+  const s = lastWorkSet(ex);
+  if (!s) return "";
+  return `<div class="rpe-row" role="group" aria-label="Anstrengung letzter Satz ${esc(ex.name)}">
+    <span class="hint">Wie schwer war der letzte Satz?</span>
+    <div class="rpe-chips">${[6, 7, 8, 9, 10].map((v) => `<button type="button" class="chip-btn"
+      data-rpe="${index}" data-value="${v}" aria-pressed="${s.rpe === v}"
+      aria-label="RPE ${v}${v === 10 ? " – nichts mehr drin" : ""}">${v}</button>`).join("")}</div>
   </div>`;
 }
 
@@ -114,26 +129,30 @@ function exerciseCard(ex, index, open) {
   const range = ex.reps_min === ex.reps_max ? `${ex.reps_min}` : `${ex.reps_min}–${ex.reps_max}`;
   const done = ex.sets.filter((s) => s.done).length;
   const complete = done === ex.sets.length;
-  // Die Kopfzeile ist der Schalter: zugeklappt zeigt sie genug, um zu wissen, wo man steht.
+  const unitLabel = ex.unit === "koerper" ? "kg extra" : "kg";
+  // Die Kopfzeile ist der Schalter. Zugeklappt reicht Name + Stand, Ziel und letztes Mal
+  // braucht man nur bei der Uebung, an der man gerade ist.
   return `<div class="card exercise-card ${complete ? "is-done" : ""} ${open ? "is-open" : "is-closed"}">
     <button type="button" class="ex-head" data-focus="${index}" aria-expanded="${open}">
       <div>
         <div class="card-title">${esc(ex.name)}</div>
-        <div class="row-meta">
-          <span>Ziel ${range} Whd.</span>
+        ${open ? `<div class="row-meta">
+          <span>${range} Whd.${ex.last?.length ? ` · zuletzt ${esc(setsSummary(ex.last, ex.unit))}` : ""}</span>
           ${ex.adjusted ? `<span class="soon-text">angepasst: ${esc(ex.adjusted)}</span>` : ""}
-          ${ex.last?.length ? `<span>letztes Mal ${esc(setsSummary(ex.last, ex.unit))}</span>` : ""}
-        </div>
+        </div>` : ""}
       </div>
       <span class="pill ${complete ? "ok" : ""}">${done}/${ex.sets.length}</span>
       ${icon("down", "chev")}
     </button>
-    ${open ? `<div class="sets">${ex.sets.map((s, i) => setRow(ex, index, s, i)).join("")}</div>
+    ${open ? `<div class="sets">
+      <div class="set-head" aria-hidden="true"><span></span><span>Whd.</span><span>${unitLabel}</span><span></span></div>
+      ${ex.sets.map((s, i) => setRow(ex, index, s, i)).join("")}</div>
     <div class="btn-row">
       <button type="button" class="btn small ghost" data-add-set="${index}">${icon("plus")} Satz</button>
       <span class="grow"></span>
       <button type="button" class="btn small ghost" data-ex-menu="${index}" aria-label="Weitere Aktionen für ${esc(ex.name)}">⋯ Mehr</button>
     </div>` : ""}
+    ${complete ? rpeRow(ex, index) : ""}
   </div>`;
 }
 
@@ -349,6 +368,8 @@ function updateSet(exIndex, setIndex, fn) {
     const pill = $(".pill", card);
     pill.textContent = `${done}/${ex.sets.length}`;
     pill.classList.toggle("ok", done === ex.sets.length);
+    $(".rpe-row", card)?.remove();
+    if (done === ex.sets.length) card.insertAdjacentHTML("beforeend", rpeRow(ex, exIndex));
   }
 
   const done = doneCount(draft);
@@ -455,9 +476,11 @@ function advanceFocus(fromIndex) {
   saveDraft(draft);
   renderDraft(draft);
   if (next >= 0) {
-    const card = $$(".exercise-card", root)[next];
+    // Die RPE-Frage der gerade fertigen Uebung soll noch zu sehen sein, direkt darunter
+    // die naechste Karte – sonst scrollt die Frage weg, bevor man sie beantworten kann.
+    const target = $(".rpe-row", $$(".exercise-card", root)[fromIndex]) || $$(".exercise-card", root)[next];
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    card?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    target?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
   }
 }
 
@@ -518,13 +541,14 @@ async function finish() {
     stopRest();
     clearDraft();
     today = null;
-    toast(res.queued ? "Gespeichert – wird gesendet, sobald du wieder Empfang hast"
-      : `Einheit gespeichert · ${sets.length} Sätze`);
+    const fb = res.data?.feedback;
+    // Mit Bewertung sagt das Sheet schon, dass gespeichert ist – ein Toast daneben verdeckt es nur.
+    if (res.queued) toast("Gespeichert – wird gesendet, sobald du wieder Empfang hast");
+    else if (!fb) toast(`Einheit gespeichert · ${sets.length} Sätze`);
     window.dispatchEvent(new CustomEvent("outbox-changed"));
     window.dispatchEvent(new CustomEvent("data-changed"));
     // Das Urteil kommt mit der Antwort zurueck. Ohne Netz liegt die Einheit im Ausgang –
     // dann gibt es die Bewertung erst nach dem Nachsenden, im Verlauf.
-    const fb = res.data?.feedback;
     if (fb) {
       openSheet({ title: "Einheit bewertet", body: feedbackHtml(fb),
         footer: `<span class="grow"></span>
@@ -681,6 +705,8 @@ export async function mount(el) {
       if (res?.s.done && !allDone) {
         const rest = res.ex.rest || (res.ex.kind === "compound" ? REST.compound : REST.isolation);
         startRest(rest);
+      } else if (allDone) {
+        stopRest();   // die Pause vom vorletzten Satz lief sonst weiter
       }
       // Letzter Satz einer Uebung: gleich die naechste offene aufklappen.
       if (res?.s.done && res.ex.sets.every((x) => x.done)) advanceFocus(i);
@@ -690,6 +716,18 @@ export async function mount(el) {
     if (focus) {
       const i = Number(focus.dataset.focus);
       return update((d) => { d.focus = focusIndex(d) === i ? -1 : i; });
+    }
+    const rpe = t("[data-rpe]");
+    if (rpe) {
+      const i = Number(rpe.dataset.rpe);
+      const v = Number(rpe.dataset.value);
+      const d = getDraft();
+      const s = d && lastWorkSet(d.exercises[i]);
+      if (!s) return;
+      s.rpe = s.rpe === v ? null : v;   // nochmal tippen nimmt die Angabe zurueck
+      saveDraft(d);
+      rpe.closest(".rpe-row").outerHTML = rpeRow(d.exercises[i], i);
+      return;
     }
     const menu = t("[data-ex-menu]");
     if (menu) return openExerciseMenu(Number(menu.dataset.exMenu));

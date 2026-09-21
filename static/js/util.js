@@ -138,21 +138,24 @@ export function setsSummary(sets, unit) {
 export function feedbackHtml(fb) {
   if (!fb) return "";
   const tone = fb.score >= 85 ? "gut" : fb.score >= 50 ? "mittel" : "schwach";
-  const block = (title, items, name) => (items?.length
-    ? `<p class="feedback-lead">${title}</p>
-       <ul class="feedback-list ${name}">${items
-         .map((t) => `<li>${icon(name === "bad" ? "warn" : "check")}<span>${esc(t)}</span></li>`)
-         .join("")}</ul>`
-    : "");
+  const li = (t, name) => `<li>${icon(name === "bad" ? "warn" : "check")}<span>${esc(t)}</span></li>`;
+  // Erst was gestimmt hat, dann hoechstens drei Hinweise (die wichtigsten, der Server
+  // sortiert nach Gewicht) – eine lange Maengelliste nach einer guten Einheit liest sich
+  // wie ein Tadel.
+  const bad = (fb.missing || []).map((m) => m.text);
+  const [top, rest] = [bad.slice(0, 3), bad.slice(3)];
   return `<div class="feedback tone-${tone}">
     <div class="feedback-score">
       <span class="big-number">${fb.score}</span>
       <span>von 100 · <b>${esc(fb.label)}</b></span>
     </div>
-    ${fb.missing?.length
-      ? block("Das hat gefehlt", fb.missing.map((m) => m.text), "bad")
+    ${fb.good?.length ? `<p class="feedback-lead">Das hat gestimmt</p>
+      <ul class="feedback-list good">${fb.good.map((t) => li(t, "good")).join("")}</ul>` : ""}
+    ${top.length ? `<p class="feedback-lead">Darauf achten</p>
+      <ul class="feedback-list bad">${top.map((t) => li(t, "bad")).join("")}</ul>
+      ${rest.length ? `<details class="field-more feedback-more"><summary>+ ${rest.length} weitere</summary>
+        <ul class="feedback-list bad">${rest.map((t) => li(t, "bad")).join("")}</ul></details>` : ""}`
       : `<p class="feedback-lead">${icon("trophy")} Nichts auszusetzen.</p>`}
-    ${block("Das hat gestimmt", fb.good, "good")}
   </div>`;
 }
 
