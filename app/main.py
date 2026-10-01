@@ -57,9 +57,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Fitness", lifespan=lifespan)
 
-from .routes import body as body_routes, daily, library, nutrition as nutrition_routes  # noqa: E402
+from .routes import body as body_routes, daily, library, nutrition as nutrition_routes, planner as planner_routes  # noqa: E402
 
-for _router in (daily.router, library.router, nutrition_routes.router, body_routes.router):
+for _router in (daily.router, library.router, nutrition_routes.router, body_routes.router,
+                planner_routes.router):
     app.include_router(_router)
 
 # ------------------------------------------------------- Host-Pruefung

@@ -86,6 +86,9 @@ export function openWizard(profile) {
 }
 
 // ------------------------------------------------------------ Anzeige
+const INJURIES = [["knee", "Knie"], ["lower_back", "Rücken"], ["shoulder", "Schulter"], ["elbow", "Ellbogen"],
+  ["wrist", "Handgelenk"], ["hip", "Hüfte"]];
+
 const choice = (group, value, label, text, active) => `
   <button type="button" class="choice ${active ? "active" : ""}" data-pick="${group}" data-value="${value}"
     aria-pressed="${active}">
@@ -96,8 +99,11 @@ const choice = (group, value, label, text, active) => `
 function stepData() {
   const d = st.data;
   const year = new Date().getFullYear();
-  return `<p class="hint">Alles freiwillig. Einschränkungen wie „Knie“, „Rücken“, „Schulter“ oder
-      „Ellbogen“ wählt der Assistent direkt bei den Übungen aus.</p>
+  const has = (label) => (d.limitations || "").toLowerCase().includes(label.toLowerCase());
+  return `<p class="hint">Alles freiwillig. Bei Beschwerden lässt der Assistent belastende Übungen weg
+      und wählt Alternativen.</p>
+    <div class="chips" role="group" aria-label="Beschwerden">${INJURIES.map(([k, label]) => `<button type="button"
+      class="chip${has(label) ? " active" : ""}" data-injury="${label}" aria-pressed="${has(label)}">${label}</button>`).join("")}</div>
     <div class="form">
       <div class="field-row">
         <label class="field">Geburtsjahr<input data-field="birth_year" type="number" inputmode="numeric"
@@ -217,11 +223,27 @@ function volumeTable(pv) {
       und Woche gelten als Schwelle für nahezu maximalen Aufbau.</p>`;
 }
 
+/** Der Block: Saetze pro Woche steigen, am Ende Entlastung. */
+function blockTimeline(pv) {
+  const b = pv.block;
+  if (!b?.planned?.length) return "";
+  const totals = b.planned.map((w) => Object.values(w).reduce((n, x) => n + x, 0));
+  const max = Math.max(1, ...totals);
+  return `<div class="card block-card"><p class="eyebrow">Trainingsblock · ${b.weeks} Wochen</p>
+    <div class="weekbars" role="img" aria-label="Sätze pro Woche im Block">${totals.map((t, i) => `
+      <span class="weekbar ${i === 0 ? "now" : ""}"><i style="height:${Math.max(8, (t / max) * 100)}%"></i>
+        <b>${t}</b><small>${i === totals.length - 1 ? "Deload" : `W${i + 1}`}</small></span>`).join("")}</div>
+    <p class="hint">Das Volumen steigt von Woche zu Woche, ${b.rir[0]}→${b.rir[b.rir.length - 2]} Wiederholungen in Reserve;
+      die letzte Woche entlastet. Danach startet ein neuer Block mit frischen Isolationsübungen – die App passt
+      Sätze und Gewichte laufend an und sagt dir, warum.</p></div>`;
+}
+
 function stepPreview() {
   const pv = st.preview;
   if (!pv) return `<p class="hint">Erstelle Plan …</p>`;
   const findings = st.check?.findings || [];
   return `<label class="field">Name<input data-plan-name maxlength="80" value="${esc(pv.name)}"></label>
+    ${blockTimeline(pv)}
     ${pv.basis?.length ? `<details class="card basis" open><summary class="eyebrow">Darauf basiert dein Plan</summary>
       <ul class="plain">${pv.basis.map((b) => `<li>${esc(b)}</li>`).join("")}</ul>
       ${pv.frequency ? `<p class="hint">Häufigkeit pro Woche: ${freqLine(pv.frequency, pv.focus || [])}</p>` : ""}
@@ -334,6 +356,17 @@ async function next() {
 
 async function onClick(ev) {
   const t = (sel) => ev.target.closest(sel);
+  const inj = t("[data-injury]");
+  if (inj) {
+    const label = inj.dataset.injury;
+    const parts = (st.data.limitations || "").split(/[,;\n]/).map((x) => x.trim()).filter(Boolean);
+    const at = parts.findIndex((x) => x.toLowerCase() === label.toLowerCase());
+    if (at >= 0) parts.splice(at, 1); else parts.push(label);
+    st.data.limitations = parts.join(", ");
+    st.options = null;
+    save();
+    return render();
+  }
   if (t("[data-back]")) {
     st.step = Math.max(0, st.step - 1);
     save();

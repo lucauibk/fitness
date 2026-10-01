@@ -35,6 +35,7 @@ export function startDraft(day) {
     profile_id: getProfile(),
     split_day_id: day.id,
     title: day.label,
+    block: day.block ? { week: day.block.week, weeks: day.block.weeks, rir: day.block.rir, deload: day.block.deload } : null,
     started_at: new Date().toISOString(),
     exercises: day.exercises.map((e) => ({
       exercise_id: e.exercise_id,
@@ -249,6 +250,8 @@ function renderDraft(draft) {
   const total = totalCount(draft);
   root.innerHTML = `<div class="page-head">
       <h2 class="page-title">${esc(draft.title || "Einheit")}</h2>
+      ${draft.block ? `<p class="hint">Woche ${draft.block.week} von ${draft.block.weeks} · ${draft.block.deload
+        ? "Entlastung: leichter, nichts bis ans Limit" : `Ziel: ${draft.block.rir} Wiederholungen in Reserve`}</p>` : ""}
       <p class="page-sub"><span data-elapsed>${elapsed(draft)}</span> · ${done}/${total} Sätze</p>
     </div>
     <div class="progress lg"><i style="width:${total ? (done / total) * 100 : 0}%"></i></div>

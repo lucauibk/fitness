@@ -10,6 +10,7 @@ let detail = null;      // der gerade geöffnete Split
 let openSplitId = null;
 let sortingDay = null;   // Pfeile nur in dem Tag zeigen, den man gerade sortiert
 let exercises = null;
+let blockInfo = null;   // Woche X von Y, Soll/Ist-Volumen, Ereignisse
 let confirmActivate = null;   // { id, timer } – zweiter Tipp auf "Wechseln" bestaetigt
 // Aufgeklappte Trainingstage – eingeklappt ist der Plan eine Uebersicht statt einer langen Liste.
 const openDays = new Set(prefs.get("plan.openDays") || []);
@@ -77,6 +78,29 @@ function dayCard(day) {
   </details>`;
 }
 
+/** Block-Kopf: wo im Block stehe ich, was ist diese Woche geplant, was hat sich geaendert. */
+function blockCard() {
+  const b = blockInfo?.block;
+  if (!b) return "";
+  const maxSets = Math.max(1, ...blockInfo.weeks.map((w) => w.sets));
+  const vol = blockInfo.volume;
+  const top = Math.max(10, ...vol.map((v) => Math.max(v.planned, v.done)));
+  return `<div class="card block-card">
+    <p class="eyebrow">${b.deload ? "Entlastungswoche" : "Trainingsblock"}</p>
+    <h3 class="card-title">Woche ${b.week} von ${b.weeks}${b.deload ? " · leichter, Kraft erholt sich" : ` · ${b.rir} Wdh. in Reserve`}</h3>
+    <div class="weekbars" role="img" aria-label="Sätze pro Woche im Block">${blockInfo.weeks.map((w) => `
+      <span class="weekbar ${w.week === b.week ? "now" : ""}"><i style="height:${Math.max(8, (w.sets / maxSets) * 100)}%"></i>
+        <b>${w.sets}</b><small>${w.week === b.weeks ? "Deload" : `W${w.week}`}</small></span>`).join("")}</div>
+    <details class="field-more"><summary>Diese Woche je Muskel</summary>
+      <div class="bars">${vol.map((v) => `<div class="bar-row"><span class="bar-label">${esc(v.label)}</span>
+        <span class="bar"><i style="width:${(v.done / top) * 100}%"></i></span>
+        <span class="bar-value">${v.done}/${v.planned}</span></div>`).join("")}</div></details>
+    ${blockInfo.events.length ? `<details class="field-more"><summary>Was sich geändert hat</summary>
+      <div class="list flush">${blockInfo.events.map((e) => `<div class="row-item"><div class="row-main">
+        <div class="row-title">${esc(e.text)}</div><div class="row-meta"><span>${esc(e.date)}</span></div></div></div>`).join("")}</div></details>` : ""}
+  </div>`;
+}
+
 function render() {
   if (!splits?.length) {
     root.innerHTML = `${empty("Noch kein Split", "Ein Split ist dein Trainingsplan – zum Beispiel Push, "
@@ -88,7 +112,7 @@ function render() {
   const visible = splits.filter((s) => !isPendingDelete(`splits/${s.id}`));
   const open = detail && visible.some((s) => s.id === detail.id) ? detail : null;
 
-  root.innerHTML = `<div class="list">${visible.map((s) => `
+  root.innerHTML = `${blockCard()}<div class="list">${visible.map((s) => `
       <div class="row-item">
         <button type="button" class="row-main row-btn" data-open-split="${s.id}" aria-expanded="${open?.id === s.id}">
           <span class="row-title">${esc(s.name)}</span>
@@ -112,6 +136,7 @@ function render() {
 export async function load() {
   if (!splits) root.innerHTML = skeleton(4);
   splits = await api("splits");
+  blockInfo = await api("planner/block").catch(() => null);
   const wanted = openSplitId ?? splits.find((s) => s.active)?.id ?? splits[0]?.id;
   if (wanted) {
     openSplitId = wanted;
@@ -529,6 +554,10 @@ function openPlanMenu() {
   const open = detail && splits?.some((s) => s.id === detail.id) ? detail : null;
   actionMenu(open ? esc(open.name) : "Plan", [
     open?.days.length && { label: "Plan verbessern", icon: "spark", run: improvePlan },
+    blockInfo?.block && { label: "Neuen Block starten", icon: "refresh", run: async () => {
+      try { await api("planner/new-block", { method: "POST" }); toast("Neuer Block gestartet"); changed(); await load(); }
+      catch (e) { toast(e.message, { error: true }); }
+    } },
     open && { label: "Split umbenennen", icon: "edit", run: () => editSplit(splits.find((s) => s.id === open.id)) },
     { label: "Neuen Plan mit Assistent", icon: "spark", run: async () => {
       const profile = await api(`profiles/${getProfile()}`).catch(() => null);

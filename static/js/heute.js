@@ -117,7 +117,9 @@ function workoutCard() {
         : d.note === "nachgeholt" ? "Nachholen · verschoben" : "Als Nächstes dran"}</p>
       <h3 class="hero-title">${esc(day.label)}</h3>
       <p class="hint">${day.exercises.length} Übungen · ${day.exercises.reduce((n, e) => n + e.target_sets, 0)} Sätze
-        ${d.position ? ` · Tag ${d.position} von ${d.day_count}` : ""}</p>
+        ${d.position ? ` · Tag ${d.position} von ${d.day_count}` : ""}
+        ${d.block ? ` · Woche ${d.block.week}/${d.block.weeks}${d.block.deload ? " (Entlastung)" : ` · ${d.block.rir} in Reserve`}` : ""}</p>
+      ${d.block?.deload ? `<p class="callout">${icon("warn")} Entlastungswoche: leichter trainieren, nichts bis ans Limit – so erholen sich Muskeln und Gelenke.</p>` : ""}
       ${d.sore_today?.length ? `<p class="callout">${icon("warn")} Muskelkater in ${esc(d.sore_today.map((g) => GROUPS[g]).join(", "))} –
         die Sätze sind reduziert.${d.alternative ? ` Alternativ heute <button type="button" class="link-btn" data-start="${d.alternative.id}">${esc(d.alternative.label)} trainieren</button>.` : ""}</p>` : ""}
       ${d.note === "erholung" ? `<p class="callout">${icon("warn")} Gestern waren dieselben Muskeln dran – lass sie heute ruhen oder wähle „Anderer Tag“.</p>` : ""}
@@ -193,6 +195,8 @@ function render() {
         <p class="hint">Für Kalorien- und Trinkziel fehlen noch: ${esc(d.profile_missing.join(", "))}.</p></div>
       ${icon("right", "chev")}</a>` : ""}
     ${workoutCard()}
+    ${(d.plan_events || []).length ? `<div class="card quiet-events"><p class="eyebrow">${icon("spark")} Dein Plan passt sich an</p>
+      ${d.plan_events.map((e) => `<p class="hint">${esc(e.text)}</p>`).join("")}</div>` : ""}
     ${showForm ? checkinForm(d.checkin) : readinessCard(d.checkin)}
     ${mobilityCard()}
     ${nutritionCard()}`;
