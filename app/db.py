@@ -150,6 +150,29 @@ CREATE TABLE IF NOT EXISTS body_measurements (
     notes TEXT,
     client_id TEXT UNIQUE
 );
+CREATE TABLE IF NOT EXISTS blocks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    split_id INTEGER NOT NULL,
+    start_date TEXT NOT NULL,            -- Montag der ersten Blockwoche
+    weeks INTEGER NOT NULL,              -- inklusive Deload-Woche am Ende
+    goal TEXT, experience TEXT,
+    params TEXT,                         -- JSON: Wochenvolumen je Gruppe, Reviews
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS plan_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    split_id INTEGER,
+    exercise_id INTEGER,
+    date TEXT NOT NULL,
+    kind TEXT NOT NULL,                  -- weight_up | sets_up | sets_down | deload | swap | hold | info
+    text TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_blocks_profile ON blocks(profile_id, active);
+CREATE INDEX IF NOT EXISTS idx_events_profile ON plan_events(profile_id, date);
 CREATE TABLE IF NOT EXISTS saved_meals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     profile_id INTEGER NOT NULL,
@@ -184,14 +207,17 @@ MIGRATIONS = {
                  "carbs_goal": "INTEGER", "fat_goal": "INTEGER",
                  "nutrition_auto": "INTEGER DEFAULT 1", "water_goal_ml": "INTEGER"},
     # Empfohlene Satzpause je Uebung
-    "split_exercises": {"rest_seconds": "INTEGER"},
+    "split_exercises": {"rest_seconds": "INTEGER", "base_sets": "INTEGER"},
     # Aufwaermsatz: zaehlt nicht in Volumen, Bestleistungen und Progression
     "sets": {"warmup": "INTEGER DEFAULT 0"},
     # Bewegungsmuster: danach waehlt der Assistent Uebungen aus
     "exercises": {"pattern": "TEXT", "kind": "TEXT",
                   # Uebungsbibliothek
                   "instructions": "TEXT", "mistakes": "TEXT", "muscles_primary": "TEXT",
-                  "muscles_secondary": "TEXT", "equipment": "TEXT", "video_query": "TEXT"},
+                  "muscles_secondary": "TEXT", "equipment": "TEXT", "video_query": "TEXT",
+                  # Auswahl-Eigenschaften fuer den Plan-Ersteller (app/planner/catalog_data.py)
+                  "equipment_type": "TEXT", "difficulty": "INTEGER", "sfr": "INTEGER",
+                  "contraindications": "TEXT"},
     # Portion mit Beschriftung und Packungsgroesse fuer die Mengeneingabe
     "foods": {"serving_label": "TEXT", "pack_g": "REAL"},
 }
@@ -418,6 +444,8 @@ def init():
         _catalog_v2(c)
         from .exercise_info import apply as _exercise_info
         _exercise_info(c)
+        from .planner.catalog import apply as _planner_catalog
+        _planner_catalog(c)
     with sqlite3.connect(DB_PATH, timeout=30) as c:
         # WAL: Lesen blockiert nicht, waehrend geschrieben wird – wichtig, wenn zwei
         # Leute gleichzeitig eine Einheit hochladen.
@@ -478,6 +506,8 @@ WRITABLE = {
                  "carbs", "fat", "client_id"),
     "water_log": ("profile_id", "date", "ml", "client_id"),
     "saved_meals": ("profile_id", "name", "items"),
+    "blocks": ("profile_id", "split_id", "start_date", "weeks", "goal", "experience", "params", "active"),
+    "plan_events": ("profile_id", "split_id", "exercise_id", "date", "kind", "text"),
     "body_measurements": ("profile_id", "date", "source", "weight_kg", "body_fat_pct",
                           "body_fat_estimated", "muscle_mass_kg", "water_pct", "visceral_fat",
                           "bmr_kcal", "bio_age", "waist_cm", "hip_cm", "chest_cm", "arm_cm",
@@ -486,7 +516,7 @@ WRITABLE = {
     "split_days": ("split_id", "position", "label", "weekdays"),
     "split_exercises": ("split_day_id", "exercise_id", "position", "target_sets",
                         "target_reps_min", "target_reps_max", "target_weight",
-                        "rest_seconds", "notes"),
+                        "rest_seconds", "notes", "base_sets"),
     "workouts": ("profile_id", "split_day_id", "title", "started_at", "finished_at", "notes"),
     "bodyweight": ("profile_id", "date", "kg"),
 }
