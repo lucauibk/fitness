@@ -2,65 +2,42 @@
    Fitness – ruhig & aufgeraeumt
    ===================================================================== */
 :root {
-  --bg: #f5f4f1;
-  --surface: #ffffff;
-  --surface-2: #efede8;
-  --surface-3: #e6e3dc;
-  --text: #1d1c1a;
-  --muted: #6c685f;
-  --faint: #a29d92;
-  --line: rgb(29 28 26 / 0.08);
-  --line-strong: rgb(29 28 26 / 0.14);
-  --accent: #3a63d8;
-  --accent-soft: rgb(58 99 216 / 0.1);
-  --on-accent: #fff;
-  --urgent: #cf3f35;
-  --on-urgent: #fff;
-  --soon: #9c6200;
-  --ok: #2c8a55;
-  --on-ok: #fff;
-  --toast-bg: #26262a;
+  /* MCI-Look: durchgehend dunkel, Karten anthrazit, Akzente je Bereich */
+  --bg: #0b0b0c;
+  --surface: #1a1a1c;
+  --surface-2: #232326;
+  --surface-3: #2e2e32;
+  --text: #f4f3f0;
+  --muted: #a3a29d;
+  --faint: #6f6e6a;
+  --line: rgb(255 255 255 / 0.07);
+  --line-strong: rgb(255 255 255 / 0.14);
+  --accent: #3ee37f;
+  --accent-soft: rgb(62 227 127 / 0.14);
+  --on-accent: #04200f;
+  --urgent: #ff7a70;
+  --on-urgent: #1a0503;
+  --soon: #ffb04e;
+  --ok: #3ee37f;
+  --on-ok: #04200f;
+  --c-train: #ff7a45;   /* Trainingstage */
+  --c-carbs: #b56cff;   /* Carbs */
+  --c-protein: #ffb04e; /* Protein */
+  --c-fat: #2fb6c9;     /* Fett */
+  --toast-bg: #34353b;
   --toast-fg: #f3f2ef;
-  --toast-action: #9fb7ff;
-  --shadow-sm: 0 1px 2px rgb(29 28 26 / 0.05);
-  --shadow: 0 1px 2px rgb(29 28 26 / 0.04), 0 4px 16px rgb(29 28 26 / 0.05);
-  --shadow-lg: 0 8px 40px rgb(29 28 26 / 0.16);
+  --toast-action: #8ff0b4;
+  --shadow-sm: none;
+  --shadow: 0 0 0 1px var(--line);
+  --shadow-lg: 0 12px 48px rgb(0 0 0 / 0.6);
 
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
-  --r1: 8px; --r2: 12px; --r3: 16px;
+  --r1: 12px; --r2: 16px; --r3: 24px;
   --fs-xs: 12px; --fs-sm: 13px; --fs: 15px; --fs-md: 17px; --fs-lg: 22px; --fs-xl: 28px;
   --tap: 44px;
   --nav-h: 64px;
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111214;
-    --surface: #1a1b1e;
-    --surface-2: #232428;
-    --surface-3: #2c2d32;
-    --text: #ecebe8;
-    --muted: #a09e98;
-    --faint: #6e6c68;
-    --line: rgb(255 255 255 / 0.07);
-    --line-strong: rgb(255 255 255 / 0.13);
-    --accent: #7597ff;
-    --accent-soft: rgb(117 151 255 / 0.14);
-    --on-accent: #0d1530;
-    --urgent: #ff7a70;
-    --on-urgent: #1a0503;   /* weiss auf dem hellen Dark-Mode-Rot hat nur 2,5:1 */
-    --soon: #eab04e;
-    --ok: #5fc98b;
-    --on-ok: #04200f;       /* dito Gruen: 2,1:1 */
-    --toast-bg: #34353b;
-    --toast-fg: #f3f2ef;
-    --toast-action: #a9bfff;
-    --shadow-sm: none;
-    --shadow: 0 0 0 1px var(--line);
-    --shadow-lg: 0 12px 48px rgb(0 0 0 / 0.5);
-    color-scheme: dark;
-  }
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  color-scheme: dark;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -484,17 +461,12 @@ input:not([type=checkbox]):not([type=radio]):focus, select:focus, textarea:focus
 /* ============================================================= Heute */
 .hero {
   position: relative; overflow: hidden;
-  background: var(--accent); color: var(--on-accent);
-  border-radius: calc(var(--r3) + 4px); padding: var(--s5) var(--s4);
+  background: var(--surface-2); border-radius: var(--r3); padding: var(--s5) var(--s4);
 }
-.hero .eyebrow, .hero .hint { color: inherit; opacity: 0.85; }
-.hero .btn.primary { background: var(--on-accent); color: var(--accent); }
-.hero .btn.ghost, .hero .btn.tonal { background: rgb(255 255 255 / 0.16); color: inherit; }
-.hero .link-btn { color: inherit; text-decoration: underline; }
-.hero.is-done { background: var(--surface); color: var(--text); }
-.hero.is-done .btn.tonal { background: var(--accent-soft); color: var(--accent); }
-.hero.is-done .btn.ghost { background: transparent; color: var(--muted); }
-.hero-title { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; margin: 4px 0 6px; }
+.hero .eyebrow { color: var(--accent); }
+.hero .btn.primary { background: #fff; color: #0b0b0c; }
+.hero.is-done { background: color-mix(in srgb, var(--ok) 10%, var(--surface)); }
+.hero-title { font-size: var(--fs-lg); font-weight: 800; letter-spacing: 0.01em; text-transform: uppercase; margin: 4px 0 6px; }
 
 
 /* ================================================ Touch: Tippflaechen */
@@ -769,7 +741,6 @@ button.chip { border: 0; font-family: inherit; }
 .nutri-mini { display: grid; gap: var(--s3); }
 .water-line { display: flex; align-items: center; gap: var(--s2); padding-top: var(--s3); border-top: 1px solid var(--line); font-size: var(--fs-sm); }
 .water-line b { font-size: var(--fs-md); font-variant-numeric: tabular-nums; }
-.hero.is-done { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 7%, var(--surface)); }
 .hero.is-done .eyebrow { color: var(--ok); display: flex; align-items: center; gap: 4px; }
 .hero.is-done .eyebrow .icon { width: 14px; height: 14px; }
 .move-target { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; margin: var(--s4) 0; }
@@ -962,3 +933,10 @@ body.training-fullscreen.resting .content { padding-bottom: calc(var(--rest-h) +
 .cal-grid b.lift { background: var(--accent); color: var(--on-accent); font-weight: 650; }
 .cal-grid b.cardio { box-shadow: inset 0 0 0 2px var(--accent); }
 .cal-grid b.today:not(.lift) { background: var(--surface-3); }
+
+/* ------------------------------------------- MCI: Typo und Buttons */
+h1, h2, .page-title, .group-title { font-weight: 800; letter-spacing: 0.01em; }
+.topbar h1 { text-transform: uppercase; font-size: var(--fs-md); }
+.btn { border-radius: 999px; }
+.btn.primary { background: #fff; color: #0b0b0c; }
+.btn.primary:hover { background: #e6e6e6; }
