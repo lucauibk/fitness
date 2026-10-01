@@ -1,0 +1,98 @@
+"""Mesozyklus: Wochenvolumen je Muskel ueber einen Block (steigend, am Ende Deload).
+
+Woche 1 startet nahe MEV, jede Woche kommen Saetze dazu (Richtung MAV, bei Fokus Richtung MRV),
+die letzte Woche ist ein Deload. Quellen: Renaissance Periodization (Volumen-Landmarken),
+Schoenfeld et al. (Dosis-Wirkung, abnehmender Nutzen ab ca. 12-20 Saetzen), Bell et al. (Deload).
+"""
+from .muscles import GROUPS
+
+LEVEL = {"einsteiger": 0.0, "fortgeschritten": 0.6, "erfahren": 1.0}
+GOAL_FACTOR = {"kraft": 0.8, "aufbau": 1.0, "abnehmen": 0.9, "fitness": 0.85}
+# Wochen je Block inklusive Deload
+BLOCK_WEEKS = {"einsteiger": 6, "fortgeschritten": 5, "erfahren": 5}
+# Wiederholungen in Reserve je Trainingswoche: vorsichtig starten, am Ende nah ans Limit
+RIR_RAMP = {5: [3, 2, 2, 1], 6: [3, 3, 2, 2, 1]}
+DELOAD_RIR = 4
+
+MINUTES_PER_SET = {"kraft": 4.0, "aufbau": 3.2, "abnehmen": 2.8, "fitness": 2.8}
+WARMUP_MINUTES = 8
+MAX_SETS_PER_SESSION = 26
+
+
+def capacity(days, minutes, goal="aufbau"):
+    """(Saetze pro Woche, Saetze pro Einheit). minutes=None -> nur die Obergrenze je Einheit."""
+    if not minutes:
+        return days * MAX_SETS_PER_SESSION, MAX_SETS_PER_SESSION
+    per_set = MINUTES_PER_SET.get(goal, 3.2)
+    per_session = max(6, min(MAX_SETS_PER_SESSION, int((minutes - WARMUP_MINUTES) / per_set)))
+    return days * per_session, per_session
+
+
+def rir_by_week(weeks):
+    ramp = RIR_RAMP.get(weeks) or [3] + [2] * (weeks - 3) + [1]
+    return ramp[: weeks - 1] + [DELOAD_RIR]
+
+
+def block_targets(experience, goal, focus_groups=(), age=None, weeks=None):
+    """{Gruppe: [Saetze je Woche]} fuer einen ganzen Block (letzte Woche = Deload)."""
+    n = weeks or BLOCK_WEEKS.get(experience, 5)
+    train = n - 1
+    level = LEVEL.get(experience, 0.0)
+    factor = GOAL_FACTOR.get(goal, 1.0) * (0.85 if age and age >= 50 else 1.0)
+    focus = set(focus_groups)
+    out = {}
+    for g, (_, mv, mev, mav, mrv) in GROUPS.items():
+        if g in focus:
+            start, end = mev + (mav - mev) * 0.6, mav + (mrv - mav) * 0.6
+        elif focus:
+            start = end = max(mv, mev - 1)          # Spezialisierung: der Rest nur Erhaltung
+        else:
+            start = mev + (mav - mev) * level * 0.5
+            end = mev + (mav - mev) * (0.5 + 0.5 * level)
+        weekly = []
+        for w in range(train):
+            value = start + (end - start) * (w / max(1, train - 1))
+            weekly.append(max(mv, round(value * factor)) if value else 0)
+        for i in range(1, train):                   # nie weniger als die Vorwoche
+            weekly[i] = max(weekly[i], weekly[i - 1])
+        weekly.append(max(mv, round(weekly[0] * 0.5)) if weekly[0] else 0)
+        out[g] = weekly
+    return out
+
+
+def fit_to_capacity(targets, total):
+    """Passt alle Wochen an die verfuegbare Zeit an (Spitzenwoche zaehlt). -> (Ziele, Hinweis|None)."""
+    weeks = len(next(iter(targets.values())))
+    peak = max(sum(v[w] for v in targets.values()) for w in range(weeks - 1))
+    if peak <= total:
+        return targets, None
+    f = total / peak
+    out = {g: [(min(x, GROUPS[g][1]) if round(x * f) < GROUPS[g][1] else round(x * f)) if x else 0 for x in v]
+           for g, v in targets.items()}
+    return out, (f"Deine Zeit reicht für ≈ {total} Sätze pro Woche, der Block würde {peak} verlangen – "
+                 "das Volumen ist anteilig gekürzt (nicht unter Erhaltung).")
+
+
+def reps_for(pattern, goal, compound):
+    if goal == "kraft":
+        base = (4, 6) if compound else (8, 12)
+    elif goal == "aufbau":
+        base = (6, 10) if compound else (10, 15)
+    else:
+        base = (10, 15) if compound else (12, 20)
+    if pattern == "glutes":
+        return (10, 20) if goal != "kraft" else (8, 12)
+    if pattern in ("calves", "core"):
+        return (12, 20) if goal != "kraft" else (10, 15)
+    if pattern == "hinge" and goal != "kraft":
+        return (6, 12)
+    return base
+
+
+def rest_for(pattern, goal, compound):
+    """Satzpause in Sekunden (Schoenfeld 2016: lange Pausen bringen mehr)."""
+    if compound:
+        return 180 if goal == "kraft" else 150
+    if pattern in ("core", "calves"):
+        return 60
+    return 90

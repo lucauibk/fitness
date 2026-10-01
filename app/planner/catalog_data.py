@@ -129,3 +129,18 @@ def parse():
 
 
 EXERCISES = parse()
+
+
+# Bewaehrte Hauptuebungen (bekommen Vorrang) und Hilfsuebungen (nie erste Wahl eines Grundmusters)
+STAPLES = {
+    "Bankdrücken", "Schrägbankdrücken Kurzhantel", "Schrägbankdrücken Langhantel", "Brustpresse",
+    "Klimmzüge", "Latzug", "Rudern Kabel", "Rudern Maschine", "Langhantelrudern", "Kurzhantelrudern einarmig",
+    "Brustgestütztes Rudern", "Schulterdrücken", "Kurzhantel-Schulterdrücken", "Schulterpresse Maschine",
+    "Kniebeuge", "Beinpresse", "Hackenschmidt-Kniebeuge", "Rumänisches Kreuzheben", "Kreuzheben",
+    "Bulgarian Split Squat", "Ausfallschritte", "Hip Thrust", "Beinbeuger", "Beinbeuger sitzend", "Beinstrecker",
+}
+ACCESSORIES = {
+    "Kabel-Pullover", "Kabel-Pull-Through", "Good Morning", "Inverted Row", "Goblet Squat",
+    "Latzug einarmig", "Rudern Kabel einarmig", "Kabel-Brustpresse", "Liegestütze", "Step-ups",
+    "Trap-Bar-Kreuzheben", "Smith Split Squat", "Arnold Press",
+}
