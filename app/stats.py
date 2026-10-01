@@ -297,6 +297,55 @@ def pick_day(split, on_date):
     return None
 
 
+RECOVERY_GROUPS = {"beine", "po", "brust", "ruecken"}   # wie splits.RECOVERY
+
+
+def _big_groups(day):
+    return {e.get("muscle_group") for e in day.get("exercises", [])} & RECOVERY_GROUPS
+
+
+def schedule_day(profile_id, split, on_date):
+    """Adaptiver Wochenplan. Die Wochentage der Split-Tage sind nur der Soll-Plan; was in dieser
+    Woche tatsaechlich trainiert wurde, hakt den passenden Tag ab – egal an welchem Wochentag.
+    Offen bleibt, was noch fehlt: Wer am Unterkoerper-Tag Oberkoerper trainiert, bekommt als
+    Naechstes den Unterkoerper. Ein ausgelassener Tag rutscht auf den naechsten Tag (auch ohne
+    Praeferenz), sofern die Muskeln von gestern erholt sind.
+    Rueckgabe: (Tag, fest, Hinweis) – fest = der Tag ist wie geplant dran; Hinweis "nachgeholt"
+    oder "erholung" (ausstehender Tag belastet dieselben Muskeln wie gestern)."""
+    slots = sorted(((wd, d) for d in split["days"] for wd in (d.get("weekdays") or [])),
+                   key=lambda s: s[0])
+    if not slots:
+        return rotation_day(profile_id, split), False, None
+    monday = on_date - timedelta(days=on_date.weekday())
+    yesterday = on_date - timedelta(days=1)
+    done, yesterday_ids = {}, set()
+    for r in db.rows("SELECT split_day_id, COALESCE(started_at, finished_at) AS at FROM workouts"
+                     " WHERE profile_id=? AND split_day_id IS NOT NULL ORDER BY at DESC LIMIT 60",
+                     (profile_id,)):
+        d = _local_date(r["at"])
+        if d and monday <= d <= on_date:
+            done[r["split_day_id"]] = done.get(r["split_day_id"], 0) + 1
+            if d == yesterday:
+                yesterday_ids.add(r["split_day_id"])
+    remaining = []
+    for wd, d in slots:
+        if done.get(d["id"], 0) > 0:
+            done[d["id"]] -= 1
+        else:
+            remaining.append((wd, d))
+    tired = set()
+    for d in split["days"]:
+        if d["id"] in yesterday_ids:
+            tired |= _big_groups(d)
+    due = [(wd, d) for wd, d in remaining if wd <= on_date.weekday()]
+    for wd, d in due:
+        # Der heute geplante Tag gilt immer; nachgeholte nur, wenn die Muskeln erholt sind.
+        if wd == on_date.weekday() or not (_big_groups(d) & tired):
+            return d, wd == on_date.weekday(), ("nachgeholt" if wd < on_date.weekday() else None)
+    nxt = remaining[0][1] if remaining else rotation_day(profile_id, split)
+    return nxt, False, ("erholung" if due else None)
+
+
 def rotation_day(profile_id, split):
     """Nächster Teil in der Rotation: der zuletzt trainierte + 1."""
     days = split["days"]
@@ -340,10 +389,7 @@ def today_view(profile_id):
     if not split:
         return {"split": None, "day": None, "fixed": False, "days": [],
                 "last_workout": None}
-    day = pick_day(split, today())
-    fixed = day is not None
-    if not day:
-        day = rotation_day(profile_id, split)
+    day, fixed, note = schedule_day(profile_id, split, today())
     last = db.rows("SELECT w.id, w.split_day_id, COALESCE(w.started_at, w.finished_at) AS at,"
                    " d.label AS day_label FROM workouts w"
                    " LEFT JOIN split_days d ON d.id = w.split_day_id"
@@ -352,6 +398,7 @@ def today_view(profile_id):
         "split": {"id": split["id"], "name": split["name"]},
         "day": day_plan(profile_id, day) if day else None,
         "fixed": fixed,
+        "note": note,
         "position": next((i + 1 for i, d in enumerate(split["days"]) if day and d["id"] == day["id"]), None),
         "day_count": len(split["days"]),
         "days": [{"id": d["id"], "label": d["label"], "weekdays": d.get("weekdays") or []}

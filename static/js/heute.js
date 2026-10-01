@@ -113,12 +113,14 @@ function workoutCard() {
     </div>`;
   }
   return `<div class="card hero">
-      <p class="eyebrow">${d.fixed ? `${esc(weekday)} · Training` : "Als Nächstes dran"}</p>
+      <p class="eyebrow">${d.fixed ? `${esc(weekday)} · Training`
+        : d.note === "nachgeholt" ? "Nachholen · verschoben" : "Als Nächstes dran"}</p>
       <h3 class="hero-title">${esc(day.label)}</h3>
       <p class="hint">${day.exercises.length} Übungen · ${day.exercises.reduce((n, e) => n + e.target_sets, 0)} Sätze
         ${d.position ? ` · Tag ${d.position} von ${d.day_count}` : ""}</p>
       ${d.sore_today?.length ? `<p class="callout">${icon("warn")} Muskelkater in ${esc(d.sore_today.map((g) => GROUPS[g]).join(", "))} –
         die Sätze sind reduziert.${d.alternative ? ` Alternativ heute <button type="button" class="link-btn" data-start="${d.alternative.id}">${esc(d.alternative.label)} trainieren</button>.` : ""}</p>` : ""}
+      ${d.note === "erholung" ? `<p class="callout">${icon("warn")} Gestern waren dieselben Muskeln dran – lass sie heute ruhen oder wähle „Anderer Tag“.</p>` : ""}
       <div class="btn-row">
         ${running
           ? `<a class="btn primary" href="#training/einheit">${icon("play")} Einheit fortsetzen</a>`
