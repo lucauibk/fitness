@@ -150,6 +150,13 @@ CREATE TABLE IF NOT EXISTS body_measurements (
     notes TEXT,
     client_id TEXT UNIQUE
 );
+CREATE TABLE IF NOT EXISTS saved_meals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    items TEXT NOT NULL,                 -- JSON: [{"food_id": 1, "grams": 150}, ...]
+    created_at TEXT DEFAULT (datetime('now'))
+);
 CREATE INDEX IF NOT EXISTS idx_food_log_day ON food_log(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_water_log_day ON water_log(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_cardio_day ON cardio(profile_id, date);
@@ -470,6 +477,7 @@ WRITABLE = {
     "food_log": ("profile_id", "date", "meal", "food_id", "name", "grams", "kcal", "protein",
                  "carbs", "fat", "client_id"),
     "water_log": ("profile_id", "date", "ml", "client_id"),
+    "saved_meals": ("profile_id", "name", "items"),
     "body_measurements": ("profile_id", "date", "source", "weight_kg", "body_fat_pct",
                           "body_fat_estimated", "muscle_mass_kg", "water_pct", "visceral_fat",
                           "bmr_kcal", "bio_age", "waist_cm", "hip_cm", "chest_cm", "arm_cm",

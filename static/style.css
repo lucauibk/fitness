@@ -765,7 +765,6 @@ button.chip { border: 0; font-family: inherit; }
 /* ========================================================= Ernährung */
 .date-switch { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s3); }
 .date-switch b { font-size: var(--fs-md); }
-.nutri-head { display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap; }
 .nutri-side { flex: 1; min-width: 180px; }
 .ring-svg { flex: none; }
 .ring-track { fill: none; stroke: var(--surface-2); stroke-width: 10; }
@@ -959,3 +958,14 @@ h1, h2, .page-title, .group-title { font-weight: 800; letter-spacing: 0.01em; }
 .dotgrid i.on { background: var(--c-train); }
 .tbar { display: block; width: 100%; height: 8px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
 .tbar i { display: block; height: 100%; border-radius: 4px; }
+
+/* ------------------------------------------- Ernaehrung (MCI-Stil) */
+.nutri-head { display: flex; align-items: center; justify-content: space-around; gap: var(--s3); }
+.nutri-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.nutri-stat b { font-size: var(--fs-lg); font-weight: 800; }
+.nutri-stat span { color: var(--muted); font-size: var(--fs-sm); }
+.donut-row { display: flex; align-items: center; gap: var(--s4); }
+.donut-legend { list-style: none; margin: 0; padding: 0; flex: 1; display: grid; gap: var(--s3); }
+.donut-legend li { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: var(--s2); }
+.donut-legend i { width: 10px; height: 10px; border-radius: 50%; }
+.donut-legend small { grid-column: 2 / -1; color: var(--faint); margin-top: -8px; font-size: var(--fs-xs); }
