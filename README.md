@@ -14,6 +14,28 @@ sichtbar, Einträge werden lokal gesammelt und nachgesendet, sobald wieder Netz 
 | Fortschritt | Übersicht (Bestleistungen, Volumen) · Körper (Gewicht, Körperfett, Maße, ViCoach) · Erfolge (Serien, Abzeichen) · Verlauf |
 | Profil | Daten, Ernährungsziel, Plan-Assistent |
 
+## Plan-Ersteller (Blöcke statt Einmal-Plan)
+
+Der Plan ist ein **Trainingsblock** aus 5–6 Wochen (Einsteiger 6, sonst 5): Woche 1 startet nahe
+der kleinsten wirksamen Menge je Muskel, jede Woche kommen Sätze dazu, die letzte Woche ist ein
+Deload. Danach beginnt ein neuer Block, Isolationsübungen wechseln, Grundübungen bleiben.
+
+- **Volumen:** Landmarken MV/MEV/MAV/MRV je Muskel (`app/planner/muscles.py`), Fokus-Muskeln
+  Richtung MRV, alle anderen auf Erhaltung (Renaissance Periodization; Schoenfeld et al.).
+- **Auswahl:** Bewegungsmuster → Übung nach SFR (Reiz/Ermüdung), Schwierigkeit, Gerät und
+  Beschwerden (Knie, Rücken, Schulter, Ellbogen, Handgelenk, Hüfte). 106 Studio-Übungen.
+- **Progression:** Double Progression mit Ziel-RIR, RPE, Plateau-Erkennung (3 Einheiten ohne
+  Fortschritt), Rücksetzen nach zwei Fehlschlägen, Gewichtssprung je Gerät (`progression.py`).
+- **Anpassung:** Wochen-Check beim Öffnen von „Heute“ (`autoregulate.py`): verpasste Sätze werden
+  nachgeholt, bei steigender Anstrengung wird der Deload vorgezogen, war alles leicht, kommt ein
+  Satz dazu. Ausgelassene Tage rutschen auf den nächsten Tag (`stats.schedule_day`).
+- **Erklärt:** jede Änderung steht als Satz im Plan unter „Was sich geändert hat“.
+
+Quellen: [Volumen-Landmarken](https://thestrengthequation.com/post/volume-landmarks.html),
+[Dynamic Double Progression](https://www.jpshealthandfitness.com.au/the-utility-of-dynamic-autoregulated-double-progression/),
+[Deloading (Bell et al.)](https://shura.shu.ac.uk/35313/3/Bell-APracticalApproach(AM).pdf),
+[Trainingsfrequenz-Metaanalyse](https://www.researchgate.net/publication/301578131_Effects_of_Resistance_Training_Frequency_on_Measures_of_Muscle_Hypertrophy_A_Systematic_Review_and_Meta-Analysis).
+
 ## Körperanalyse aus dem Studio (ViCoach)
 
 ViCoach hat keine Schnittstelle und keinen Export. Stattdessen: in ViCoach einen Screenshot
@@ -41,7 +63,7 @@ cp .env.example .env
 .venv/bin/pytest
 ```
 
-Reine Rechenlogik ohne eigene Datenbank (Readiness-Score, Volumen-Planung, Serien-Zaehlung,
+Reine Rechenlogik (Readiness-Score, Plan-Generator, Progression, Blockwochen, Serien-Zaehlung,
 Koerperfett-Schaetzung, Einheits-Bewertung) plus die Sicherheitsgrenze fuer KI-Antworten
 (`ai.validate_plan`).
 Laeuft gegen eine eigene, temporaere SQLite-Datei – `fitness.db` bleibt unangetastet.
