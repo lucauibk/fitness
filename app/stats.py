@@ -200,50 +200,12 @@ def last_sets(profile_id, exercise_id):
                    " ORDER BY set_no, id", (last["id"], exercise_id))
 
 
-def suggest(profile_id, exercise, target_sets=None, reps_min=None, reps_max=None):
-    """Doppelte Steigerung ("double progression"): innerhalb des Wiederholungs-Bereichs
-    arbeiten, und erst wenn in allen Sätzen das obere Ende erreicht ist, das Gewicht
-    erhöhen und wieder unten einsteigen. Der Vorschlag ist immer nur ein Vorschlag."""
+def suggest(profile_id, exercise, target_sets=None, reps_min=None, reps_max=None, rir=2, deload=False):
+    """Vorschlag fuer die naechste Einheit – Rechenlogik in planner.progression."""
+    from .planner import progression
     lo = reps_min or 8
-    hi = max(reps_max or lo, lo)
-    previous = last_sets(profile_id, exercise["id"])
-    if not previous:
-        return {"reps": lo, "weight": None, "raise_weight": False,
-                "reason": "erstes Mal", "last": [], "range": [lo, hi]}
-    weights = [p["weight"] for p in previous if p["weight"] is not None]
-    top = max(weights) if weights else None
-    done_sets = len(previous)
-    # Oberes Ende in allen geplanten Sätzen erreicht?
-    at_top = (all((p["reps"] or 0) >= hi for p in previous)
-              and done_sets >= (target_sets or 1))
-    if at_top:
-        # RPE als Autoregulation: Wiederholungsziel erreicht, aber nahe am Muskelversagen
-        # (⌀ RPE ≥ 9,5) heisst noch keine echte Reserve – dann lieber halten statt steigern.
-        rpes = [p["rpe"] for p in previous if p.get("rpe") is not None]
-        avg_rpe = sum(rpes) / len(rpes) if rpes else None
-        if avg_rpe is not None and avg_rpe >= 9.5:
-            return {"reps": hi, "weight": top, "raise_weight": False,
-                    "reason": f"{hi} Wiederholungen erreicht, aber nah am Muskelversagen (⌀ RPE {avg_rpe:g}) "
-                              "– noch einmal bei gleichem Gewicht, dann steigern",
-                    "last": previous, "range": [lo, hi]}
-        step = INCREMENT.get(exercise.get("muscle_group"), 2.5)
-        if top:
-            return {"reps": lo, "weight": round(top + step, 2), "raise_weight": True,
-                    "reason": f"{hi} Wiederholungen in allen Sätzen – Gewicht erhöhen",
-                    "last": previous, "range": [lo, hi]}
-        # Ohne Zusatzgewicht (Klimmzüge, Liegestütze): mehr Wiederholungen
-        return {"reps": hi + 1, "weight": None, "raise_weight": False,
-                "reason": "Bereich ausgereizt – eine Wiederholung mehr",
-                "last": previous, "range": [lo, hi]}
-    best_reps = max((p["reps"] or 0) for p in previous)
-    weakest = min((p["reps"] or 0) for p in previous)
-    if weakest < lo:
-        return {"reps": lo, "weight": top, "raise_weight": False,
-                "reason": f"unteres Ende ({lo}) erst noch in allen Sätzen schaffen",
-                "last": previous, "range": [lo, hi]}
-    return {"reps": min(best_reps + 1, hi), "weight": top, "raise_weight": False,
-            "reason": "gleiches Gewicht, eine Wiederholung mehr",
-            "last": previous, "range": [lo, hi]}
+    return progression.for_exercise(profile_id, exercise["id"], lo, max(reps_max or lo, lo),
+                                    target_sets, rir, deload)
 
 
 def ready_to_raise(profile_id):
