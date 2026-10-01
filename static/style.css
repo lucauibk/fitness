@@ -157,6 +157,10 @@ main {
 }
 #nav a svg { width: 25px; height: 25px; }
 #nav a[aria-current="page"] { color: var(--accent); }
+#nav a[aria-current="page"]::before {
+  content: ""; position: absolute; top: 2px; width: 52px; height: 30px; border-radius: 999px;
+  background: var(--accent-soft); z-index: -1;
+}
 #nav .count {
   position: absolute; top: 4px; left: calc(50% + 7px);
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
@@ -480,9 +484,16 @@ input:not([type=checkbox]):not([type=radio]):focus, select:focus, textarea:focus
 /* ============================================================= Heute */
 .hero {
   position: relative; overflow: hidden;
-  background: linear-gradient(135deg, var(--accent-soft), var(--surface) 70%);
-  border-left: 4px solid var(--accent);
+  background: var(--accent); color: var(--on-accent);
+  border-radius: calc(var(--r3) + 4px); padding: var(--s5) var(--s4);
 }
+.hero .eyebrow, .hero .hint { color: inherit; opacity: 0.85; }
+.hero .btn.primary { background: var(--on-accent); color: var(--accent); }
+.hero .btn.ghost, .hero .btn.tonal { background: rgb(255 255 255 / 0.16); color: inherit; }
+.hero .link-btn { color: inherit; text-decoration: underline; }
+.hero.is-done { background: var(--surface); color: var(--text); }
+.hero.is-done .btn.tonal { background: var(--accent-soft); color: var(--accent); }
+.hero.is-done .btn.ghost { background: transparent; color: var(--muted); }
 .hero-title { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; margin: 4px 0 6px; }
 
 
@@ -942,3 +953,12 @@ body.training-fullscreen.resting .content { padding-bottom: calc(var(--rest-h) +
 .lib-group > summary.group-title { margin: 0; min-height: 52px; padding: 0 var(--s4); display: flex; align-items: center; gap: var(--s2);
   font-size: var(--fs-md); color: var(--text); }
 .lib-group > .list { box-shadow: none; border-top: 1px solid var(--line); border-radius: 0 0 var(--r2) var(--r2); margin: 0; }
+
+/* ------------------------------------------------------- Kalender */
+.cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s3); }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; text-align: center; }
+.cal-grid small { color: var(--faint); font-size: var(--fs-xs); }
+.cal-grid b { font-weight: 500; font-size: var(--fs-sm); line-height: 34px; border-radius: 50%; color: var(--text); }
+.cal-grid b.lift { background: var(--accent); color: var(--on-accent); font-weight: 650; }
+.cal-grid b.cardio { box-shadow: inset 0 0 0 2px var(--accent); }
+.cal-grid b.today:not(.lift) { background: var(--surface-3); }
