@@ -674,8 +674,11 @@ def _check(plan, profile_id=None):
     from .planner import validate
     profile = db.get_row("profiles", profile_id) if profile_id else None
     injuries = injuries_from((profile or {}).get("limitations"))
-    return validate.analyze(plan, injuries, (profile or {}).get("session_minutes"),
-                            (profile or {}).get("goal") or "aufbau", bool(plan.get("rotate")))
+    profile = profile or {}
+    return validate.analyze(plan, injuries, profile.get("session_minutes"),
+                            plan.get("goal") or profile.get("goal") or "aufbau", bool(plan.get("rotate")),
+                            plan.get("experience") or profile.get("experience") or "fortgeschritten",
+                            plan.get("focus") or db.parse_focus(profile.get("focus")))
 
 
 def _with_check(preview, profile_id=None):
@@ -711,9 +714,11 @@ def api_wizard_preview(body: WizardIn, profile_id: int = Depends(current_profile
 
 
 @app.get("/api/wizard/alternatives")
-def api_wizard_alternatives(pattern: Pattern, exclude: str = Query("", max_length=200)):
+def api_wizard_alternatives(pattern: Pattern, exclude: str = Query("", max_length=200),
+                            profile_id: int = Depends(current_profile)):
     ids = [int(x) for x in exclude.split(",") if x.strip().isdigit()]
-    return generate.alternatives(pattern, ids)
+    injuries = injuries_from((db.get_row("profiles", profile_id) or {}).get("limitations"))
+    return generate.alternatives(pattern, ids, injuries)
 
 
 def _plan_dict(plan: PlanIn):

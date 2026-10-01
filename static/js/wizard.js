@@ -89,6 +89,13 @@ export function openWizard(profile) {
 const INJURIES = [["knee", "Knie"], ["lower_back", "Rücken"], ["shoulder", "Schulter"], ["elbow", "Ellbogen"],
   ["wrist", "Handgelenk"], ["hip", "Hüfte"]];
 
+function injuryChips() {
+  const has = (label) => (st.data.limitations || "").toLowerCase().includes(label.toLowerCase());
+  return `<h3 class="form-section">Beschwerden</h3>
+    <div class="chips" role="group" aria-label="Beschwerden">${INJURIES.map(([k, label]) => `<button type="button"
+      class="chip${has(label) ? " active" : ""}" data-injury="${label}" aria-pressed="${has(label)}">${label}</button>`).join("")}</div>`;
+}
+
 const choice = (group, value, label, text, active) => `
   <button type="button" class="choice ${active ? "active" : ""}" data-pick="${group}" data-value="${value}"
     aria-pressed="${active}">
@@ -99,11 +106,9 @@ const choice = (group, value, label, text, active) => `
 function stepData() {
   const d = st.data;
   const year = new Date().getFullYear();
-  const has = (label) => (d.limitations || "").toLowerCase().includes(label.toLowerCase());
   return `<p class="hint">Alles freiwillig. Bei Beschwerden lässt der Assistent belastende Übungen weg
       und wählt Alternativen.</p>
-    <div class="chips" role="group" aria-label="Beschwerden">${INJURIES.map(([k, label]) => `<button type="button"
-      class="chip${has(label) ? " active" : ""}" data-injury="${label}" aria-pressed="${has(label)}">${label}</button>`).join("")}</div>
+    ${injuryChips()}
     <div class="form">
       <div class="field-row">
         <label class="field">Geburtsjahr<input data-field="birth_year" type="number" inputmode="numeric"
@@ -153,7 +158,9 @@ const stepFocus = () => `<p class="hint">Welche Muskeln sollen mehr Aufmerksamke
       class="chip ${st.focus.includes(k) ? "active" : ""}" data-focus="${k}"
       aria-pressed="${st.focus.includes(k)}">${l}</button>`).join("")}</div>
   <p class="hint">${st.focus.length ? `Fokus: ${st.focus.map((f) => FOCUS[f]).join(", ")} – dafür gibt es mehr Sätze und bei Bedarf eine Zusatzübung.`
-    : "Kein Fokus: alle Muskelgruppen gleichmäßig."}</p>`;
+    : "Kein Fokus: alle Muskelgruppen gleichmäßig."}</p>
+  ${injuryChips()}
+  <p class="hint">Belastende Übungen werden weggelassen, die Alternativen passen zum selben Muskel.</p>`;
 
 const stepExperience = () => `<p class="hint">Wie lange trainierst du schon im Studio?</p>
   <div class="choices">${Object.entries(EXPERIENCE).map(([k, e]) => choice("experience", k, e.label, e.text, st.experience === k)).join("")}</div>`;
@@ -326,7 +333,8 @@ async function next() {
       const weekdays = [...st.weekdays].sort();
       await api(`profiles/${getProfile()}`, { method: "PATCH", body: {
         goal: st.goal, train_weekdays: weekdays, session_minutes: st.minutes || null,
-        experience: st.experience, focus: st.focus } });
+        experience: st.experience, focus: st.focus,
+        limitations: (st.data.limitations || "").trim() || null } });
       const q = new URLSearchParams({ weekdays: weekdays.join(","), experience: st.experience,
         goal: st.goal, focus: st.focus.join(",") });
       q.set("minutes", st.minutes ?? 0);

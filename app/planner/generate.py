@@ -16,6 +16,7 @@ MONTHS = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt",
 FOCUS_GROUPS = {"brust": ["brust"], "ruecken": ["ruecken"], "schultern": ["schultern"],
                 "arme": ["bizeps", "trizeps"], "beine": ["quads", "beinbeuger", "waden"],
                 "po": ["po", "beinbeuger"], "rumpf": ["rumpf"]}
+PULL = {"h_pull", "v_pull", "rear_delt"}
 BIG_GROUPS = {"brust", "ruecken", "quads", "beinbeuger", "po", "schultern"}
 MAX_SETS = 5
 MIN_SETS = 2
@@ -143,8 +144,9 @@ def distribute(plan, targets, per_session, focus_groups=()):
 
     for day, slots in enumerate(assigned):
         def order(idx):
+            # zuerst fallen Isolationsuebungen weg, bei Grunduebungen eher Druecken als Ziehen
             pattern = slots[idx][0]
-            return (group_of(pattern) in focus_groups, pattern in COMPOUND, -slots[idx][1])
+            return (group_of(pattern) in focus_groups, pattern in COMPOUND, pattern in PULL, -slots[idx][1])
         while sum(v[1] for v in slots.values()) > per_session and any(v[1] > MIN_SETS for v in slots.values()):
             idx = next(i for i in sorted(slots, key=order) if slots[i][1] > MIN_SETS)
             slots[idx][1] -= 1
@@ -253,6 +255,8 @@ def generate(profile, option_key, overrides=None, variation=0):
         chosen.sort(key=lambda e: e["pattern"] not in COMPOUND)
         days.append({"label": label, "weekdays": list(weekdays), "exercises": chosen})
 
+    _fill_gaps(days, by_pattern, peak, per_session, goal, age, focus_groups, weeks_t, used)
+
     planned_by_week = [{g: 0 for g in GROUPS} for _ in range(n_weeks)]
     for d in days:
         for e in d["exercises"]:
@@ -283,6 +287,30 @@ def generate(profile, option_key, overrides=None, variation=0):
         "basis": info.get("pro", [])[:2] + basis,
         "days": days, "notes": [],
     }
+
+
+def _fill_gaps(days, by_pattern, peak, per_session, goal, age, focus_groups, weeks_t, used):
+    """Eine Muskelgruppe, die unter Erhaltung bleibt (z. B. Waden im Ganzkoerperplan), bekommt
+    eine kurze Zusatzuebung am Tag mit der meisten Luft – sofern die Zeit es hergibt."""
+    from .muscles import GROUPS as G
+    for g, (_, mv, *_rest) in G.items():
+        if not mv or not peak.get(g):
+            continue
+        have = sum(e["peak_sets"] for d in days for e in d["exercises"] if group_of(e["pattern"]) == g)
+        if have >= mv:
+            continue
+        pattern = next((p for p in GROUP_PATTERNS.get(g, ()) if by_pattern.get(p)), None)
+        if not pattern:
+            continue
+        need = min(mv - have, MAX_SETS)
+        day = min(days, key=lambda d: sum(e["peak_sets"] for e in d["exercises"]))
+        room = per_session - sum(e["peak_sets"] for e in day["exercises"])
+        taken = {e["exercise_id"] for e in day["exercises"]}
+        ex = _pick(by_pattern[pattern], used, taken, 0)
+        if not ex or room < MIN_SETS:
+            continue
+        used[ex["id"]] = used.get(ex["id"], 0) + 1
+        day["exercises"].append(_entry(ex, pattern, max(MIN_SETS, min(need, room)), goal, age, focus_groups, weeks_t, peak))
 
 
 def _entry(ex, pattern, peak_sets, goal, age, focus_groups, weeks_t, peak):

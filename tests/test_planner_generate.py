@@ -88,3 +88,29 @@ def test_time_budget_is_respected(profile_id):
     per_session = vp.capacity(3, 45, "aufbau")[1]
     for d in plan["days"]:
         assert sum(e["peak_sets"] for e in d["exercises"]) <= per_session + 2
+
+
+def test_every_block_week_fits_the_time_budget(profile_id):
+    for minutes in (45, 60, 90):
+        p = _profile(profile_id, train_weekdays=DAYS[3], days_per_week=3, session_minutes=minutes)
+        plan = generate.generate(p, generate.split_options(p)[0]["key"])
+        per_session = vp.capacity(3, minutes, "aufbau")[1]
+        for w in range(plan["block"]["weeks"]):
+            for d in plan["days"]:
+                assert sum(e["week_sets"][w] for e in d["exercises"]) <= per_session + 2, (minutes, w, d["label"])
+
+
+def test_recommended_plans_pass_the_validator_for_normal_budgets(profile_id):
+    """Bei ausreichender Zeit darf der empfohlene Plan keine Luecke unter Erhaltung haben."""
+    for days in (3, 4, 5):
+        p = _profile(profile_id, train_weekdays=DAYS[days], days_per_week=days, session_minutes=90,
+                     experience="fortgeschritten")
+        plan = generate.generate(p, generate.split_options(p)[0]["key"])
+        res = validate.analyze(plan, minutes=90, goal="aufbau", rotate=plan["rotate"], experience="fortgeschritten")
+        low = [f for f in res["findings"] if "nicht einmal" in f["text"] or f["level"] == "warn"]
+        assert not low, (days, low)
+
+
+def test_alternatives_respect_injuries():
+    names = {e["name"] for e in generate.alternatives("squat", injuries={"knee"})}
+    assert "Kniebeuge" not in names and "Beinpresse" in names

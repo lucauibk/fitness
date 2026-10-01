@@ -43,3 +43,15 @@ def test_seeded_into_database_without_losing_existing_ids():
     bench = db.one("SELECT id FROM exercises WHERE name='Bankdrücken'")
     db.init()   # erneuter Start aendert nichts
     assert db.one("SELECT id FROM exercises WHERE name='Bankdrücken'")["id"] == bench["id"]
+
+
+def test_restart_does_not_duplicate_or_resurrect_exercises():
+    before = db.one("SELECT COUNT(*) AS n FROM exercises")["n"]
+    db.init()
+    db.init()
+    assert db.one("SELECT COUNT(*) AS n FROM exercises")["n"] == before
+    # eine bewusst geloeschte Uebung bleibt weg
+    ex = db.one("SELECT id FROM exercises WHERE name='Arnold Press'")
+    db.delete_row("exercises", ex["id"])
+    db.init()
+    assert db.one("SELECT id FROM exercises WHERE name='Arnold Press'") is None
