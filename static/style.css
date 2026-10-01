@@ -940,3 +940,22 @@ h1, h2, .page-title, .group-title { font-weight: 800; letter-spacing: 0.01em; }
 .btn { border-radius: 999px; }
 .btn.primary { background: #fff; color: #0b0b0c; }
 .btn.primary:hover { background: #e6e6e6; }
+
+/* ------------------------------------------- Kachelraster (Fortschritt) */
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin-bottom: var(--s3); }
+.tile, .tile-in { display: flex; flex-direction: column; justify-content: space-between; gap: var(--s3); min-height: 168px;
+  background: var(--surface); border-radius: var(--r3); padding: var(--s4); color: var(--text); text-decoration: none; box-shadow: var(--shadow); }
+.tile.wide { grid-column: 1 / -1; padding: 0; min-height: 0; }
+.tile-in { min-height: 150px; box-shadow: none; }
+.tile-title { margin: 0; font-weight: 700; font-size: var(--fs-md); }
+.tile-sub { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-xs); }
+.tile-body { display: flex; align-items: center; justify-content: center; }
+.tile-body .spark { width: 100%; height: 56px; }
+.tile-foot { display: flex; align-items: center; gap: var(--s1); color: var(--muted); font-size: var(--fs-sm); border-top: 1px solid var(--line); padding-top: var(--s3); }
+.tile-foot b { color: var(--text); font-size: var(--fs-md); }
+.tile-foot .chev { margin-left: auto; width: 18px; height: 18px; }
+.dotgrid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; width: 100%; }
+.dotgrid i { aspect-ratio: 1; border-radius: 3px; background: var(--surface-3); }
+.dotgrid i.on { background: var(--c-train); }
+.tbar { display: block; width: 100%; height: 8px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
+.tbar i { display: block; height: 100%; border-radius: 4px; }
