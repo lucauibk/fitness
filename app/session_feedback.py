@@ -17,7 +17,8 @@ Zwei Eigenheiten, die Absicht sind:
 """
 from datetime import datetime, timezone
 
-from . import db, volume
+from . import db
+from .planner import volume_plan as volume
 
 # Gewicht je Kriterium. Summe 100, wenn alle greifen – sonst wird auf die anwendbaren
 # normiert, damit freies Training nicht für fehlende Vorgaben bestraft wird.

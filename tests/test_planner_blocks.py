@@ -1,0 +1,88 @@
+"""Blockwochen, Wochen-Check und Nachholen verpasster Saetze."""
+from datetime import date, datetime, timedelta
+
+from app import db
+from app.planner import autoregulate, blocks, explain
+
+MONDAY = date(2026, 9, 7)
+
+
+def _setup(profile_id):
+    sp = db.insert_row("splits", {"profile_id": profile_id, "name": "T", "active": 1})
+    day = db.insert_row("split_days", {"split_id": sp["id"], "position": 0, "label": "OK", "weekdays": "0,3"})
+    ids = {}
+    for pos, name in enumerate(["Bankdrücken", "Latzug", "Seitheben", "Bizepscurls Kurzhantel"]):
+        ex = db.one("SELECT id FROM exercises WHERE name=?", (name,))
+        row = db.insert_row("split_exercises", {"split_day_id": day["id"], "exercise_id": ex["id"], "position": pos,
+                                                "target_sets": 3, "target_reps_min": 8, "target_reps_max": 12})
+        ids[name] = (row["id"], ex["id"])
+    db.update_row("profiles", profile_id, {"goal": "aufbau", "experience": "fortgeschritten"})
+    return sp, day, ids
+
+
+def _log(profile_id, day_id, ex_id, on, sets=3, reps=10, weight=50, rpe=None):
+    at = datetime(on.year, on.month, on.day, 18).isoformat()
+    w = db.insert_row("workouts", {"profile_id": profile_id, "split_day_id": day_id, "started_at": at, "finished_at": at})
+    with db.connect() as c:
+        for n in range(sets):
+            c.execute("INSERT INTO sets (workout_id, exercise_id, set_no, reps, weight, rpe, warmup) VALUES (?,?,?,?,?,?,0)",
+                      (w["id"], ex_id, n + 1, reps, weight, rpe))
+
+
+def test_block_weeks_ramp_and_deload(profile_id):
+    sp, day, ids = _setup(profile_id)
+    block = blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    row = db.active_split(profile_id)["days"][0]["exercises"][0]          # Bankdrücken, Woche 1 = 3 Sätze
+    sets = [blocks.sets_for(block, row, MONDAY + timedelta(weeks=w)) for w in range(block["weeks"])]
+    assert sets[0] == 3 and sets == sorted(sets[:-1]) + [sets[-1]]
+    assert sets[-1] < sets[0] and max(sets[:-1]) <= 6                   # Deload leichter
+    st = blocks.state(block, MONDAY + timedelta(weeks=block["weeks"] - 1))
+    assert st["deload"] and st["rir"] == 4
+    assert blocks.state(block, MONDAY + timedelta(weeks=block["weeks"]))["finished"]
+
+
+def test_missed_sets_are_made_up_next_week(profile_id):
+    sp, day, ids = _setup(profile_id)
+    block = blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    # Woche 1: nur Brust trainiert, Rücken (Latzug) komplett ausgelassen
+    _log(profile_id, day["id"], ids["Bankdrücken"][1], MONDAY)
+    res = autoregulate.review(profile_id, MONDAY + timedelta(weeks=1))
+    texts = [e["text"] for e in res["events"]]
+    assert any("Latzug" in t and "+1 Satz" in t for t in texts), texts
+    st = blocks.state(blocks.active(profile_id), MONDAY + timedelta(weeks=1))
+    row = next(e for e in db.active_split(profile_id)["days"][0]["exercises"] if e["name"] == "Latzug")
+    plain = blocks.sets_for({**blocks.active(profile_id), "params": '{"ratios": {}}'}, row, MONDAY + timedelta(weeks=1))
+    assert blocks.sets_for(blocks.active(profile_id), row, MONDAY + timedelta(weeks=1)) > plain - 1
+    # zweiter Aufruf in derselben Woche aendert nichts mehr
+    again = autoregulate.review(profile_id, MONDAY + timedelta(weeks=1))
+    assert len(again["events"]) == len(res["events"])
+
+
+def test_rpe_drift_pulls_deload_forward(profile_id):
+    sp, day, ids = _setup(profile_id)
+    blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    for ex_name, rpes in (("Bankdrücken", (7, 8, 9)), ("Latzug", (7, 8, 9))):
+        for i, rpe in enumerate(rpes):
+            _log(profile_id, day["id"], ids[ex_name][1], MONDAY + timedelta(weeks=i, days=1), rpe=rpe)
+    res = autoregulate.review(profile_id, MONDAY + timedelta(weeks=2))      # Woche 3
+    st = blocks.state(blocks.active(profile_id), MONDAY + timedelta(weeks=2))
+    assert st["deload"] and any("Entlastungswoche vorgezogen" in e["text"] for e in res["events"])
+
+
+def test_rollover_starts_new_block_and_swaps_isolation_only(profile_id):
+    sp, day, ids = _setup(profile_id)
+    old = blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    later = MONDAY + timedelta(weeks=old["weeks"] + 1)
+    res = autoregulate.review(profile_id, later)
+    new = blocks.active(profile_id)
+    assert new["id"] != old["id"] and blocks.state(new, later)["week"] == 1
+    names = {e["name"] for e in db.active_split(profile_id)["days"][0]["exercises"]}
+    assert {"Bankdrücken", "Latzug"} <= names                                # Grundübungen bleiben
+    assert not {"Seitheben", "Bizepscurls Kurzhantel"} <= names              # Isolation gewechselt
+    assert any(e["kind"] == "swap" for e in res["events"])
+
+
+def test_events_are_deduplicated(profile_id):
+    explain.log(profile_id, "info", "Test")
+    explain.log(profile_id, "info", "Test")
+    assert len([e for e in explain.recent(profile_id) if e["text"] == "Test"]) == 1

@@ -324,12 +324,18 @@ def rotation_day(profile_id, split):
 
 
 def day_plan(profile_id, day):
-    """Ein Trainingstag mit letzten Werten und Vorschlägen je Übung."""
+    """Ein Trainingstag mit letzten Werten und Vorschlägen je Übung – nach Blockwoche."""
+    from .planner import blocks
+    block = blocks.ensure(profile_id)
+    st = blocks.state(block) if block else None
     items = []
     for item in day["exercises"]:
         ex = {"id": item["exercise_id"], "muscle_group": item["muscle_group"]}
+        if st:
+            item = {**item, "target_sets": blocks.sets_for(block, item)}
         s = suggest(profile_id, ex, item["target_sets"],
-                    item["target_reps_min"], item["target_reps_max"])
+                    item["target_reps_min"], item["target_reps_max"],
+                    rir=st["rir"] if st else 2, deload=bool(st and st["deload"]))
         items.append({
             "split_exercise_id": item["id"], "exercise_id": item["exercise_id"],
             "name": item["name"], "unit": item["unit"], "muscle_group": item["muscle_group"],
@@ -340,10 +346,10 @@ def day_plan(profile_id, day):
             "rest_seconds": item.get("rest_seconds"),
             "last": s["last"], "suggest": {"reps": s["reps"], "weight": s["weight"],
                                            "reason": s["reason"],
-                                           "raise_weight": s["raise_weight"]},
+                                           "raise_weight": s["raise_weight"], "status": s.get("status")},
         })
     return {"id": day["id"], "label": day["label"], "weekdays": day.get("weekdays") or [],
-            "exercises": items}
+            "exercises": items, "block": st}
 
 
 def today_view(profile_id):

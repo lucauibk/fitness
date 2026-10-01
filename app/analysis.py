@@ -4,28 +4,30 @@ anwendbare Vorschlaege – Saetze anpassen, Uebung ergaenzen oder streichen, Spl
 
 Richtwerte kommen aus app/volume.py (Volumen-Landmarken, Schoenfeld 2017).
 """
-from . import db, generator, volume
+from . import db
+from .planner import generate, muscles
+from .planner import volume_plan as vp
+from .planner.profile_model import GOALS
 
 # Wenn eine Uebung kein Bewegungsmuster hat, grob ueber die Muskelgruppe zuordnen
-GROUP_FALLBACK = {"brust": "brust", "ruecken": "ruecken", "schultern": "schultern",
-                  "arme": "arme", "beine": "quads", "rumpf": "rumpf"}
+GROUP_FALLBACK = muscles.LEGACY_GROUP
 # Welche Muster passen zu welchem Tagestyp (fuer "wo ergaenzen?")
-UPPER = {"brust", "ruecken", "schultern", "arme"}
+UPPER = {"brust", "ruecken", "schultern", "bizeps", "trizeps"}
 LOWER = {"quads", "beinbeuger", "po", "waden"}
 MIN_GAP = 3      # ab so vielen fehlenden Saetzen gibt es einen Vorschlag
 MAX_EXTRA = 4    # ab so vielen Saetzen zu viel
 
 
 def _focus_names(profile):
-    names = [volume.LABEL[t] for f in (profile.get("focus") or [])
-             for t in volume.FOCUS_TARGETS.get(f, [])]
+    names = [muscles.LABEL[t] for f in (profile.get("focus") or [])
+             for t in generate.FOCUS_GROUPS.get(f, [])]
     seen = list(dict.fromkeys(names))
     return " und ".join([", ".join(seen[:-1]), seen[-1]]) if len(seen) > 1 else (seen[0] if seen else "")
 
 
 def _group_of(ex):
     if ex.get("pattern"):
-        return volume.PATTERN_TARGET.get(ex["pattern"])
+        return muscles.PATTERN_GROUP.get(ex["pattern"])
     return GROUP_FALLBACK.get(ex.get("muscle_group"))
 
 
@@ -35,8 +37,8 @@ def _per_week(day):
 
 def measure(split):
     """Wochensaetze und Haeufigkeit je Zielgruppe, plus Einheiten pro Woche."""
-    sets = {g: 0 for g in volume.LANDMARKS}
-    freq = {g: 0 for g in volume.LANDMARKS}
+    sets = {g: 0 for g in muscles.GROUPS}
+    freq = {g: 0 for g in muscles.GROUPS}
     sessions = 0
     for day in split["days"]:
         times = _per_week(day)
@@ -68,20 +70,16 @@ def _day_for(group, split):
 
 
 def _pick_exercise(group, used_ids, profile, prefer_patterns=()):
-    """Passende Uebung aus dem Katalog: beruecksichtigt Einschraenkungen und Erfahrung."""
-    rules = generator.limitation_rules(profile.get("limitations"))
-    excluded = {n for r in rules for n in r[2]}
-    preferred = [n for r in rules for n in r[3]] + generator.PREFER.get(
-        profile.get("experience") or "einsteiger", [])
-    rank = {name: i for i, name in enumerate(preferred)}
+    """Passende Uebung aus dem Katalog: beruecksichtigt Verletzungen, Geraet und Erfahrung."""
+    settings = generate.settings_from(profile)
     best = None
-    for ex in generator.catalog():
-        if ex["id"] in used_ids or ex["name"] in excluded:
+    for ex in generate.catalog():
+        if ex["id"] in used_ids or not generate.usable(ex, settings["injuries"]):
             continue
-        if volume.PATTERN_TARGET.get(ex["pattern"]) != group:
+        if muscles.PATTERN_GROUP.get(ex["pattern"]) != group:
             continue
         key = (0 if (not prefer_patterns or ex["pattern"] in prefer_patterns) else 1,
-               rank.get(ex["name"], 99), ex["id"])
+               -generate.score(ex, settings), ex["id"])
         if best is None or key < best[0]:
             best = (key, ex)
     return best[1] if best else None
@@ -94,15 +92,15 @@ def _add_suggestion(group, missing, split, profile, goal, used_ids, prefer_patte
         return None
     sets = max(2, min(4, missing))
     compound = ex["kind"] == "compound"
-    lo, hi = volume.reps_for(ex["pattern"], goal, compound)
+    lo, hi = vp.reps_for(ex["pattern"], goal, compound)
     used_ids.add(ex["id"])
     return {
         "level": "warn" if missing >= 4 else "info",
         "text": f"{ex['name']} mit {sets} Sätzen zu „{day['label']}“ hinzufügen",
-        "why": why or f"{volume.LABEL[group]}: {missing} Sätze pro Woche fehlen zum Richtwert.",
+        "why": why or f"{muscles.LABEL[group]}: {missing} Sätze pro Woche fehlen zum Richtwert.",
         "action": {"type": "add", "day_id": day["id"], "exercise_id": ex["id"],
                    "target_sets": sets, "target_reps_min": lo, "target_reps_max": hi,
-                   "rest_seconds": volume.rest_for(ex["pattern"], goal, compound)},
+                   "rest_seconds": vp.rest_for(ex["pattern"], goal, compound)},
     }
 
 
@@ -114,10 +112,10 @@ def analyze(profile_id, split_id=None):
 
     actual, freq, sessions = measure(split)
     goal = profile.get("goal") or "aufbau"
-    target, notes, per_session = volume.targets(
-        profile.get("experience") or "einsteiger", goal, profile.get("focus") or [],
+    focus_groups = {t for f in (profile.get("focus") or []) for t in generate.FOCUS_GROUPS.get(f, [])}
+    target, notes, per_session = vp.weekly_targets(
+        profile.get("experience") or "einsteiger", goal, focus_groups,
         sessions, profile.get("session_minutes"))
-    focus_groups = {t for f in (profile.get("focus") or []) for t in volume.FOCUS_TARGETS.get(f, [])}
 
     items = [(day, ex) for day in split["days"] for ex in day["exercises"]]
     used_ids = {ex["exercise_id"] for _, ex in items}
@@ -148,7 +146,7 @@ def analyze(profile_id, split_id=None):
                     "level": "warn" if gap >= 5 else "info",
                     "text": f"„{ex['name']}“ auf {ex['target_sets'] + add} Sätze erhöhen"
                             f" ({day['label']})",
-                    "why": f"{volume.LABEL[group]}: {have} statt {want} Sätze pro Woche"
+                    "why": f"{muscles.LABEL[group]}: {have} statt {want} Sätze pro Woche"
                            + (" – das ist deine Fokus-Muskelgruppe." if group in focus_groups else "."),
                     "action": {"type": "sets", "item_id": ex["id"],
                                "target_sets": ex["target_sets"] + add},
@@ -167,7 +165,7 @@ def analyze(profile_id, split_id=None):
                 suggestions.append({
                     "level": "info",
                     "text": f"„{ex['name']}“ auf {new} Sätze reduzieren ({day['label']})",
-                    "why": (f"{volume.LABEL[group]}: {have} Sätze pro Woche. "
+                    "why": (f"{muscles.LABEL[group]}: {have} Sätze pro Woche. "
                             + (f"Weil {_focus_names(profile)} im Fokus stehen, reicht hier "
                                f"Erhaltungsvolumen ({want} Sätze) – die Zeit steckst du besser in den Fokus."
                                if focus_groups else
@@ -178,7 +176,7 @@ def analyze(profile_id, split_id=None):
                 suggestions.append({
                     "level": "info",
                     "text": f"„{ex['name']}“ aus „{day['label']}“ streichen",
-                    "why": (f"{volume.LABEL[group]}: {have} statt {want} Sätze pro Woche"
+                    "why": (f"{muscles.LABEL[group]}: {have} statt {want} Sätze pro Woche"
                             + (f" – im Fokus stehen {_focus_names(profile)}." if focus_groups else ".")),
                     "action": {"type": "remove", "item_id": ex["id"]},
                 })
@@ -225,13 +223,13 @@ def analyze(profile_id, split_id=None):
         if not ex.get("pattern"):
             continue
         compound = ex.get("kind") == "compound"
-        lo, hi = volume.reps_for(ex["pattern"], goal, compound)
+        lo, hi = vp.reps_for(ex["pattern"], goal, compound)
         cur_lo, cur_hi = ex["target_reps_min"], ex["target_reps_max"]
         if abs(cur_lo - lo) >= 4 or abs(cur_hi - hi) >= 5:
             suggestions.append({
                 "level": "info",
                 "text": f"„{ex['name']}“ auf {lo}–{hi} Wiederholungen umstellen",
-                "why": f"Für dein Ziel ({generator.GOALS.get(goal, goal)}) passt dieser Bereich "
+                "why": f"Für dein Ziel ({GOALS.get(goal, goal)}) passt dieser Bereich "
                        f"besser als {cur_lo}–{cur_hi}.",
                 "action": {"type": "reps", "item_id": ex["id"],
                            "target_reps_min": lo, "target_reps_max": hi},
@@ -241,12 +239,12 @@ def analyze(profile_id, split_id=None):
     weekdays = sorted({wd for day in split["days"] for wd in (day.get("weekdays") or [])})
     advice = None
     if len(weekdays) >= 2:
-        options = generator.split_options(profile, {"weekdays": weekdays})
+        options = generate.split_options(profile, {"weekdays": weekdays})
         best = options[0] if options else None
         if best:
             # Haeufigkeit vergleichen: die Split-Bewertung nutzt groebere Gruppen
             coarse = {"brust": "brust", "ruecken": "ruecken", "schultern": "schultern",
-                      "arme": "arme", "quads": "beine", "beinbeuger": "beine",
+                      "bizeps": "arme", "trizeps": "arme", "quads": "beine", "beinbeuger": "beine",
                       "waden": "beine", "po": "po", "rumpf": None}
             better, worse = [], []
             for group, c in coarse.items():
@@ -254,9 +252,9 @@ def analyze(profile_id, split_id=None):
                     continue
                 now, then = freq.get(group, 0), best["frequency"].get(c, 0)
                 if then >= 2 > now:
-                    better.append(volume.LABEL[group])
+                    better.append(muscles.LABEL[group])
                 elif now >= 2 > then:
-                    worse.append(volume.LABEL[group])
+                    worse.append(muscles.LABEL[group])
             if better and not worse:
                 text = (f"Mit „{best['name']}“ kämen {', '.join(dict.fromkeys(better))} zweimal "
                         "pro Woche dran statt einmal – bei gleichem Volumen bringt das mehr.")
@@ -264,7 +262,7 @@ def analyze(profile_id, split_id=None):
                 text = (f"„{best['name']}“ würde {', '.join(dict.fromkeys(better))} öfter trainieren, "
                         f"dafür {', '.join(dict.fromkeys(worse))} seltener – das ist Geschmackssache.")
             else:
-                seldom = [volume.LABEL[g] for g in volume.LANDMARKS
+                seldom = [muscles.LABEL[g] for g in muscles.GROUPS
                           if target.get(g) and actual.get(g) and freq.get(g, 0) < 2]
                 text = ("Dein Split passt gut zu deinen Trainingstagen."
                         + (f" Nur {', '.join(seldom)} kommen einmal pro Woche dran – "
@@ -284,9 +282,9 @@ def analyze(profile_id, split_id=None):
         "sessions": sessions,
         "per_session": per_session,
         "notes": notes,
-        "volume": [{"group": g, "label": volume.LABEL[g], "actual": actual[g],
+        "volume": [{"group": g, "label": muscles.LABEL[g], "actual": actual[g],
                     "target": target[g], "frequency": freq[g], "focus": g in focus_groups}
-                   for g in volume.LANDMARKS if target[g] or actual[g]],
+                   for g in muscles.GROUPS if target[g] or actual[g]],
         "suggestions": suggestions[:12],
         "split_advice": advice,
     }
@@ -320,7 +318,8 @@ def apply(profile_id, action):
         if kind == "remove":
             db.delete_row("split_exercises", item["id"])
             return {"ok": True}
-        data = ({"target_sets": _int(action, "target_sets")} if kind == "sets" else
+        data = ({"target_sets": _int(action, "target_sets"), "base_sets": _int(action, "target_sets")}
+                if kind == "sets" else
                 {"target_reps_min": _int(action, "target_reps_min"),
                  "target_reps_max": _int(action, "target_reps_max")})
         return db.update_row("split_exercises", item["id"], data)
@@ -335,6 +334,7 @@ def apply(profile_id, action):
         return db.insert_row("split_exercises", {
             "split_day_id": day["id"], "exercise_id": _int(action, "exercise_id"),
             "position": len(siblings), "target_sets": _int(action, "target_sets", 3),
+            "base_sets": _int(action, "target_sets", 3),
             "target_reps_min": _int(action, "target_reps_min", 8),
             "target_reps_max": _int(action, "target_reps_max", 12),
             "rest_seconds": action.get("rest_seconds")})

@@ -69,8 +69,13 @@ def fit_to_capacity(targets, total):
     f = total / peak
     out = {g: [(min(x, GROUPS[g][1]) if round(x * f) < GROUPS[g][1] else round(x * f)) if x else 0 for x in v]
            for g, v in targets.items()}
-    return out, (f"Deine Zeit reicht für ≈ {total} Sätze pro Woche, der Block würde {peak} verlangen – "
-                 "das Volumen ist anteilig gekürzt (nicht unter Erhaltung).")
+    left = max(sum(v[w] for v in out.values()) for w in range(weeks - 1))
+    note = (f"Deine Zeit reicht für ≈ {total} Sätze pro Woche, der Block würde {peak} verlangen – "
+            "das Volumen ist anteilig gekürzt (nicht unter Erhaltung).")
+    if left > total:
+        note += (f" Selbst gekürzt bleiben ≈ {left} Sätze – für dieses Volumen bräuchte es mehr Zeit "
+                 "pro Einheit oder einen zusätzlichen Trainingstag.")
+    return out, note
 
 
 def reps_for(pattern, goal, compound):
@@ -96,3 +101,11 @@ def rest_for(pattern, goal, compound):
     if pattern in ("core", "calves"):
         return 60
     return 90
+
+
+def weekly_targets(experience, goal, focus_groups=(), days=3, minutes=None, age=None):
+    """Spitzenwoche je Gruppe, zeitlich angepasst: (Ziele, Hinweise, Saetze je Einheit)."""
+    total, per_session = capacity(max(2, days), minutes, goal)
+    weeks, note = fit_to_capacity(block_targets(experience, goal, focus_groups, age), total)
+    peak = {g: max(v[:-1]) for g, v in weeks.items()}
+    return peak, ([note] if note else []), per_session
