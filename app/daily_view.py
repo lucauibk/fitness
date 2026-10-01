@@ -79,5 +79,6 @@ def build(profile_id):
         # Was fuer Kalorien-/Trinkziel noch fehlt – Heute zeigt dann "Profil vervollstaendigen".
         "profile_missing": goal_info["missing"],
         "nutrition": {"totals": kcal_day, "goals": goals,
-                     "water_ml": day_nutrition["water_ml"], "water_goal": water_goal},
+                     "water_ml": day_nutrition["water_ml"], "water_goal": water_goal,
+                      "burned_kcal": day_nutrition["burned_kcal"]},
     }

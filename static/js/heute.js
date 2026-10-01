@@ -152,10 +152,10 @@ function nutritionCard() {
   const eaten = n.totals.kcal + pend;
   return `<div class="card nutri-mini">
     <a class="mini-card" href="#ernaehrung">
-      ${ring(eaten, n.goals.kcal, { size: 72 })}
+      ${ring(eaten, n.goals.kcal ? n.goals.kcal + (n.burned_kcal || 0) : n.goals.kcal, { size: 72 })}
       <div class="grow"><p class="eyebrow">Ernährung</p>
         <div class="card-title">${Math.round(eaten)} ${n.goals.kcal ? `von ${n.goals.kcal} ` : ""}kcal</div>
-        <p class="hint">Eiweiß ${Math.round(n.totals.protein)}${n.goals.protein ? ` / ${n.goals.protein}` : ""} g</p></div>
+        <p class="hint">Eiweiß ${Math.round(n.totals.protein)}${n.goals.protein ? ` / ${n.goals.protein}` : ""} g${n.burned_kcal ? ` · ${n.burned_kcal} kcal verbrannt` : ""}</p></div>
       ${icon("right", "chev")}
     </a>
     ${waterLine()}
