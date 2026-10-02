@@ -14,27 +14,34 @@ sichtbar, Einträge werden lokal gesammelt und nachgesendet, sobald wieder Netz 
 | Fortschritt | Übersicht (Bestleistungen, Volumen) · Körper (Gewicht, Körperfett, Maße, ViCoach) · Erfolge (Serien, Abzeichen) · Verlauf |
 | Profil | Daten, Ernährungsziel, Plan-Assistent |
 
-## Plan-Ersteller (Blöcke statt Einmal-Plan)
+## Plan-Ersteller (ein Tipp, dann lernt die App)
 
-Der Plan ist ein **Trainingsblock** aus 5–6 Wochen (Einsteiger 6, sonst 5): Woche 1 startet nahe
-der kleinsten wirksamen Menge je Muskel, jede Woche kommen Sätze dazu, die letzte Woche ist ein
-Deload. Danach beginnt ein neuer Block, Isolationsübungen wechseln, Grundübungen bleiben.
+**Erstellen:** Training → Plan → „Plan erstellen“. Gefragt wird nur nach den Trainingstagen pro Woche (2–6);
+Ziel (Aufbau), Dauer (60 min), Erfahrung (neu), Split und Wochentage sind Voreinstellungen und lassen sich unter
+„Anpassen“ ändern. Der Plan ist sofort aktiv.
 
-- **Volumen:** Landmarken MV/MEV/MAV/MRV je Muskel (`app/planner/muscles.py`), Fokus-Muskeln
-  Richtung MRV, alle anderen auf Erhaltung (Renaissance Periodization; Schoenfeld et al.).
-- **Auswahl:** Bewegungsmuster → Übung nach SFR (Reiz/Ermüdung), Schwierigkeit, Gerät und
-  Beschwerden (Knie, Rücken, Schulter, Ellbogen, Handgelenk, Hüfte). 106 Studio-Übungen.
-- **Progression:** Double Progression mit Ziel-RIR, RPE, Plateau-Erkennung (3 Einheiten ohne
-  Fortschritt), Rücksetzen nach zwei Fehlschlägen, Gewichtssprung je Gerät (`progression.py`).
-- **Anpassung:** Wochen-Check beim Öffnen von „Heute“ (`autoregulate.py`): verpasste Sätze werden
-  nachgeholt, bei steigender Anstrengung wird der Deload vorgezogen, war alles leicht, kommt ein
-  Satz dazu. Ausgelassene Tage rutschen auf den nächsten Tag (`stats.schedule_day`).
-- **Erklärt:** jede Änderung steht als Satz im Plan unter „Was sich geändert hat“.
+- **Split nach Tagen:** 2 Ganzkörper A/B · 3 Ganzkörper A/B/C · 4 Ober/Unter ×2 · 5 Ober/Unter + Push/Pull/Beine · 6 PPL ×2
+  (jeder Muskel ≥ 2× pro Woche). Die Einheiten sind eine Warteschlange: ausgelassene Tage rücken nach, ein trainierter
+  anderer Tag zählt, Muskeln bekommen mindestens einen Tag Pause (nach langen Einheiten zwei).
+- **Block:** Volumen steigt von Woche zu Woche (MEV → MAV, Fokus Richtung MRV). Entlastung nur **bei Bedarf** – bei zwei
+  Ermüdungssignalen (steigende Anstrengung, sinkende Leistung, Stillstand, anhaltender Muskelkater), sonst läuft der
+  Block bis zu 8 Wochen weiter. Neuer Block = frische Isolationsübungen, Grundübungen bleiben.
+- **Auswahl:** Bewegungsmuster → Übung nach Reiz/Ermüdung, Gerät, Schwierigkeit, Belastung in der gedehnten Position und
+  Beschwerden. 106 Studio-Übungen. „Schmerz bei dieser Übung“ ersetzt belastende Übungen im Plan.
+- **Kaltstart:** Startgewicht als Schätzung aus Körpergewicht, Geschlecht, Alter und Gerät (±25 %), besser aus einer
+  ähnlichen Übung. Die erste Einheit kalibriert („leicht / passt / zu schwer“). Erfahrung wird aus den Daten angehoben.
+- **Progression:** Anfänger wiederholungsbasiert (lineare Steigerung, Plateau nach zwei Stillständen, keine RPE-Regeln),
+  sonst Double Progression mit RPE, Plateau nach drei Einheiten, Rücksetzen nach zwei Fehlschlägen, Wiedereinstieg nach
+  Pausen (> 14 Tage 93 %, > 28 Tage 87 % der letzten Last).
+- **Wochen-Check** beim Öffnen von „Heute“: verpasste Sätze werden nachgeholt (höchstens +20 % der Wochensätze, nie über
+  MRV), war ein Muskel überall leicht, kommt ein Satz dazu, zweiter Stillstand → Variante tauschen. Jede Änderung steht
+  unter „Was sich geändert hat“.
 
-Quellen: [Volumen-Landmarken](https://thestrengthequation.com/post/volume-landmarks.html),
+Quellen: [Frequenz](https://pubmed.ncbi.nlm.nih.gov/30558493/), [Volumen](https://link.springer.com/article/10.1007/s40279-025-02344-w),
+[Volumen-Landmarken](https://thestrengthequation.com/post/volume-landmarks.html),
 [Dynamic Double Progression](https://www.jpshealthandfitness.com.au/the-utility-of-dynamic-autoregulated-double-progression/),
-[Deloading (Bell et al.)](https://shura.shu.ac.uk/35313/3/Bell-APracticalApproach(AM).pdf),
-[Trainingsfrequenz-Metaanalyse](https://www.researchgate.net/publication/301578131_Effects_of_Resistance_Training_Frequency_on_Measures_of_Muscle_Hypertrophy_A_Systematic_Review_and_Meta-Analysis).
+[Deloading](https://shura.shu.ac.uk/35313/3/Bell-APracticalApproach(AM).pdf), [RIR-Genauigkeit](https://pmc.ncbi.nlm.nih.gov/articles/PMC5712461/).
+Eine fertige Open-Source-Lösung gibt es nicht (geprüft: Liftosaur, wger, OpenGym, streprogen, routine-engine).
 
 ## Körperanalyse aus dem Studio (ViCoach)
 
