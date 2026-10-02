@@ -769,9 +769,13 @@ export async function mount(el) {
         const ex = d.exercises[i];
         const last = [...ex.sets].reverse().find((x) => x.done && !x.warmup);
         if (last) last.rpe = { easy: 6, ok: 8, hard: 10 }[calib.dataset.level];
-        ex.sets.filter((x) => !x.done && x.weight != null).forEach((x) => {
+        // 0 kg (Körpergewicht) bleibt 0; „leicht“/„zu schwer“ ändert mindestens um einen Schritt
+        ex.sets.filter((x) => !x.done && x.weight > 0).forEach((x) => {
           const step = x.weight < 20 ? 1 : 2.5;
-          x.weight = Math.max(step, Math.round((x.weight * factor) / step) * step);
+          let w = Math.round((x.weight * factor) / step) * step;
+          if (factor > 1) w = Math.max(w, x.weight + step);
+          if (factor < 1) w = Math.min(w, x.weight - step);
+          x.weight = Math.max(step, w);
         });
         ex.calibrated = true;
       });

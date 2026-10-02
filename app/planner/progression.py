@@ -68,6 +68,20 @@ def _round_to(value, step):
     return round(round(value / step) * step, 2)
 
 
+EMPTY_BAR = 20.0
+
+
+def floor_for(equipment, step):
+    """Leichtestes sinnvolles Gewicht: die leere Langhantel, sonst ein Schritt."""
+    return EMPTY_BAR if equipment == "barbell" else step
+
+
+def lighter(top, factor, step, equipment=None):
+    """Leichtere Last fuer Entlastung, Neuaufbau und Wiedereinstieg: mindestens einen Schritt unter top
+    (4 kg x 0,9 runden sonst wieder auf 4 kg), nie unter der leeren Stange."""
+    return max(floor_for(equipment, step), min(_round_to(top * factor, step), round(top - step, 2)))
+
+
 def _top_weight(sets):
     ws = [s["weight"] for s in sets if s["weight"] is not None]
     return max(ws) if ws else None
@@ -137,12 +151,12 @@ def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, r
     gap = _days_since(last_workout or history[0].get("date"), today)
     if not deload and top and gap is not None and gap > LAYOFF_DAYS:
         factor = 0.87 if gap > 28 else 0.93
-        return {**base, "reps": lo, "weight": max(step, _round_to(top * factor, step)), "status": "return",
+        return {**base, "reps": lo, "weight": lighter(top, factor, step, equipment), "status": "return",
                 "reason": f"{gap} Tage Pause – vorsichtig wieder einsteigen ({round(factor * 100)} % der letzten Last)"}
 
     if deload:
         if top:
-            return {**base, "reps": hi, "weight": max(step, _round_to(top * DELOAD_FACTOR, step)),
+            return {**base, "reps": hi, "weight": lighter(top, DELOAD_FACTOR, step, equipment),
                     "status": "deload", "reason": "Entlastungswoche: ca. 10 % leichter, nichts bis ans Limit"}
         return {**base, "reps": max(lo, hi - 2), "weight": None, "status": "deload",
                 "reason": "Entlastungswoche: weniger Wiederholungen, nichts bis ans Limit"}
@@ -152,20 +166,25 @@ def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, r
         weakest_now = min(s["reps"] for s in last)
         weakest_prev = min(s["reps"] for s in history[1]["sets"])
         if prev_top == top and weakest_now < lo and weakest_prev < lo:
-            return {**base, "reps": lo, "weight": max(step, _round_to(top * DROP_FACTOR, step)),
+            return {**base, "reps": lo, "weight": lighter(top, DROP_FACTOR, step, equipment),
                     "status": "drop", "reason": f"zweimal unter {lo} Wiederholungen – etwas leichter und sauber aufbauen"}
 
-    if top and is_plateau(history, 2 if novice else PLATEAU_SESSIONS):
-        return {**base, "reps": lo, "weight": max(step, _round_to(top * DELOAD_FACTOR, step)),
+    # Oberes Ende in allen Saetzen geschafft geht vor der Plateau-Pruefung: wer nach einem „noch einmal gleich“
+    # wieder oben ankommt, steckt nicht fest, sondern ist bereit fuer mehr Gewicht.
+    at_top = all(s["reps"] >= hi for s in last) and len(last) >= (target_sets or 1)
+    rpes = [] if novice else [s["rpe"] for s in last if s["rpe"] is not None]
+    avg_rpe = sum(rpes) / len(rpes) if rpes else None
+    held_before = len(history) >= 2 and _top_weight(history[1]["sets"]) == top \
+        and all(s["reps"] >= hi for s in history[1]["sets"])
+
+    if top and not at_top and is_plateau(history, 2 if novice else PLATEAU_SESSIONS):
+        return {**base, "reps": lo, "weight": lighter(top, DELOAD_FACTOR, step, equipment),
                 "status": "plateau",
                 "reason": f"{2 if novice else PLATEAU_SESSIONS} Einheiten ohne Fortschritt – 10 % leichter neu aufbauen "
                           "(oder die Übung im nächsten Block wechseln)"}
 
-    at_top = all(s["reps"] >= hi for s in last) and len(last) >= (target_sets or 1)
-    rpes = [] if novice else [s["rpe"] for s in last if s["rpe"] is not None]
-    avg_rpe = sum(rpes) / len(rpes) if rpes else None
     if at_top:
-        if avg_rpe is not None and avg_rpe >= 9.5 and rir >= 2:
+        if avg_rpe is not None and avg_rpe >= 9.5 and rir >= 2 and not held_before:
             return {**base, "reps": hi, "weight": top, "status": "hold",
                     "reason": f"{hi} Wiederholungen geschafft, aber nah am Muskelversagen (⌀ RPE {avg_rpe:g}) "
                               "– noch einmal gleich, dann steigern"}

@@ -57,7 +57,7 @@ def starting_weight(profile_id, exercise_id):
     novice = (profile.get("experience") or "einsteiger") == "einsteiger"
     raw = e1rm * (0.5 if novice else 0.6)
     step = progression.step_for(ex["equipment_type"], ex["pattern"], raw)
-    kg = max(step, progression._round_to(raw, step if step <= 2.5 else 2.5))
+    kg = max(progression.floor_for(ex["equipment_type"], step), progression._round_to(raw, step if step <= 2.5 else 2.5))
     return kg, f"{source} – wird nach zwei Einheiten genauer (±25 %)"
 
 

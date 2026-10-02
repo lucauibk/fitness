@@ -113,3 +113,29 @@ def test_dates_follow_vienna_not_utc(profile_id):
     week_of_sunday, _ = autoregulate.actual_sets(profile_id, d(2026, 9, 21), d(2026, 9, 27))
     week_of_monday, _ = autoregulate.actual_sets(profile_id, d(2026, 9, 28), d(2026, 10, 4))
     assert week_of_sunday["brust"] == 0 and week_of_monday["brust"] == 1
+
+
+def test_top_of_range_after_a_hold_raises_instead_of_plateau():
+    """Oben angekommen, aber am Limit -> einmal halten; wieder oben -> steigern, nicht als Plateau 10 % runter."""
+    at_failure = sess((12, 50, 10), (12, 50, 10), (12, 50, 10))
+    r = rec([at_failure, at_failure, at_failure], experience="fortgeschritten")
+    assert r["status"] != "plateau" and r["raise_weight"] and r["weight"] > 50
+
+
+def test_lighter_is_at_least_one_step_and_never_below_the_empty_bar():
+    stuck = [sess((8, 4), (8, 4), (8, 4))] * 3                      # Kurzhantel 4 kg: 0,9 x 4 rundet auf 4
+    r = rec(stuck, equipment="dumbbell", pattern="lateral", experience="fortgeschritten")
+    assert r["status"] == "plateau" and r["weight"] == 3
+    bar = [sess((8, 20), (8, 20), (8, 20))] * 3
+    assert rec(bar, equipment="barbell", pattern="h_push", deload=True)["weight"] == 20
+    assert rec(bar, equipment="barbell", pattern="h_push", experience="fortgeschritten")["weight"] == 20
+    assert pg.lighter(22.5, 0.9, 2.5, "barbell") == 20
+
+
+def test_barbell_start_weight_is_at_least_the_empty_bar(profile_id):
+    from app import db
+    from app.planner import cold_start
+    db.update_row("profiles", profile_id, {"sex": "weiblich", "experience": "einsteiger"})
+    ex = db.one("SELECT id FROM exercises WHERE equipment_type='barbell' AND pattern='v_push' AND archived=0")
+    kg, _ = cold_start.starting_weight(profile_id, ex["id"])
+    assert kg >= 20
