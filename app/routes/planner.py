@@ -1,11 +1,14 @@
 """Block-Ansicht des Plans: Woche X von Y, Soll/Ist-Volumen und was sich geaendert hat."""
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from .. import db
 from ..common import current_profile
-from ..planner import autoregulate, blocks, explain
+from ..planner import autoregulate, blocks, explain, generate, store
 from ..planner.muscles import GROUPS, LABEL
 
 router = APIRouter(prefix="/api/planner")
@@ -46,3 +49,26 @@ def new_block(profile_id: int = Depends(current_profile)):
         return {"block": None}
     nb, _ = autoregulate.rollover(profile_id, block, split, date.today())
     return {"block": blocks.state(nb)}
+
+
+class CreateIn(BaseModel):
+    days: int = Field(3, ge=2, le=6)
+    goal: Optional[str] = None
+    minutes: Optional[int] = Field(None, ge=0, le=120)
+    focus: Optional[list[str]] = None
+
+
+@router.post("/create")
+def create_plan(body: CreateIn, profile_id: int = Depends(current_profile)):
+    """Ein Tipp: aus der Tageszahl (und dem, was im Profil steht) wird ein aktiver Plan mit Block.
+    Alles Weitere sind Voreinstellungen, die sich spaeter anpassen lassen."""
+    profile = db.profile_out(db.get_row("profiles", profile_id))
+    overrides = {"days": body.days, "weekdays": [], "goal": body.goal, "minutes": body.minutes,
+                 "focus": body.focus}
+    options = generate.split_options(profile, overrides)
+    if not options:
+        raise HTTPException(400, "Für diese Tageszahl gibt es keinen passenden Split.")
+    plan = generate.generate(profile, options[0]["key"], overrides)
+    db.update_row("profiles", profile_id, {"days_per_week": body.days})
+    split = store.save_plan(profile_id, plan, activate=True)
+    return {"split": split, "plan": {"name": plan["name"], "basis": plan["basis"]}}

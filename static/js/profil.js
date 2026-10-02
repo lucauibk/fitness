@@ -73,10 +73,10 @@ function render() {
     ${data.hasPlan ? "" : `<div class="card hero">
       <p class="eyebrow">Plan-Assistent</p>
       <h3 class="hero-title">Plan erstellen lassen</h3>
-      <p class="hint">Ziel, Zeit und Erfahrung angeben – daraus entsteht ein passender Plan,
-        den du vor dem Übernehmen anpassen kannst.</p>
+      <p class="hint">Nur die Trainingstage pro Woche wählen – den Rest stellt die App passend ein
+        und passt ihn nach jeder Einheit an.</p>
       <div class="btn-row">
-        <button type="button" class="btn primary" data-wizard>${icon("spark")} ${draft ? "Assistent fortsetzen" : "Neuen Plan erstellen"}</button>
+        <button type="button" class="btn primary" data-wizard>${icon("spark")} Neuen Plan erstellen</button>
       </div>
     </div>`}
 
@@ -84,7 +84,7 @@ function render() {
       <p class="eyebrow">Trainingsziel</p>
       <p>${esc(summary(p))}</p>
       ${data.hasPlan ? `<div class="btn-row"><button type="button" class="btn small tonal" data-wizard>${icon("spark")}
-        ${draft ? "Assistent fortsetzen" : "Neuen Plan erstellen"}</button></div>` : ""}
+        Neuen Plan erstellen</button></div>` : ""}
     </div>
 
     ${nutritionCard()}
