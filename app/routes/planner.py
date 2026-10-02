@@ -52,25 +52,37 @@ def new_block(profile_id: int = Depends(current_profile)):
 
 
 class CreateIn(BaseModel):
-    days: int = Field(3, ge=2, le=6)
+    days: int = Field(3, ge=2, le=6)              # gewuenschte Einheiten pro Woche
+    available: Optional[list[int]] = None          # freie Wochentage (0 = Montag); leer = jeder Tag
     goal: Optional[str] = None
     minutes: Optional[int] = Field(None, ge=0, le=120)
     focus: Optional[list[str]] = None
+    experience: Optional[str] = None
 
 
 @router.post("/create")
 def create_plan(body: CreateIn, profile_id: int = Depends(current_profile)):
     """Ein Tipp: aus der Tageszahl (und dem, was im Profil steht) wird ein aktiver Plan mit Block.
     Alles Weitere sind Voreinstellungen, die sich spaeter anpassen lassen."""
+    if body.experience in generate.EXPERIENCE:
+        db.update_row("profiles", profile_id, {"experience": body.experience, "experience_auto": None})
     profile = db.profile_out(db.get_row("profiles", profile_id))
     minutes = body.minutes if body.minutes is not None else (profile.get("session_minutes") or 60)
     overrides = {"days": body.days, "weekdays": [], "goal": body.goal, "minutes": minutes,
                  "focus": body.focus}
-    key = generate.DEFAULT_SPLIT.get(body.days)
+    available = db.parse_weekdays(body.available) if body.available is not None else db.parse_weekdays(profile.get("train_weekdays"))
+    sessions = max(2, min(body.days, len(available) or 7))      # nie mehr Einheiten als freie Tage
+    key = generate.DEFAULT_SPLIT.get(sessions)
     if not key:
         raise HTTPException(400, "Für diese Tageszahl gibt es keinen passenden Split.")
+    weekdays = generate.pick_days(available, sessions)
+    overrides.update({"days": sessions, "weekdays": weekdays})
     plan = generate.generate(profile, key, overrides)
-    db.update_row("profiles", profile_id, {"days_per_week": body.days})
+    if any(b - a == 1 for a, b in zip(weekdays, weekdays[1:])) and key.startswith("gk"):
+        plan["basis"].append("Einige Trainingstage liegen direkt hintereinander – bei Ganzkörper-Einheiten "
+                             "ist das nicht ideal. Mit einem freien Tag dazwischen läuft es besser.")
+    db.update_row("profiles", profile_id, {"days_per_week": sessions,
+                                           "train_weekdays": db.format_weekdays(available)})
     split = store.save_plan(profile_id, plan, activate=True)
     return {"split": split, "plan": {"name": plan["name"], "basis": plan["basis"]}}
 
@@ -85,3 +97,18 @@ def pain(body: PainIn, profile_id: int = Depends(current_profile)):
         return autoregulate.report_pain(profile_id, body.area)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+
+
+@router.get("/suggest")
+def suggest(available: str = "", minutes: Optional[int] = None, goal: Optional[str] = None,
+            experience: Optional[str] = None, days: Optional[int] = None,
+            profile_id: int = Depends(current_profile)):
+    """Empfehlung fuer die Einheiten pro Woche und die dafuer gewaehlten Tage – fuer die Anzeige im Assistenten."""
+    profile = db.profile_out(db.get_row("profiles", profile_id))
+    free = db.parse_weekdays(available)
+    n = generate.recommended_days(experience or profile.get("experience"),
+                                  goal or profile.get("goal") or "aufbau",
+                                  minutes if minutes is not None else profile.get("session_minutes") or 60,
+                                  len(free) or 7)
+    chosen = max(2, min(days or n, len(free) or 7))
+    return {"recommended": n, "max": len(free) or 7, "weekdays": generate.pick_days(free, chosen)}

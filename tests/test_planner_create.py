@@ -41,3 +41,42 @@ def test_saved_plan_never_exceeds_the_session_time_budget_in_any_block_week(prof
         for d in split["days"]:
             total = sum(blocks.sets_for(block, e, start + timedelta(weeks=w)) for e in d["exercises"])
             assert total <= per_session + 2, (minutes, w, d["label"], total)
+
+
+def _weekdays(profile_id):
+    return sorted({wd for d in db.active_split(profile_id)["days"] for wd in d["weekdays"]})
+
+
+def test_available_days_are_not_training_days(profile_id):
+    """Mittwoch bis Sonntag frei heisst nicht fuenf Einheiten."""
+    pr.create_plan(pr.CreateIn(days=3, available=[2, 3, 4, 5, 6]), profile_id)
+    assert _weekdays(profile_id) == [2, 4, 6]                           # Mi, Fr, So
+    assert db.parse_weekdays(db.get_row("profiles", profile_id)["train_weekdays"]) == [2, 3, 4, 5, 6]
+    pr.create_plan(pr.CreateIn(days=4, available=[2, 3, 4, 5, 6]), profile_id)
+    assert _weekdays(profile_id) == [2, 3, 5, 6]                        # nie drei Tage am Stueck
+
+
+def test_sessions_never_exceed_available_days(profile_id):
+    pr.create_plan(pr.CreateIn(days=5, available=[5, 6]), profile_id)    # nur Wochenende
+    assert _weekdays(profile_id) == [5, 6]
+
+
+def test_suggestion_recommends_by_level_and_time_and_caps_at_available(profile_id):
+    from app.planner import generate
+    assert generate.recommended_days("einsteiger", "aufbau", 60, 5) == 3
+    assert generate.recommended_days("fortgeschritten", "aufbau", 60, 7) == 4
+    assert generate.recommended_days("fortgeschritten", "aufbau", 45, 7) == 5
+    assert generate.recommended_days("erfahren", "aufbau", 90, 3) == 3
+    res = pr.suggest(available="2,3,4,5,6", minutes=60, goal="aufbau", experience="einsteiger", days=None,
+                     profile_id=profile_id)
+    assert res["recommended"] == 3 and res["weekdays"] == [2, 4, 6] and res["max"] == 5
+    assert pr.suggest(available="", minutes=60, goal=None, experience="einsteiger", days=4,
+                      profile_id=profile_id)["weekdays"] == [0, 1, 3, 5]
+
+
+def test_pick_days_prefers_even_spacing_and_avoids_runs():
+    from app.planner.generate import pick_days
+    assert pick_days([0, 1, 2, 3, 4], 3) == [0, 2, 4]
+    assert pick_days([0, 1, 2, 3, 4], 4) == [0, 1, 3, 4]
+    assert pick_days([2, 3, 4, 5, 6], 2) == [2, 5]
+    assert pick_days([], 3) == [0, 2, 4]

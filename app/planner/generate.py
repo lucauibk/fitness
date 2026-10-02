@@ -3,6 +3,7 @@
 Regelbasiert und nachvollziehbar: jede Entscheidung landet als Satz in `basis`.
 Gewaehlt wird nach Bewegungsmuster, Verletzungen, Geraet, Schwierigkeit und SFR.
 """
+import itertools
 import math
 from datetime import date
 
@@ -26,6 +27,39 @@ TEMPLATES = splits.TEMPLATES
 # Standard-Split nach Trainingstagen (Frequenz ≥ 2×/Woche je Muskel; Schoenfeld 2016/2019, Pelland 2025)
 DEFAULT_SPLIT = {2: "gk2", 3: "gk3", 4: "okuk4", 5: "pplokuk5", 6: "ppl6"}
 MAX_SESSION_SETS_PER_MUSCLE = 8
+
+
+def recommended_days(experience, goal, minutes, available_count=7):
+    """Empfohlene Einheiten pro Woche (ACSM 2009, Schoenfeld 2016/2019, Pelland 2025): Einsteiger 3,
+    Fortgeschrittene Aufbau 4, Erfahrene 4; Fitness 3 hoechstens; kurze Einheiten einen Tag mehr,
+    lange einen weniger. Nie mehr als die freien Tage, Einsteiger hoechstens 5."""
+    base = {"einsteiger": 3, "fortgeschritten": 4 if goal == "aufbau" else 3, "erfahren": 4}.get(experience, 3)
+    if goal == "fitness":
+        base = min(base, 3)
+    if minutes:
+        base += 1 if minutes <= 45 else -1 if minutes >= 90 else 0
+    cap = 5 if experience in (None, "einsteiger") else 6
+    return max(2, min(base, cap, max(2, available_count)))
+
+
+def pick_days(available, n):
+    """Aus den freien Wochentagen (0 = Montag; leer = alle) die n besten waehlen: moeglichst gleichmaessige
+    Abstaende (kleinster Abstand so gross wie moeglich, ueber die Wochengrenze gerechnet), wenig direkt
+    aufeinanderfolgende Tage, keine Luecken ueber 3 Tage. Die uebrigen freien Tage bleiben Reserve."""
+    avail = sorted({d for d in (available or []) if 0 <= d <= 6}) or list(range(7))
+    n = max(1, min(n, len(avail)))
+    best, best_key = None, None
+    for combo in itertools.combinations(avail, n):
+        gaps = [((combo[(i + 1) % n] - combo[i]) % 7) or 7 for i in range(n)]
+        run = best_run = 0
+        for g in gaps + gaps:                       # laengste Kette direkt aufeinanderfolgender Tage (zyklisch)
+            run = run + 1 if g == 1 else 0
+            best_run = max(best_run, run)
+        key = (-min(gaps), min(best_run, n - 1), sum(1 for g in gaps if g == 1), sum(1 for g in gaps if g > 3),
+               max(gaps) - min(gaps), combo)
+        if best_key is None or key < best_key:
+            best, best_key = combo, key
+    return list(best)
 
 
 def catalog():

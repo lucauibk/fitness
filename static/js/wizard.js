@@ -1,6 +1,6 @@
-/** Plan erstellen: ein Bildschirm, ein Tipp. Gefragt wird nur nach den Trainingstagen pro Woche,
- *  alles andere sind Voreinstellungen (Ziel, Dauer, Erfahrung, Split, Wochentage) und lässt sich
- *  unter „Anpassen“ ändern. Gewichte und Erfahrung lernt die App aus den ersten Einheiten. */
+/** Plan erstellen: ein Bildschirm, alles vorbelegt, ein Knopf. Gefragt wird nach Erfahrung, Ziel, freien
+ *  Tagen (die sind etwas anderes als die Einheiten pro Woche), gewünschten Einheiten und Dauer – die
+ *  Empfehlung für die Einheiten kommt vom Server. Fokus und Beschwerden sind eingeklappt. */
 import { $, api, busy, closeSheet, esc, getProfile, icon, openSheet, toast } from "./util.js";
 
 export const GOALS = {
@@ -25,39 +25,68 @@ const MAX_FOCUS = 3;
 /** Den alten Mehrschritt-Entwurf gibt es nicht mehr. */
 export const hasWizardDraft = () => false;
 
+const WD = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+
 export function openWizard(profile) {
-  const have = (profile?.train_weekdays || []).length;
   const st = {
-    days: profile?.days_per_week || (have >= 2 ? have : 3),
+    available: [...(profile?.train_weekdays || [])],
+    days: profile?.days_per_week || 3,
+    touched: false,            // Einheiten pro Woche von Hand gewählt? Dann ändert die Empfehlung sie nicht mehr
+    experience: profile?.experience || "einsteiger",
     goal: profile?.goal || "aufbau",
     minutes: profile?.session_minutes ?? 60,
     focus: [...(profile?.focus || [])],
     limits: (profile?.limitations || "").split(/[,;\n]/).map((x) => x.trim()).filter(Boolean),
+    sug: null,
   };
   const sheet = openSheet({ title: "Plan erstellen", body: "", wide: true });
   const body = $(".sheet-body", sheet);
 
-  const chip = (attr, value, label, active) => `<button type="button" class="chip${active ? " active" : ""}"
-    ${attr}="${value}" aria-pressed="${active}">${label}</button>`;
+  const chip = (attr, value, label, active, extra = "") => `<button type="button" class="chip${active ? " active" : ""}"
+    ${attr}="${value}" aria-pressed="${active}" ${extra}>${label}</button>`;
+  const maxDays = () => st.available.length || 7;
+
+  async function suggest() {
+    const q = new URLSearchParams({ available: st.available.join(","), minutes: st.minutes ?? 0,
+      goal: st.goal, experience: st.experience, days: st.touched ? st.days : "" });
+    if (!st.touched) q.delete("days");
+    try {
+      st.sug = await api(`planner/suggest?${q}`);
+      if (!st.touched) st.days = st.sug.recommended;
+      if (st.days > maxDays()) st.days = maxDays();
+    } catch { st.sug = null; }
+    paint();
+  }
 
   function paint() {
-    body.innerHTML = `<p class="hint">Wie oft pro Woche willst du trainieren? Den Rest stellt die App passend ein
-        und passt ihn nach jeder Einheit an.</p>
-      <div class="chips big" role="group" aria-label="Trainingstage pro Woche">${[2, 3, 4, 5, 6]
-        .map((n) => chip("data-days", n, `${n}×`, st.days === n)).join("")}</div>
-      <div class="btn-row wide"><button type="button" class="btn primary" data-create>${icon("spark")} Plan erstellen</button></div>
-      <details class="field-more"><summary>Anpassen (optional)</summary>
-        <h3 class="form-section">Ziel</h3>
-        <div class="chips">${Object.entries(GOALS).map(([k, g]) => chip("data-goal", k, g.label, st.goal === k)).join("")}</div>
-        <h3 class="form-section">Dauer pro Einheit</h3>
-        <div class="chips">${[...MINUTES, 0].map((m) => chip("data-minutes", m, m ? `${m} min` : "egal", st.minutes === m)).join("")}</div>
+    const free = st.available.length;
+    const picked = (st.sug?.weekdays || []).map((d) => WD[d]).join(" · ");
+    body.innerHTML = `<h3 class="form-section">Wie viel Erfahrung hast du?</h3>
+      <div class="choices">${Object.entries(EXPERIENCE).map(([k, e]) => `<button type="button"
+        class="choice${st.experience === k ? " active" : ""}" data-experience="${k}" aria-pressed="${st.experience === k}">
+        <span class="choice-title">${esc(e.label)}</span><span class="choice-text">${esc(e.text)}</span></button>`).join("")}</div>
+      <h3 class="form-section">Ziel</h3>
+      <div class="chips">${Object.entries(GOALS).map(([k, g]) => chip("data-goal", k, g.label, st.goal === k)).join("")}</div>
+      <h3 class="form-section">An welchen Tagen hast du Zeit?</h3>
+      <div class="chips days">${WD.map((l, i) => chip("data-avail", i, l, st.available.includes(i))).join("")}</div>
+      <p class="hint">${free ? `${free} freie ${free === 1 ? "Tag" : "Tage"} – das heißt nicht, dass du an allen trainierst.`
+        : "Keine Auswahl = jeder Tag ist möglich."}</p>
+      <h3 class="form-section">Wie oft pro Woche willst du trainieren?</h3>
+      <div class="chips big" role="group" aria-label="Einheiten pro Woche">${[2, 3, 4, 5, 6]
+        .map((n) => chip("data-days", n, `${n}×`, st.days === n, n > maxDays() ? "disabled" : "")).join("")}</div>
+      <p class="hint">${st.sug ? `Empfohlen: ${st.sug.recommended}× pro Woche. ` : ""}${picked ? `Trainingstage: ${picked}.` : ""}
+        ${free > st.days ? "Die übrigen freien Tage bleiben als Reserve zum Nachholen." : ""}</p>
+      <h3 class="form-section">Dauer pro Einheit</h3>
+      <div class="chips">${[...MINUTES, 0].map((m) => chip("data-minutes", m, m ? `${m} min` : "egal", st.minutes === m)).join("")}</div>
+      <details class="field-more"><summary>Mehr Aufmerksamkeit für Muskeln, Beschwerden</summary>
         <h3 class="form-section">Mehr Aufmerksamkeit für</h3>
         <div class="chips">${Object.entries(FOCUS).map(([k, l]) => chip("data-focus", k, l, st.focus.includes(k))).join("")}</div>
         <h3 class="form-section">Beschwerden</h3>
         <div class="chips">${INJURIES.map((l) => chip("data-injury", l, l, st.limits.some((x) => x.toLowerCase() === l.toLowerCase()))).join("")}</div>
         <p class="hint">Belastende Übungen werden weggelassen und durch passende ersetzt.</p>
       </details>
-      <p class="hint">Startgewichte findest du in der ersten Einheit selbst – die App merkt sich, was passt.</p>`;
+      <div class="btn-row wide"><button type="button" class="btn primary" data-create>${icon("spark")} Plan erstellen</button></div>
+      <p class="hint">Gewichte findest du in der ersten Einheit selbst – die App merkt sich, was passt und passt den Plan danach laufend an.</p>`;
   }
 
   async function create(btn) {
@@ -65,9 +94,10 @@ export function openWizard(profile) {
       try {
         const limitations = st.limits.join(", ") || null;
         await api(`profiles/${getProfile()}`, { method: "PATCH", body: {
-          goal: st.goal, session_minutes: st.minutes || null, focus: st.focus, limitations } });
+          goal: st.goal, experience: st.experience, session_minutes: st.minutes || null, focus: st.focus, limitations } });
         await api("planner/create", { method: "POST", body: {
-          days: st.days, goal: st.goal, minutes: st.minutes, focus: st.focus } });
+          days: st.days, available: st.available, goal: st.goal, experience: st.experience,
+          minutes: st.minutes, focus: st.focus } });
         window.dispatchEvent(new CustomEvent("wizard-changed"));
         closeSheet();
         toast("Plan erstellt – er passt sich ab jetzt an");
@@ -81,12 +111,20 @@ export function openWizard(profile) {
 
   sheet.addEventListener("click", (ev) => {
     const t = (s) => ev.target.closest(s);
-    const days = t("[data-days]");
-    if (days) { st.days = Number(days.dataset.days); return paint(); }
+    const exp = t("[data-experience]");
+    if (exp) { st.experience = exp.dataset.experience; return suggest(); }
     const goal = t("[data-goal]");
-    if (goal) { st.goal = goal.dataset.goal; return paint(); }
+    if (goal) { st.goal = goal.dataset.goal; return suggest(); }
+    const av = t("[data-avail]");
+    if (av) {
+      const d = Number(av.dataset.avail);
+      st.available = st.available.includes(d) ? st.available.filter((x) => x !== d) : [...st.available, d].sort();
+      return suggest();
+    }
+    const days = t("[data-days]");
+    if (days && !days.disabled) { st.days = Number(days.dataset.days); st.touched = true; return suggest(); }
     const min = t("[data-minutes]");
-    if (min) { st.minutes = Number(min.dataset.minutes); return paint(); }
+    if (min) { st.minutes = Number(min.dataset.minutes); return suggest(); }
     const focus = t("[data-focus]");
     if (focus) {
       const k = focus.dataset.focus;
@@ -105,4 +143,5 @@ export function openWizard(profile) {
     if (go) return create(go);
   });
   paint();
+  suggest();
 }

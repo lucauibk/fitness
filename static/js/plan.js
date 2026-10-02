@@ -112,7 +112,8 @@ function render() {
   const visible = splits.filter((s) => !isPendingDelete(`splits/${s.id}`));
   const open = detail && visible.some((s) => s.id === detail.id) ? detail : null;
 
-  root.innerHTML = `${blockCard()}<div class="list">${visible.map((s) => `
+  root.innerHTML = `<div class="btn-row"><button type="button" class="btn primary" data-wizard>${icon("spark")} Neuen Plan erstellen</button></div>
+    ${blockCard()}<div class="list">${visible.map((s) => `
       <div class="row-item">
         <button type="button" class="row-main row-btn" data-open-split="${s.id}" aria-expanded="${open?.id === s.id}">
           <span class="row-title">${esc(s.name)}</span>

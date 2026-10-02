@@ -16,9 +16,11 @@ sichtbar, Einträge werden lokal gesammelt und nachgesendet, sobald wieder Netz 
 
 ## Plan-Ersteller (ein Tipp, dann lernt die App)
 
-**Erstellen:** Training → Plan → „Plan erstellen“. Gefragt wird nur nach den Trainingstagen pro Woche (2–6);
-Ziel (Aufbau), Dauer (60 min), Erfahrung (neu), Split und Wochentage sind Voreinstellungen und lassen sich unter
-„Anpassen“ ändern. Der Plan ist sofort aktiv.
+**Erstellen:** Training → Plan → „Neuen Plan erstellen“ (oben, immer sichtbar). Ein Bildschirm, alles vorbelegt:
+Erfahrung, Ziel, **freie Tage** (nicht dasselbe wie Trainingstage), **Einheiten pro Woche** (Empfehlung nach Erfahrung,
+Ziel und Dauer, höchstens so viele wie freie Tage), Dauer. Fokus-Muskeln und Beschwerden sind eingeklappt. Aus den freien
+Tagen wählt die App die mit den gleichmäßigsten Abständen (Mi–So und 3× → Mi · Fr · So), die übrigen bleiben Reserve zum
+Nachholen. Der Plan ist sofort aktiv.
 
 - **Split nach Tagen:** 2 Ganzkörper A/B · 3 Ganzkörper A/B/C · 4 Ober/Unter ×2 · 5 Ober/Unter + Push/Pull/Beine · 6 PPL ×2
   (jeder Muskel ≥ 2× pro Woche). Die Einheiten sind eine Warteschlange: ausgelassene Tage rücken nach, ein trainierter
