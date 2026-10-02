@@ -50,3 +50,31 @@ def test_experience_only_rises_automatically_and_manual_choice_wins(profile_id):
     db.update_row("profiles", profile_id, {"experience": "einsteiger", "experience_auto": None})
     autoregulate.reclassify(profile_id)           # manuell gesetzt -> unveraendert
     assert db.get_row("profiles", profile_id)["experience"] == "einsteiger"
+
+
+def _train(profile_id, lifts, weeks=4, per_week=3):
+    """lifts: {Uebungsname: kg}; je Einheit drei Saetze a 8 Wiederholungen."""
+    start = datetime(2026, 6, 1, 17)
+    with db.connect() as c:
+        for n in range(weeks * per_week):
+            at = (start + timedelta(days=n * 7 // per_week)).isoformat()
+            w = c.execute("INSERT INTO workouts (profile_id, started_at) VALUES (?, ?)", (profile_id, at)).lastrowid
+            for name, kg in lifts.items():
+                for k in range(3):
+                    c.execute("INSERT INTO sets (workout_id, exercise_id, set_no, reps, weight) VALUES (?,?,?,8,?)",
+                              (w, _ex(name)["id"], k + 1, kg))
+
+
+def test_one_strong_machine_lift_does_not_upgrade(profile_id):
+    db.update_row("profiles", profile_id, {"sex": "männlich"})
+    _train(profile_id, {"Beinpresse": 160})
+    assert cold_start.infer_experience(profile_id) == (None, None)
+
+
+def test_three_strong_free_weight_lifts_over_weeks_upgrade(profile_id):
+    db.update_row("profiles", profile_id, {"sex": "männlich"})
+    _train(profile_id, {"Kniebeuge": 80, "Bankdrücken": 60, "Langhantelrudern": 60}, weeks=1, per_week=10)
+    assert cold_start.infer_experience(profile_id) == (None, None)          # zu kurz: alles in einer Woche
+    _train(profile_id, {"Kniebeuge": 80, "Bankdrücken": 60, "Langhantelrudern": 60})
+    level, why = cold_start.infer_experience(profile_id)
+    assert level == "fortgeschritten" and "Kniebeuge" in why

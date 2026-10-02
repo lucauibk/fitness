@@ -81,23 +81,41 @@ def update_estimate(m, sigma, observed, reps, novice=False):
     return m + gain * (observed - m), ((1 - gain) * sigma ** 2) ** 0.5
 
 
+MIN_EXERCISES_FOR_LEVEL = 3
+MIN_WEEKS_FOR_LEVEL = 3
+# Maschinen, Kabel und Multipresse: Gewichte schwanken von Geraet zu Geraet stark (Hebel, Umlenkung) –
+# sie muessen die Schwelle deutlicher ueberschreiten als freie Gewichte
+GUIDED_MARGIN = 1.3
+
+
 def infer_experience(profile_id):
-    """Einstufung aus den Daten (hoechstens nach oben): -> ('fortgeschritten'|'erfahren'|None, Begruendung)."""
+    """Einstufung aus den Daten (hoechstens nach oben): -> ('fortgeschritten'|'erfahren'|None, Begruendung).
+    Verlangt mindestens drei Grunduebungen ueber der Schwelle und drei Wochen Daten – eine einzelne
+    (Maschinen-)Uebung mit grosszuegig geschaetztem Startwert reicht nicht."""
     profile = db.get_row("profiles", profile_id) or {}
-    n = db.one("SELECT COUNT(*) AS n FROM workouts WHERE profile_id=?", (profile_id,))["n"]
-    if n < 10:
+    span = db.one("SELECT COUNT(*) AS n, MIN(COALESCE(started_at, finished_at)) AS first,"
+                  " MAX(COALESCE(started_at, finished_at)) AS last FROM workouts WHERE profile_id=?", (profile_id,))
+    if span["n"] < 10:
+        return None, None
+    try:
+        weeks = (date.fromisoformat(span["last"][:10]) - date.fromisoformat(span["first"][:10])).days / 7
+    except (TypeError, ValueError):
+        return None, None
+    if weeks < MIN_WEEKS_FOR_LEVEL:
         return None, None
     bw = bodyweight_of(profile_id, profile)
-    best_ratio, best_name = 0.0, None
+    ratios = []
     for ex in db.rows("SELECT id, name, pattern, equipment_type FROM exercises WHERE archived=0"
                       " AND pattern IN ('squat','hinge','h_push','v_pull','h_pull','v_push')"):
         hist = progression.sessions(profile_id, ex["id"], limit=4)
         e1 = max((v for v in (progression.best_e1rm(h) for h in hist) if v), default=None)
         base = prior_e1rm(profile, bw, ex["pattern"], ex["equipment_type"])
-        if e1 and base and e1 / base > best_ratio:
-            best_ratio, best_name = e1 / base, ex["name"]
-    if best_ratio >= 2.0:
-        return "erfahren", f"{best_name} liegt weit über dem Einsteiger-Niveau"
-    if best_ratio >= 1.4 and n >= 10:
-        return "fortgeschritten", f"{best_name} liegt klar über dem Einsteiger-Niveau"
+        if e1 and base:
+            margin = GUIDED_MARGIN if ex["equipment_type"] in ("machine", "cable", "smith") else 1.0
+            ratios.append((e1 / base / margin, ex["name"]))
+    ratios.sort(reverse=True)
+    for level, threshold, text in (("erfahren", 2.0, "weit"), ("fortgeschritten", 1.4, "klar")):
+        above = [name for r, name in ratios if r >= threshold]
+        if len(above) >= MIN_EXERCISES_FOR_LEVEL:
+            return level, f"{', '.join(above[:3])} liegen {text} über dem Einsteiger-Niveau"
     return None, None

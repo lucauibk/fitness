@@ -228,37 +228,6 @@ def ready_to_raise(profile_id):
     return out
 
 
-def next_targets(profile_id, limit=8):
-    """Die Zielwerte für den nächsten geplanten Trainingstag – für den Fortschritt-Tab."""
-    split = db.active_split(profile_id)
-    if not split or not split["days"]:
-        return []
-    # Heute kein fester Tag -> der naechste in der Reihe (wie auf "Heute")
-    day = pick_day(split, today()) or rotation_day(profile_id, split)
-    if not day:
-        return []
-    out = []
-    for item in day["exercises"][:limit]:
-        ex = {"id": item["exercise_id"], "muscle_group": item["muscle_group"]}
-        s = suggest(profile_id, ex, item["target_sets"],
-                    item["target_reps_min"], item["target_reps_max"])
-        out.append({"exercise": item["name"], "unit": item["unit"],
-                    "sets": item["target_sets"], **s})
-    return [{"day": day["label"], "items": out}] if out else []
-
-
-def pick_day(split, on_date):
-    """Welcher Split-Teil ist heute dran? Fester Wochentag gewinnt; sonst der Teil,
-    der am längsten nicht trainiert wurde (Rotation)."""
-    days = split["days"]
-    if not days:
-        return None
-    fixed = [d for d in days if on_date.weekday() in (d.get("weekdays") or [])]
-    if fixed:
-        return fixed[0]
-    return None
-
-
 RECOVERY_GROUPS = {"beine", "po", "brust", "ruecken"}   # wie splits.RECOVERY
 
 
@@ -384,7 +353,6 @@ def progress(profile_id):
         "volume": weekly_volume(profile_id),
         "frequency": frequency(profile_id),
         "bodyweight": bodyweight(profile_id),
-        "next": next_targets(profile_id),
         "ready": ready_to_raise(profile_id),
         "groups": GROUP_LABEL,
     }
