@@ -38,8 +38,7 @@ def settings_from(profile, overrides=None):
     for k, v in (overrides or {}).items():
         if v is not None:
             s[k] = v
-    if s.get("minutes") == 0:
-        s["minutes"] = None
+    s["minutes"] = None          # die Dauer wird nicht abgefragt: der Plan richtet sich nach dem Volumen
     s["weekdays"] = db.parse_weekdays(s["weekdays"])
     if s["weekdays"]:
         s["days"] = len(s["weekdays"])

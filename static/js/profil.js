@@ -14,7 +14,6 @@ function summary(p) {
     p.goal ? GOALS[p.goal].label : null,
     p.train_weekdays?.length ? p.train_weekdays.map((d) => WEEKDAYS[d]).join(" · ")
       : p.days_per_week ? `${p.days_per_week} Tage pro Woche` : null,
-    p.session_minutes ? `${p.session_minutes} min` : null,
     p.experience ? EXPERIENCE[p.experience].label : null,
     p.focus?.length ? `Fokus: ${p.focus.map((f) => FOCUS[f]).join(", ")}` : null,
   ].filter(Boolean);

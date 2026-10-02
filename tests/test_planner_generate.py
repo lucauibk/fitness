@@ -82,22 +82,17 @@ def test_variation_changes_isolation_but_not_main_lifts(profile_id):
     assert names(a, False) != names(b, False)
 
 
-def test_time_budget_is_respected(profile_id):
-    p = _profile(profile_id, train_weekdays=DAYS[3], days_per_week=3, session_minutes=45)
-    plan = generate.generate(p, generate.split_options(p)[0]["key"])
-    per_session = vp.capacity(3, 45, "aufbau")[1]
-    for d in plan["days"]:
-        assert sum(e["peak_sets"] for e in d["exercises"]) <= per_session + 2
-
-
-def test_every_block_week_fits_the_time_budget(profile_id):
-    for minutes in (45, 60, 90):
-        p = _profile(profile_id, train_weekdays=DAYS[3], days_per_week=3, session_minutes=minutes)
-        plan = generate.generate(p, generate.split_options(p)[0]["key"])
-        per_session = vp.capacity(3, minutes, "aufbau")[1]
-        for w in range(plan["block"]["weeks"]):
-            for d in plan["days"]:
-                assert sum(e["week_sets"][w] for e in d["exercises"]) <= per_session + 2, (minutes, w, d["label"])
+def test_duration_follows_from_volume_and_profile_minutes_are_ignored(profile_id):
+    """Die Dauer wird nicht mehr abgefragt: alte Minuten im Profil aendern nichts, der Plan nennt seine Dauer."""
+    p45 = _profile(profile_id, train_weekdays=DAYS[3], days_per_week=3, session_minutes=45)
+    a = generate.generate(p45, generate.split_options(p45)[0]["key"])
+    p90 = _profile(profile_id, train_weekdays=DAYS[3], days_per_week=3, session_minutes=90)
+    b = generate.generate(p90, generate.split_options(p90)[0]["key"])
+    assert a["days"] == b["days"]
+    assert any(x.startswith("Dauer: etwa") for x in a["basis"]) and a["minutes"] >= 30
+    for w in range(a["block"]["weeks"]):
+        for d in a["days"]:
+            assert sum(e["week_sets"][w] for e in d["exercises"]) <= vp.MAX_SETS_PER_SESSION
 
 
 def test_recommended_plans_pass_the_validator_for_normal_budgets(profile_id):

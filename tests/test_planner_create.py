@@ -29,18 +29,17 @@ def test_creating_again_replaces_active_plan_but_keeps_the_old_one(profile_id):
     assert blocks.active(profile_id)["split_id"] == second
 
 
-@pytest.mark.parametrize("minutes", [45, 60, 90])
-def test_saved_plan_never_exceeds_the_session_time_budget_in_any_block_week(profile_id, minutes):
+def test_saved_plan_stays_within_the_session_cap_in_any_block_week(profile_id):
+    """Ohne Zeitfrage richtet sich der Plan nach dem Volumen – eine Einheit bleibt trotzdem unter der Obergrenze."""
     from datetime import timedelta
     from app.planner import volume_plan as vp
-    pr.create_plan(pr.CreateIn(days=3, minutes=minutes), profile_id)
+    pr.create_plan(pr.CreateIn(days=3), profile_id)
     split, block = db.active_split(profile_id), blocks.active(profile_id)
-    per_session = vp.capacity(3, minutes, "aufbau")[1]
     start = blocks.monday(__import__("datetime").date.fromisoformat(block["start_date"]))
     for w in range(block["weeks"]):
         for d in split["days"]:
             total = sum(blocks.sets_for(block, e, start + timedelta(weeks=w)) for e in d["exercises"])
-            assert total <= per_session + 2, (minutes, w, d["label"], total)
+            assert total <= vp.MAX_SETS_PER_SESSION, (w, d["label"], total)
 
 
 def _weekdays(profile_id):
@@ -63,16 +62,16 @@ def test_sessions_never_exceed_available_days(profile_id):
     assert _weekdays(profile_id) == [5, 6]
 
 
-def test_suggestion_recommends_by_level_and_time_and_caps_at_available(profile_id):
+def test_suggestion_recommends_by_level_and_caps_at_available(profile_id):
     from app.planner import generate
-    assert generate.recommended_days("einsteiger", "aufbau", 60, 5) == 3
-    assert generate.recommended_days("fortgeschritten", "aufbau", 60, 7) == 4
-    assert generate.recommended_days("fortgeschritten", "aufbau", 45, 7) == 5
-    assert generate.recommended_days("erfahren", "aufbau", 90, 3) == 3
-    res = pr.suggest(available="2,3,4,5,6", minutes=60, goal="aufbau", experience="einsteiger", days=None, focus="",
+    assert generate.recommended_days("einsteiger", "aufbau", 5) == 3
+    assert generate.recommended_days("fortgeschritten", "aufbau", 7) == 4
+    assert generate.recommended_days("fitness", "fitness", 7) == 3
+    assert generate.recommended_days("erfahren", "aufbau", 3) == 3
+    res = pr.suggest(available="2,3,4,5,6", goal="aufbau", experience="einsteiger", days=None, focus="",
                      profile_id=profile_id)
     assert res["recommended"] == 3 and res["weekdays"] == [2, 4, 6] and res["max"] == 5
-    assert pr.suggest(available="", minutes=60, goal=None, experience="einsteiger", days=4, focus="",
+    assert pr.suggest(available="", goal=None, experience="einsteiger", days=4, focus="",
                       profile_id=profile_id)["weekdays"] == [0, 1, 3, 5]
 
 
@@ -85,8 +84,8 @@ def test_pick_days_prefers_even_spacing_and_avoids_runs():
 
 
 def test_suggest_offers_splits_with_a_recommendation_that_depends_on_experience(profile_id):
-    novice = pr.suggest(available="", minutes=60, goal="aufbau", experience="einsteiger", days=3, focus="", profile_id=profile_id)
-    adv = pr.suggest(available="", minutes=60, goal="aufbau", experience="fortgeschritten", days=3, focus="", profile_id=profile_id)
+    novice = pr.suggest(available="", goal="aufbau", experience="einsteiger", days=3, focus="", profile_id=profile_id)
+    adv = pr.suggest(available="", goal="aufbau", experience="fortgeschritten", days=3, focus="", profile_id=profile_id)
     rec = lambda r: next(o["key"] for o in r["splits"] if o["recommended"])      # noqa: E731
     assert rec(novice) == "gk3" and rec(adv) != "gk3"
     assert len(novice["splits"]) >= 3

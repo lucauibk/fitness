@@ -63,7 +63,6 @@ class CreateIn(BaseModel):
     available: list[int] = Field(default_factory=list, max_length=7)  # freie Wochentage (0 = Montag); leer = jeder Tag
     goal: Optional[Goal] = None
     experience: Optional[Experience] = None
-    minutes: Optional[int] = Field(None, ge=0, le=120)                # 0 = egal
     focus: Optional[list[FocusKey]] = Field(None, max_length=3)
     limitations: Optional[str] = Field(None, max_length=500)
     split: Optional[str] = Field(None, max_length=20)                 # gewaehlte Aufteilung; sonst die empfohlene
@@ -76,27 +75,19 @@ class CreateIn(BaseModel):
             raise ValueError("Wochentage müssen zwischen 0 (Montag) und 6 (Sonntag) liegen.")
         return sorted(set(v))
 
-    @field_validator("minutes")
-    @classmethod
-    def _minutes(cls, v):
-        if v is not None and 0 < v < 30:
-            raise ValueError("Eine Einheit sollte mindestens 30 Minuten haben (oder „egal“).")
-        return v
 
-
-def _options(profile, sessions, weekdays, goal, experience, minutes, focus=None):
+def _options(profile, sessions, weekdays, goal, experience, focus=None):
     return generate.split_options(profile, {"days": sessions, "weekdays": weekdays, "goal": goal,
-                                            "experience": experience, "minutes": minutes, "focus": focus})
+                                            "experience": experience, "focus": focus})
 
 
 def _effective(profile, body):
     """Profil mit den Angaben aus dem Assistenten – noch nichts gespeichert."""
     focus = body.focus if body.focus is not None else profile.get("focus") or []
-    minutes = body.minutes if body.minutes is not None else (profile.get("session_minutes") or 60)
     limitations = body.limitations if body.limitations is not None else profile.get("limitations")
     return {**profile, "goal": body.goal or profile.get("goal") or "aufbau",
             "experience": body.experience or profile.get("experience") or "einsteiger",
-            "session_minutes": minutes or None, "focus": list(focus), "limitations": (limitations or "").strip() or None}
+            "focus": list(focus), "limitations": (limitations or "").strip() or None}
 
 
 @router.post("/create")
@@ -112,10 +103,9 @@ def create_plan(body: CreateIn, profile_id: int = Depends(current_profile)):
             raise HTTPException(400, "Bitte mindestens zwei freie Tage wählen – oder keinen, dann ist jeder Tag möglich.")
         base = db.profile_out(db.get_row("profiles", profile_id))
         profile = _effective(base, body)
-        minutes = profile["session_minutes"]
         sessions = max(2, min(body.days, len(body.available) or 7))   # nie mehr Einheiten als freie Tage
         weekdays = generate.pick_days(body.available, sessions)
-        options = _options(profile, sessions, weekdays, profile["goal"], profile["experience"], minutes, profile["focus"])
+        options = _options(profile, sessions, weekdays, profile["goal"], profile["experience"], profile["focus"])
         keys = [o["key"] for o in options]
         if body.split and body.split not in keys:
             raise HTTPException(400, "Diese Aufteilung passt nicht zu den gewählten Einheiten pro Woche.")
@@ -124,13 +114,13 @@ def create_plan(body: CreateIn, profile_id: int = Depends(current_profile)):
             raise HTTPException(400, "Für diese Tageszahl gibt es keinen passenden Split.")
         variation = db.one("SELECT COUNT(*) AS n FROM splits WHERE profile_id=?", (profile_id,))["n"]
         try:
-            plan = generate.generate(profile, key, {"days": sessions, "weekdays": weekdays, "minutes": minutes}, variation=variation)
+            plan = generate.generate(profile, key, {"days": sessions, "weekdays": weekdays}, variation=variation)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         if any(b - a == 1 for a, b in zip(weekdays, weekdays[1:])) and key.startswith("gk"):
             plan["basis"].append("Einige Trainingstage liegen direkt hintereinander – bei Ganzkörper-Einheiten "
                                  "ist das nicht ideal. Mit einem freien Tag dazwischen läuft es besser.")
-        fields = {"goal": profile["goal"], "session_minutes": profile["session_minutes"],
+        fields = {"goal": profile["goal"],
                   "focus": ",".join(profile["focus"]) or None, "limitations": profile["limitations"],
                   "days_per_week": sessions, "train_weekdays": db.format_weekdays(weekdays),
                   "available_weekdays": db.format_weekdays(body.available)}
@@ -159,7 +149,7 @@ def pain(body: PainIn, profile_id: int = Depends(current_profile)):
 
 
 @router.get("/suggest")
-def suggest(available: str = Query("", max_length=20), minutes: Optional[int] = Query(None, ge=0, le=120),
+def suggest(available: str = Query("", max_length=20),
             goal: Optional[Goal] = None, experience: Optional[Experience] = None,
             days: Optional[int] = Query(None, ge=2, le=6), focus: Optional[str] = Query(None, max_length=80),
             profile_id: int = Depends(current_profile)):
@@ -168,15 +158,12 @@ def suggest(available: str = Query("", max_length=20), minutes: Optional[int] = 
     base = db.profile_out(db.get_row("profiles", profile_id))
     free = db.parse_weekdays(available)
     body = CreateIn(days=days or 3, available=free if len(free) >= 2 else [], goal=goal, experience=experience,
-                    minutes=minutes if minutes and minutes >= 30 else (60 if minutes is None else 0),
                     focus=db.parse_focus(focus) if focus is not None else None)
     profile = _effective(base, body)
-    n = generate.recommended_days(profile["experience"], profile["goal"], profile["session_minutes"] or None,
-                                  len(body.available) or 7)
+    n = generate.recommended_days(profile["experience"], profile["goal"], len(body.available) or 7)
     chosen = max(2, min(days or n, len(body.available) or 7))
     weekdays = generate.pick_days(body.available, chosen)
-    options = _options(profile, chosen, weekdays, profile["goal"], profile["experience"],
-                       profile["session_minutes"], profile["focus"])
+    options = _options(profile, chosen, weekdays, profile["goal"], profile["experience"], profile["focus"])
     return {"recommended": n, "max": len(body.available) or 7, "weekdays": weekdays,
             "splits": [{"key": o["key"], "name": o["name"], "text": o["text"], "recommended": o["recommended"],
                         "pro": o.get("pro", [])[:2], "contra": o.get("contra", [])[:1]} for o in options]}

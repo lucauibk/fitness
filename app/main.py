@@ -678,7 +678,7 @@ def _check(plan, profile_id=None):
     profile = db.get_row("profiles", profile_id) if profile_id else None
     injuries = injuries_from((profile or {}).get("limitations"))
     profile = profile or {}
-    return validate.analyze(plan, injuries, profile.get("session_minutes"),
+    return validate.analyze(plan, injuries, None,
                             plan.get("goal") or profile.get("goal") or "aufbau", bool(plan.get("rotate")),
                             plan.get("experience") or profile.get("experience") or "fortgeschritten",
                             plan.get("focus") or db.parse_focus(profile.get("focus")))

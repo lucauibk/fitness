@@ -31,14 +31,12 @@ def test_validation_returns_proper_errors(profile_id):
     """Die App meldet Validierungsfehler einheitlich als 400 (siehe RequestValidationError-Handler)."""
     assert post(profile_id, {"days": 3, "goal": "bogus"}).status_code == 400
     assert post(profile_id, {"days": 3, "experience": "bogus"}).status_code == 400
-    assert post(profile_id, {"days": 3, "minutes": 10}).status_code == 400
     assert post(profile_id, {"days": 7}).status_code == 400
     assert post(profile_id, {"days": 3, "available": [9]}).status_code == 400
     assert post(profile_id, {"days": 3, "focus": ["brust", "po", "arme", "rumpf"]}).status_code == 400
     assert post(profile_id, {"days": 3, "available": [3]}).status_code == 400            # ein freier Tag reicht nicht
     assert post(profile_id, {"days": 3, "split": "ppl6"}).status_code == 400             # passt nicht zu 3 Einheiten
     assert get(profile_id, days=9).status_code == 400
-    assert get(profile_id, minutes=-10).status_code == 400
     assert get(profile_id, available="0,1,2,3,4,5,6", days=3).status_code == 200         # sieben freie Tage: kein 500
     assert client.post("/api/planner/create", json={"days": 3}).status_code == 400       # kein Profil
 
@@ -57,9 +55,9 @@ def test_what_is_shown_as_recommended_is_what_gets_created(profile_id, days):
     """Fuer jede Kombination: der vorgewaehlte (✓) Split ist der erzeugte – auch ohne Tipp auf einen Chip."""
     for exp, goal, focus in itertools.product(("einsteiger", "fortgeschritten", "erfahren"),
                                               ("aufbau", "kraft"), ("", "po", "brust")):
-        sug = get(profile_id, days=days, experience=exp, goal=goal, focus=focus, minutes=60).json()
+        sug = get(profile_id, days=days, experience=exp, goal=goal, focus=focus).json()
         shown = next(o["key"] for o in sug["splits"] if o["recommended"])
-        body = {"days": days, "experience": exp, "goal": goal, "minutes": 60, "focus": [focus] if focus else []}
+        body = {"days": days, "experience": exp, "goal": goal, "focus": [focus] if focus else []}
         assert post(profile_id, body).status_code == 200
         assert labels(profile_id) == key_labels(shown), (days, exp, goal, focus, shown)
 
@@ -87,9 +85,8 @@ def test_same_client_id_creates_only_one_plan_even_in_parallel(profile_id):
 
 def test_choices_are_saved_to_the_profile_in_one_step(profile_id):
     res = post(profile_id, {"days": 3, "available": [2, 3, 4, 5, 6], "goal": "kraft", "experience": "fortgeschritten",
-                            "minutes": 75, "focus": ["po"], "limitations": "Knie"})
+                            "focus": ["po"], "limitations": "Knie"})
     assert res.status_code == 200
     p = db.profile_out(db.get_row("profiles", profile_id))
-    assert (p["goal"], p["experience"], p["session_minutes"], p["focus"], p["limitations"]) == \
-        ("kraft", "fortgeschritten", 75, ["po"], "Knie")
+    assert (p["goal"], p["experience"], p["focus"], p["limitations"]) == ("kraft", "fortgeschritten", ["po"], "Knie")
     assert p["available_weekdays"] == [2, 3, 4, 5, 6] and p["train_weekdays"] == [2, 4, 6]

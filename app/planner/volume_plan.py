@@ -45,6 +45,11 @@ def weekly_volume(days, item_sets, cycle=1.0):
     return {g: round(v / (cycle or 1.0)) for g, v in out.items()}
 
 
+def session_minutes(sets, goal="aufbau"):
+    """Geschaetzte Dauer einer Einheit (Aufwaermen + Arbeitssaetze samt Pause), auf 5 Minuten gerundet."""
+    return int(5 * round((WARMUP_MINUTES + sets * MINUTES_PER_SET.get(goal, 3.2)) / 5))
+
+
 def rir_by_week(weeks):
     ramp = RIR_RAMP.get(weeks) or [3] + [2] * (weeks - 3) + [1]
     return ramp[: weeks - 1] + [DELOAD_RIR]

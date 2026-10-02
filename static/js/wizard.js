@@ -1,5 +1,6 @@
 /** Plan erstellen: ein Bildschirm, alles vorbelegt, ein Knopf. Gefragt wird nach Erfahrung, Ziel, freien
- *  Tagen (die sind etwas anderes als die Einheiten pro Woche), gewünschten Einheiten und Dauer – die
+ *  Tagen (die sind etwas anderes als die Einheiten pro Woche) und gewünschten Einheiten – die Dauer ergibt
+ *  sich aus dem Volumen, die
  *  Empfehlung für die Einheiten kommt vom Server. Fokus und Beschwerden sind eingeklappt. */
 import { $, api, closeSheet, esc, icon, openSheet, sheetClosed, toast } from "./util.js";
 
@@ -19,7 +20,6 @@ export const FOCUS = {
   beine: "Beine", po: "Po", rumpf: "Bauch & Rumpf",
 };
 const INJURIES = ["Knie", "Rücken", "Schulter", "Ellbogen", "Handgelenk", "Hüfte"];
-const MINUTES = [45, 60, 75, 90];
 const MAX_FOCUS = 3;
 
 /** Den alten Mehrschritt-Entwurf gibt es nicht mehr. */
@@ -47,7 +47,6 @@ export function openWizard(profile) {
     touched: false,            // Einheiten pro Woche von Hand gewählt? Dann ändert die Empfehlung sie nicht mehr
     experience: profile.experience || "einsteiger",
     goal: profile.goal || "aufbau",
-    minutes: profile.session_minutes ?? 60,
     focus: [...(profile.focus || [])],
     limits: (profile.limitations || "").split(/[,;\n]/).map((x) => x.trim()).filter(Boolean),
     split: null,               // gewählte Aufteilung; null = die empfohlene
@@ -67,7 +66,7 @@ export function openWizard(profile) {
 
   async function suggest() {
     const my = ++st.seq;                       // nur die neueste Antwort zählt
-    const q = new URLSearchParams({ available: st.available.join(","), minutes: st.minutes ?? 0,
+    const q = new URLSearchParams({ available: st.available.join(","),
       goal: st.goal, experience: st.experience, focus: st.focus.join(",") });
     if (st.touched) q.set("days", st.days);
     try {
@@ -112,8 +111,6 @@ export function openWizard(profile) {
       <p class="hint">${st.sug ? `Empfohlen: ${st.sug.recommended}× pro Woche. ` : ""}${picked ? `Trainingstage: ${picked}.` : ""}
         ${free > st.days ? "Die übrigen freien Tage bleiben als Reserve zum Nachholen." : ""}</p>
       ${splitChoice()}
-      <h3 class="form-section">Dauer pro Einheit</h3>
-      <div class="chips">${[...MINUTES, 0].map((m) => chip("data-minutes", m, m ? `${m} min` : "egal", st.minutes === m)).join("")}</div>
       <details class="field-more more" ${st.moreOpen ? "open" : ""}><summary>Mehr Aufmerksamkeit für Muskeln, Beschwerden</summary>
         <h3 class="form-section">Mehr Aufmerksamkeit für</h3>
         <div class="chips">${Object.entries(FOCUS).map(([k, l]) => chip("data-focus", k, l, st.focus.includes(k))).join("")}</div>
@@ -136,7 +133,7 @@ export function openWizard(profile) {
       const shown = currentSplit();
       const res = await api("planner/create", { method: "POST", body: {
         days: st.days, available: st.available, goal: st.goal, experience: st.experience,
-        minutes: st.minutes, focus: st.focus, limitations: st.limits.join(", "),
+        focus: st.focus, limitations: st.limits.join(", "),
         split: shown?.key ?? null, client_id: st.clientId } });
       window.dispatchEvent(new CustomEvent("plan-created", { detail: { splitId: res.split.id } }));
       window.dispatchEvent(new CustomEvent("wizard-changed"));
@@ -173,8 +170,6 @@ export function openWizard(profile) {
     if (days && !days.disabled) { st.days = Number(days.dataset.days); st.touched = true; st.split = null; paint(); return suggest(); }
     const split = t("[data-split]");
     if (split) { st.split = split.dataset.split; return paint(); }
-    const min = t("[data-minutes]");
-    if (min) { st.minutes = Number(min.dataset.minutes); paint(); return suggest(); }
     const focus = t("[data-focus]");
     if (focus) {
       const k = focus.dataset.focus;

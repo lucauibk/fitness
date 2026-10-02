@@ -29,15 +29,13 @@ DEFAULT_SPLIT = {2: "gk2", 3: "gk3", 4: "okuk4", 5: "pplokuk5", 6: "ppl6"}
 MAX_SESSION_SETS_PER_MUSCLE = 8
 
 
-def recommended_days(experience, goal, minutes, available_count=7):
+def recommended_days(experience, goal, available_count=7):
     """Empfohlene Einheiten pro Woche (ACSM 2009, Schoenfeld 2016/2019, Pelland 2025): Einsteiger 3,
-    Fortgeschrittene Aufbau 4, Erfahrene 4; Fitness 3 hoechstens; kurze Einheiten einen Tag mehr,
-    lange einen weniger. Nie mehr als die freien Tage, Einsteiger hoechstens 5."""
+    Fortgeschrittene Aufbau 4, Erfahrene 4; Fitness 3 hoechstens. Nie mehr als die freien Tage,
+    Einsteiger hoechstens 5."""
     base = {"einsteiger": 3, "fortgeschritten": 4 if goal == "aufbau" else 3, "erfahren": 4}.get(experience, 3)
     if goal == "fitness":
         base = min(base, 3)
-    if minutes:
-        base += 1 if minutes <= 45 else -1 if minutes >= 90 else 0
     cap = 5 if experience in (None, "einsteiger") else 6
     return max(2, min(base, cap, max(2, available_count)))
 
@@ -80,7 +78,7 @@ def exercise_count(s):
 def split_options(profile, overrides=None):
     s = settings_from(profile, overrides)
     return splits.rank(s["days"], s["weekdays"], {
-        "goal": s["goal"], "experience": s["experience"], "minutes": s["minutes"] or 90,
+        "goal": s["goal"], "experience": s["experience"], "minutes": 60,
         "focus": s["focus"], "age": s["age"]}, exercise_count(s))
 
 
@@ -282,8 +280,6 @@ def generate(profile, option_key, overrides=None, variation=0):
         basis.append("Spezialisierung: " + ", ".join(LABEL[g] for g in sorted(focus_groups))
                      + " bekommen deutlich mehr Sätze, alle anderen laufen auf Erhaltung.")
     basis.append("Pausen: etwa 2,5–3 Minuten nach Grundübungen, 1–1,5 Minuten nach Isolationsübungen.")
-    basis.append(f"{s['minutes']} Minuten pro Einheit: rund {per_session} Arbeitssätze." if s.get("minutes")
-                 else f"Ohne Zeitgrenze: bis zu {per_session} Arbeitssätze pro Einheit.")
     if age and age >= 50:
         basis.append(f"Mit {age} Jahren: etwa 15 % weniger Volumen und keine ganz schweren Wiederholungsbereiche.")
     elif age and age >= 40:
@@ -339,6 +335,12 @@ def generate(profile, option_key, overrides=None, variation=0):
     _fill_gaps(days, by_pattern, peak, per_session, goal, age, focus_groups, weeks_t, used)
     _balance_push_pull(days, by_pattern, per_session, goal, age, focus_groups, weeks_t, peak, used)
 
+    durations = [vp.session_minutes(sum(e["week_sets"][w] for e in d["exercises"]), goal)
+                 for d in days for w in range(n_weeks - 1)]
+    lo, hi = min(durations), max(durations)
+    basis.append(f"Dauer: etwa {lo}–{hi} Minuten pro Einheit inklusive Aufwärmen – sie wächst mit den Sätzen "
+                 "über den Block." if hi > lo else f"Dauer: etwa {hi} Minuten pro Einheit inklusive Aufwärmen.")
+
     planned_by_week = [vp.weekly_volume(days, lambda e, w=w: (e["pattern"], e["week_sets"][w]), cycle)
                        for w in range(n_weeks)]
     planned_peak = {g: max(wk[g] for wk in planned_by_week[: n_weeks - 1]) for g in GROUPS}
@@ -356,7 +358,7 @@ def generate(profile, option_key, overrides=None, variation=0):
     return {
         "option": option_key,
         "name": f"{GOALS[goal]} · {opt['name']} · {MONTHS[today.month - 1]} {today.year}",
-        "goal": goal, "experience": exp, "minutes": s.get("minutes"),
+        "goal": goal, "experience": exp, "minutes": hi,
         "reason": opt["text"], "reasons": info.get("reasons", []), "frequency": info.get("frequency", {}),
         "focus": focus, "rotate": bool(opt.get("rotate")), "weekdays_chosen": s.get("weekdays") or [],
         "volume": {"target": peak, "planned": planned_peak, "labels": LABEL},
