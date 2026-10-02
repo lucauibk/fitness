@@ -1,3 +1,5 @@
+from datetime import date
+
 from app.planner import progression as pg
 
 
@@ -6,6 +8,7 @@ def sess(*sets, date="2026-09-01"):
 
 
 def rec(history, **kw):
+    kw.setdefault("today", date(2026, 9, 3))
     return pg.recommend(history, kw.pop("lo", 8), kw.pop("hi", 12), kw.pop("target_sets", 3),
                         kw.pop("equipment", "machine"), kw.pop("pattern", "h_push"), **kw)
 
@@ -78,3 +81,12 @@ def test_novice_ignores_rpe_and_plateaus_after_two_sessions():
     stalled = [sess((9, 50), (8, 50), (8, 50)), sess((9, 50), (8, 50), (8, 50))]
     assert rec(stalled, experience="einsteiger")["status"] == "plateau"
     assert rec(stalled, experience="fortgeschritten")["status"] != "plateau"
+
+
+def test_layoff_resumes_lighter():
+    h = [sess((10, 100), (10, 100), (10, 100), date="2026-09-01")]
+    short = rec(h, today=date(2026, 9, 22))      # 21 Tage
+    long = rec(h, today=date(2026, 10, 15))      # 44 Tage
+    assert (short["status"], short["weight"]) == ("return", 95.0)          # 93 % von 100 kg, auf 5 kg gerundet
+    assert (long["status"], long["weight"]) == ("return", 85.0)            # 87 %
+    assert rec(h, today=date(2026, 9, 8))["status"] != "return"

@@ -281,13 +281,15 @@ def schedule_day(profile_id, split, on_date):
     monday = on_date - timedelta(days=on_date.weekday())
     yesterday = on_date - timedelta(days=1)
     done, yesterday_ids = {}, set()
-    for r in db.rows("SELECT split_day_id, COALESCE(started_at, finished_at) AS at FROM workouts"
-                     " WHERE profile_id=? AND split_day_id IS NOT NULL ORDER BY at DESC LIMIT 60",
-                     (profile_id,)):
+    for r in db.rows("SELECT w.split_day_id, COALESCE(w.started_at, w.finished_at) AS at,"
+                     " (SELECT COUNT(*) FROM sets s WHERE s.workout_id = w.id AND s.warmup=0) AS n_sets"
+                     " FROM workouts w WHERE w.profile_id=? AND w.split_day_id IS NOT NULL"
+                     " ORDER BY at DESC LIMIT 60", (profile_id,)):
         d = _local_date(r["at"])
         if d and monday <= d <= on_date:
             done[r["split_day_id"]] = done.get(r["split_day_id"], 0) + 1
-            if d == yesterday:
+            # Erholungs-Sperre: gestern immer, vorgestern nach einer langen Einheit (>= 15 Saetze) – ~48 h
+            if d == yesterday or (d == on_date - timedelta(days=2) and (r["n_sets"] or 0) >= 15):
                 yesterday_ids.add(r["split_day_id"])
     remaining = []
     for wd, d in slots:

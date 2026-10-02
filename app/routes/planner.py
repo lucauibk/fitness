@@ -72,3 +72,15 @@ def create_plan(body: CreateIn, profile_id: int = Depends(current_profile)):
     db.update_row("profiles", profile_id, {"days_per_week": body.days})
     split = store.save_plan(profile_id, plan, activate=True)
     return {"split": split, "plan": {"name": plan["name"], "basis": plan["basis"]}}
+
+
+class PainIn(BaseModel):
+    area: str
+
+
+@router.post("/pain")
+def pain(body: PainIn, profile_id: int = Depends(current_profile)):
+    try:
+        return autoregulate.report_pain(profile_id, body.area)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e

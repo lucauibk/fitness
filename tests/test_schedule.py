@@ -56,3 +56,17 @@ def test_makeup_day_waits_when_yesterdays_muscles_are_not_recovered(profile_id):
     # Dienstag: UK A steht noch aus, aber die Beine sind von gestern müde -> kein Nachholen
     day, fixed, note = stats.schedule_day(profile_id, split, MONDAY + timedelta(days=1))
     assert note == "erholung" and not fixed
+
+
+def test_heavy_day_before_yesterday_still_locks_the_same_muscles(profile_id):
+    split, ids = _split(profile_id, [("UK A", 0, ["beine"]), ("UK B", 1, ["beine"]), ("OK", 3, ["brust"])])
+    _trained(profile_id, ids["UK B"], MONDAY)
+    ex = db.one("SELECT id FROM exercises WHERE muscle_group='beine' LIMIT 1")
+    w = db.one("SELECT id FROM workouts WHERE profile_id=? AND split_day_id=?", (profile_id, ids["UK B"]))
+    with db.connect() as c:
+        for n in range(16):
+            c.execute("INSERT INTO sets (workout_id, exercise_id, set_no, reps, weight, warmup) VALUES (?,?,?,?,?,0)",
+                      (w["id"], ex["id"], n + 1, 10, 50))
+    day, fixed, note = stats.schedule_day(profile_id, split, MONDAY + timedelta(days=2))
+    assert note == "erholung"                       # lange Einheit: 48 h Sperre
+

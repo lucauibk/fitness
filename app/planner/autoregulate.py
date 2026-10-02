@@ -55,8 +55,9 @@ def planned_sets(block, split, week):
     return out
 
 
-def _bump(block, params, week, split, group, why):
-    """+1 Satz bei den Uebungen der Gruppe mit der besten SFR (hoechstens 2 Uebungen)."""
+def _bump(block, params, week, split, group, why, budget=None, planned=None):
+    """+1 Satz bei den Uebungen der Gruppe mit der besten SFR (hoechstens 2 Uebungen).
+    budget: [Rest] – Nachholen insgesamt hoechstens +20 % der Wochensaetze; nie ueber MRV."""
     rows = [e for e in _split_rows(split) if PATTERN_GROUP.get(e.get("pattern")) == group]
     day = date.fromisoformat(block["start_date"]) + timedelta(weeks=week - 1)
     rows = [e for e in rows if blocks.sets_for(block, e, day) < blocks.MAX_EXERCISE_SETS]
@@ -64,6 +65,14 @@ def _bump(block, params, week, split, group, why):
     adj = params.setdefault("adjust", {}).setdefault(str(week), {})
     done = 0
     for e in rows[:MAX_ADJUST_PER_GROUP]:
+        if budget is not None and budget[0] <= 0:
+            break
+        if planned is not None and planned.get(group, 0) + 1 > landmark(group, "mrv"):
+            break
+        if budget is not None:
+            budget[0] -= 1
+        if planned is not None:
+            planned[group] = planned.get(group, 0) + 1
         adj[str(e["id"])] = adj.get(str(e["id"]), 0) + 1
         explain.log(block["profile_id"], "sets_up",
                     f"{e['name']}: +1 Satz diese Woche – {why}", e["exercise_id"], split["id"])
@@ -162,18 +171,78 @@ def review(profile_id, on_date=None):
         return {"block": blocks.state(block, on_date), "events": explain.recent(profile_id, 10)}
 
     if not st["deload"] and not was_deload:
+        this_week = planned_sets(block, split, week)
+        budget = [max(1, round(0.2 * sum(this_week.values())))]      # Nachholen: hoechstens +20 %
         for g in GROUPS:
             missed = plan[g] - actual[g]
             if plan[g] >= 3 and missed >= MISSED_MIN:
-                if _bump(block, params, week, split, g, f"letzte Woche fehlten {missed} Sätze {LABEL[g]}"):
+                if _bump(block, params, week, split, g, f"letzte Woche fehlten {missed} Sätze {LABEL[g]}",
+                         budget, this_week):
                     continue
             elif len(rpes[g]) >= EASY_MIN_SETS and sum(rpes[g]) / len(rpes[g]) <= EASY_RPE \
                     and plan[g] < landmark(g, "mav"):
                 _bump(block, params, week, split, g, f"{LABEL[g]} war letzte Woche überall leicht (⌀ RPE "
-                      f"{sum(rpes[g]) / len(rpes[g]):.1f})")
+                      f"{sum(rpes[g]) / len(rpes[g]):.1f})", budget, this_week)
+        swap_plateaus(profile_id, split)
     params["reviewed"] = week
     blocks._save_params(block["id"], params)
     return {"block": st, "events": explain.recent(profile_id, 10)}
+
+
+def _swap_exercise(profile_id, split, item, injuries, why):
+    """Uebung im Plan durch die beste Alternative desselben Musters ersetzen. -> neue Uebung | None"""
+    in_plan = {e["exercise_id"] for e in _split_rows(split)}
+    alts = generate.alternatives(item["pattern"], in_plan, injuries)
+    if not alts:
+        return None
+    new = alts[0]
+    db.update_row("split_exercises", item["id"], {"exercise_id": new["id"]})
+    explain.log(profile_id, "swap", f"{item['name']} → {new['name']}: {why}", new["id"], split["id"])
+    return new
+
+
+def swap_plateaus(profile_id, split, today=None):
+    """Zweiter Stillstand an derselben Uebung (nach dem 10-%-Reset) -> Variante tauschen. Hoechstens
+    ein struktureller Eingriff pro Woche."""
+    profile = db.get_row("profiles", profile_id) or {}
+    injuries = generate.settings_from(profile)["injuries"]
+    for item in _split_rows(split):
+        hist = progression.sessions(profile_id, item["exercise_id"])
+        if not progression.is_plateau(hist):
+            continue
+        earlier = db.one("SELECT COUNT(*) AS n FROM plan_events WHERE profile_id=? AND exercise_id=? AND kind='plateau'"
+                         " AND date >= date('now','-56 day')", (profile_id, item["exercise_id"]))["n"]
+        if earlier and _swap_exercise(profile_id, split, item, injuries,
+                                      "weiter Stillstand nach dem Reset – neue Variante, gleicher Muskel"):
+            return True
+    return False
+
+
+def report_pain(profile_id, area):
+    """Schmerz melden: Bereich ins Profil, belastende Uebungen im Plan ersetzen, nicht mehr automatisch steigern."""
+    from .muscles import INJURY_AREAS
+    if area not in INJURY_AREAS:
+        raise ValueError("Unbekannter Körperbereich.")
+    profile = db.get_row("profiles", profile_id) or {}
+    label = INJURY_AREAS[area]
+    current = [x.strip() for x in (profile.get("limitations") or "").replace(";", ",").split(",") if x.strip()]
+    if label.lower() not in [x.lower() for x in current]:
+        current.append(label)
+    db.update_row("profiles", profile_id, {"limitations": ", ".join(current)})
+    split = db.active_split(profile_id)
+    swapped = []
+    if split:
+        injuries = generate.settings_from(db.get_row("profiles", profile_id))["injuries"]
+        for item in _split_rows(split):
+            ex = db.one("SELECT contraindications FROM exercises WHERE id=?", (item["exercise_id"],)) or {}
+            if set((ex.get("contraindications") or "").split(",")) & injuries:
+                new = _swap_exercise(profile_id, db.active_split(profile_id), item, injuries,
+                                     f"belastet {label} – ersetzt")
+                if new:
+                    swapped.append({"from": item["name"], "to": new["name"]})
+    explain.log(profile_id, "info", f"Schmerz bei {label} gemeldet: belastende Übungen ersetzt, "
+                "kein automatisches Steigern dort.", None, split["id"] if split else None)
+    return {"limitations": ", ".join(current), "swapped": swapped}
 
 
 def rollover(profile_id, block, split, on_date=None):

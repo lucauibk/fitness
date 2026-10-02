@@ -125,3 +125,41 @@ def test_fatigue_signals_trigger_deload_at_block_end(profile_id):
             _log(profile_id, day["id"], ids[name][1], MONDAY + timedelta(weeks=i, days=1), rpe=rpe)
     autoregulate.review(profile_id, MONDAY + timedelta(weeks=block["weeks"] - 1))
     assert blocks.active(profile_id)["weeks"] <= block["weeks"]
+
+
+def test_catch_up_is_capped_to_twenty_percent_and_mrv(profile_id):
+    sp, day, ids = _setup(profile_id)
+    blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    # Woche 1 komplett ausgelassen -> alles fehlt, Nachholen darf trotzdem nur ein Fuenftel der Woche sein
+    autoregulate.review(profile_id, MONDAY + timedelta(weeks=1))
+    block = blocks.active(profile_id)
+    adj = blocks._params(block)["adjust"].get("2", {})
+    this_week = autoregulate.planned_sets(block, db.active_split(profile_id), 2)
+    assert 0 < sum(adj.values()) <= max(1, round(0.2 * (sum(this_week.values()) - sum(adj.values()))) + 1)
+
+
+def test_pain_report_replaces_loading_exercises_and_remembers_the_area(profile_id):
+    sp, day, ids = _setup(profile_id)
+    blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    bench = db.one("SELECT id FROM exercises WHERE name='Bankdrücken'")
+    se = db.one("SELECT id FROM split_exercises WHERE exercise_id=? AND split_day_id=?", (bench["id"], day["id"]))
+    res = autoregulate.report_pain(profile_id, "shoulder")
+    assert "Schulter" in res["limitations"] and any(s["from"] == "Bankdrücken" for s in res["swapped"])
+    now = db.one("SELECT exercise_id FROM split_exercises WHERE id=?", (se["id"],))["exercise_id"]
+    assert now != bench["id"]
+    assert "Schulter" in db.get_row("profiles", profile_id)["limitations"]
+    assert any("Schmerz bei Schulter" in e["text"] for e in explain.recent(profile_id))
+    import pytest
+    with pytest.raises(ValueError):
+        autoregulate.report_pain(profile_id, "kopf")
+
+
+def test_second_plateau_swaps_the_variant(profile_id):
+    sp, day, ids = _setup(profile_id)
+    blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    ex_id = ids["Latzug"][1]
+    for i in range(3):
+        _log(profile_id, day["id"], ex_id, date.today() - timedelta(days=14 - i * 3), reps=9 if i == 0 else 8, weight=50)
+    explain.log(profile_id, "plateau", "Latzug: Test", ex_id, sp["id"])
+    assert autoregulate.swap_plateaus(profile_id, db.active_split(profile_id))
+    assert db.one("SELECT exercise_id FROM split_exercises WHERE id=?", (ids["Latzug"][0],))["exercise_id"] != ex_id

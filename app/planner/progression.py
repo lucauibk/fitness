@@ -5,6 +5,8 @@ passender Anstrengung erreicht ist, kommt Gewicht drauf (Dynamic Double Progress
 Jede Empfehlung hat einen erklaerenden Satz. Reine Rechenlogik (sessions rein, Empfehlung raus),
 nur `sessions()` und `for_exercise()` greifen auf die Datenbank zu.
 """
+from datetime import date
+
 from .. import db
 
 PLATEAU_SESSIONS = 3
@@ -35,6 +37,16 @@ def sessions(profile_id, exercise_id, limit=6):
             out.append(index[r["wid"]])
         index[r["wid"]]["sets"].append({"reps": r["reps"] or 0, "weight": r["weight"], "rpe": r["rpe"]})
     return out
+
+
+LAYOFF_DAYS = 14
+
+
+def _days_since(iso, today=None):
+    try:
+        return ((today or date.today()) - date.fromisoformat((iso or "")[:10])).days
+    except ValueError:
+        return None
 
 
 def step_for(equipment, pattern, top):
@@ -103,7 +115,7 @@ def rpe_drift(history):
 
 
 def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, rir=2, deload=False,
-              experience=None, start_weight=None):
+              experience=None, start_weight=None, today=None):
     """Naechster Vorschlag fuer eine Uebung. history: neueste Einheit zuerst.
     Anfaenger: reine Wiederholungs-Regeln (lineare Steigerung), keine RPE-Logik – sie schaetzen ihre
     Reserve um 4-5 Wiederholungen daneben; Plateau schon nach zwei Stillstaenden."""
@@ -120,6 +132,12 @@ def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, r
     top = _top_weight(last)
     step = step_for(equipment, pattern, top)
     base["last"] = last
+
+    gap = _days_since(history[0].get("date"), today)
+    if not deload and top and gap is not None and gap > LAYOFF_DAYS:
+        factor = 0.87 if gap > 28 else 0.93
+        return {**base, "reps": lo, "weight": max(step, _round_to(top * factor, step)), "status": "return",
+                "reason": f"{gap} Tage Pause – vorsichtig wieder einsteigen ({round(factor * 100)} % der letzten Last)"}
 
     if deload:
         if top:

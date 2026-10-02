@@ -188,6 +188,7 @@ function openExerciseMenu(index) {
       ${ex.sets.length > 1 ? item("data-m-drop-set", "x", `Letzten Satz entfernen${last.done ? " (abgehakt)" : ""}`) : ""}
       ${ex.unit === "kg" ? item("data-m-plates", "weight", "Scheiben ausrechnen") : ""}
       ${ex.pattern ? item("data-m-swap", "swap", "Übung tauschen") : ""}
+      ${ex.pattern ? item("data-m-pain", "warn", "Schmerz bei dieser Übung") : ""}
       ${item("data-m-drop-ex", "trash", "Übung entfernen", "danger")}
     </div>`,
   });
@@ -209,6 +210,7 @@ function openExerciseMenu(index) {
   }
   sheet.querySelector("[data-m-plates]")?.addEventListener("click", after(() => openPlates(index)));
   sheet.querySelector("[data-m-swap]")?.addEventListener("click", after(() => openSwap(index)));
+  sheet.querySelector("[data-m-pain]")?.addEventListener("click", after(() => reportPain(index)));
   armDelete(sheet.querySelector("[data-m-drop-ex]"), after(() => update((d) => {
     d.exercises.splice(index, 1);
     if (Number.isInteger(d.focus) && d.focus >= index) d.focus = null;
@@ -447,6 +449,30 @@ const exOption = (e) => `<div class="row-item" role="button" tabindex="0" data-p
 // ------------------------------------------------------------- Tauschen
 /** Geraet besetzt, Muskel schon wund: passende Alternative aus dem Katalog statt die
  *  Uebung ersatzlos zu streichen. Nur zur Planungszeit gab es das bisher. */
+const PAIN_AREAS = [["knee", "Knie"], ["lower_back", "Rücken"], ["shoulder", "Schulter"], ["elbow", "Ellbogen"],
+  ["wrist", "Handgelenk"], ["hip", "Hüfte"]];
+
+/** Schmerz melden: Bereich ins Profil, belastende Übungen im Plan ersetzen, dann gleich hier tauschen. */
+function reportPain(exIndex) {
+  const sheet = openSheet({
+    title: "Wo tut es weh?",
+    body: `<p class="hint">Belastende Übungen werden im Plan ersetzt und nicht mehr automatisch gesteigert.
+        Bei anhaltenden Schmerzen bitte ärztlich abklären lassen.</p>
+      <div class="chips">${PAIN_AREAS.map(([k, l]) => `<button type="button" class="chip" data-area="${k}">${l}</button>`).join("")}</div>`,
+  });
+  sheet.addEventListener("click", async (ev) => {
+    const t = ev.target.closest("[data-area]");
+    if (!t) return;
+    try {
+      await api("planner/pain", { method: "POST", body: { area: t.dataset.area } });
+      closeSheet();
+      toast("Gemerkt – belastende Übungen werden im Plan ersetzt");
+      window.dispatchEvent(new CustomEvent("data-changed"));
+      openSwap(exIndex);
+    } catch (e) { toast(e.offline ? "Dafür ist eine Verbindung nötig." : e.message, { error: true }); }
+  });
+}
+
 async function openSwap(exIndex) {
   const draft = getDraft();
   const ex = draft?.exercises[exIndex];
