@@ -90,3 +90,18 @@ def test_choices_are_saved_to_the_profile_in_one_step(profile_id):
     p = db.profile_out(db.get_row("profiles", profile_id))
     assert (p["goal"], p["experience"], p["focus"], p["limitations"]) == ("kraft", "fortgeschritten", ["po"], "Knie")
     assert p["available_weekdays"] == [2, 3, 4, 5, 6] and p["train_weekdays"] == [2, 4, 6]
+
+
+def test_swapping_an_exercise_by_hand_clears_the_generated_mark(profile_id):
+    """Selbst gewaehlte Uebungen tauscht die App am Blockende nicht zurueck."""
+    assert post(profile_id, {"days": 3}).status_code == 200
+    item = db.active_split(profile_id)["days"][0]["exercises"][-1]
+    assert db.get_row("split_exercises", item["id"])["generated"] == 1
+    other = db.one("SELECT id FROM exercises WHERE pattern=? AND id<>? AND archived=0",
+                   (item["pattern"], item["exercise_id"]))
+    r = client.patch(f"/api/split-exercises/{item['id']}", params={"profile": profile_id},
+                     json={"exercise_id": other["id"]})
+    assert r.status_code == 200
+    assert db.get_row("split_exercises", item["id"])["generated"] is None
+    r = client.patch(f"/api/split-exercises/{item['id']}", params={"profile": profile_id}, json={"notes": "x"})
+    assert r.status_code == 200 and db.get_row("split_exercises", item["id"])["generated"] is None

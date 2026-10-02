@@ -96,7 +96,7 @@ FATIGUE_BASELINE_DAYS = 28
 
 def fatigue(profile_id, on_date=None):
     """Ermuedungswert: Summe der harten Saetze, exponentiell abklingend (Banister-artig, ohne Anpassung).
-    -> (Schnitt der letzten 7 Tage, Schnitt der vier Wochen davor) | None, wenn es dafuer noch zu wenig Verlauf gibt."""
+    -> (Schnitt der letzten 7 Tage, staerkste der vier Wochen davor) | None, wenn es dafuer noch zu wenig Verlauf gibt."""
     import math
     on_date = on_date or stats.today()
     per_day = {}
@@ -111,11 +111,18 @@ def fatigue(profile_id, on_date=None):
 
     def value(day):
         return sum(n * math.exp(-(day - d).days / FATIGUE_TAU_DAYS) for d, n in per_day.items() if d <= day)
-    # Tageswerte schwanken mit dem Trainingsrhythmus – verglichen werden Durchschnitte: letzte 7 Tage
-    # gegen die vier Wochen davor
-    recent = [value(on_date - timedelta(days=k)) for k in range(7)]
-    past = [value(on_date - timedelta(days=k)) for k in range(7, 7 + FATIGUE_BASELINE_DAYS)]
-    return sum(recent) / len(recent), sum(past) / len(past)
+    # Tageswerte schwanken mit dem Trainingsrhythmus – verglichen werden Wochen-Durchschnitte: die letzten
+    # 7 Tage gegen die staerkste der vier Wochen davor. So faellt der geplante Anstieg im Block (≈ +10 % je
+    # Woche) nicht auf, ein sprunghafter Anstieg schon. Nach einer Pause (eine Vorwoche ohne Training) gibt
+    # es keinen sinnvollen Vergleich – sonst wuerde die Rueckkehr als Ueberlastung gelten.
+    def week_mean(offset):
+        days = [on_date - timedelta(days=offset + k) for k in range(7)]
+        return sum(value(d) for d in days) / 7, any(d in per_day for d in days)
+    recent, _ = week_mean(0)
+    past = [week_mean(7 * w) for w in range(1, FATIGUE_BASELINE_DAYS // 7 + 1)]
+    if not all(trained for _, trained in past):
+        return None
+    return recent, max(mean for mean, _ in past)
 
 
 def deload_signals(profile_id, split, on_date=None):
@@ -140,7 +147,7 @@ def deload_signals(profile_id, split, on_date=None):
         signals.append("Muskelkater hält dauerhaft an")
     load = fatigue(profile_id, on_date)
     if load and load[1] > 0 and load[0] >= FATIGUE_HIGH * load[1]:
-        signals.append(f"Trainingslast {round(100 * (load[0] / load[1] - 1))} % über deinem Schnitt der Vorwochen")
+        signals.append(f"Trainingslast {round(100 * (load[0] / load[1] - 1))} % über deinen letzten Wochen")
     return signals
 
 

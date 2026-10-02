@@ -129,7 +129,13 @@ def test_lighter_is_at_least_one_step_and_never_below_the_empty_bar():
     bar = [sess((8, 20), (8, 20), (8, 20))] * 3
     assert rec(bar, equipment="barbell", pattern="h_push", deload=True)["weight"] == 20
     assert rec(bar, equipment="barbell", pattern="h_push", experience="fortgeschritten")["weight"] == 20
-    assert pg.lighter(22.5, 0.9, 2.5, "barbell") == 20
+    assert pg.lighter(22.5, 0.9, 2.5, "barbell", "h_push") == 20
+    at_bar = rec(bar, equipment="barbell", pattern="h_push", deload=True)
+    assert "leichter geht hier nicht" in at_bar["reason"]                   # kein falsches „10 % leichter“
+    light_bar = [sess((8, 10), (8, 10), (8, 10))] * 3                       # Kreuzheben mit 10 kg geloggt
+    assert rec(light_bar, equipment="barbell", pattern="hinge", deload=True)["weight"] == 10
+    sz = [sess((10, 15), (10, 15), (10, 15))] * 3                           # SZ-Curls: keine 20-kg-Grenze
+    assert rec(sz, equipment="barbell", pattern="biceps", deload=True)["weight"] < 15
 
 
 def test_barbell_start_weight_is_at_least_the_empty_bar(profile_id):

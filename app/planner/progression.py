@@ -69,17 +69,30 @@ def _round_to(value, step):
 
 
 EMPTY_BAR = 20.0
+# Grunduebungen an der olympischen Stange; SZ-Curls oder Skull Crusher laufen mit leichteren Stangen
+BAR_PATTERNS = {"squat", "hinge", "lunge", "h_push", "v_push", "h_pull", "glutes"}
 
 
-def floor_for(equipment, step):
-    """Leichtestes sinnvolles Gewicht: die leere Langhantel, sonst ein Schritt."""
-    return EMPTY_BAR if equipment == "barbell" else step
+def floor_for(equipment, step, pattern=None, logged_min=None):
+    """Leichtestes sinnvolles Gewicht: bei Langhantel-Grunduebungen die leere Stange – ausser die Person hat
+    die Uebung schon leichter geloggt (leichte Stange, nur Scheiben): dann ihr eigenes Minimum."""
+    if equipment == "barbell" and pattern in BAR_PATTERNS:
+        bar = EMPTY_BAR if logged_min is None else min(EMPTY_BAR, logged_min)
+        return max(step, bar)
+    return step
 
 
-def lighter(top, factor, step, equipment=None):
+def lighter(top, factor, step, equipment=None, pattern=None, logged_min=None):
     """Leichtere Last fuer Entlastung, Neuaufbau und Wiedereinstieg: mindestens einen Schritt unter top
-    (4 kg x 0,9 runden sonst wieder auf 4 kg), nie unter der leeren Stange."""
-    return max(floor_for(equipment, step), min(_round_to(top * factor, step), round(top - step, 2)))
+    (4 kg x 0,9 runden sonst wieder auf 4 kg), nie unter der leeren Stange bzw. dem eigenen Minimum."""
+    return max(floor_for(equipment, step, pattern, logged_min), min(_round_to(top * factor, step), round(top - step, 2)))
+
+
+def _at_floor(rec, top):
+    """Ist leichter nicht moeglich (schon an der leeren Stange), sagt der Text das statt „10 % leichter“."""
+    if rec.get("weight") is not None and top and rec["weight"] >= top:
+        rec["reason"] = "leichter geht hier nicht – gleiches Gewicht, dafür nicht bis ans Limit"
+    return rec
 
 
 def _top_weight(sets):
@@ -194,17 +207,23 @@ def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, r
     top = _top_weight(last)
     step = step_for(equipment, pattern, top)
     base["last"] = last
+    logged = [s["weight"] for h in history for s in h["sets"] if s["weight"]]
+    low = min(logged) if logged else None
+
+    def down(factor):
+        return lighter(top, factor, step, equipment, pattern, low)
 
     gap = _days_since(last_workout or history[0].get("date"), today)
     if not deload and top and gap is not None and gap > LAYOFF_DAYS:
         factor = 0.87 if gap > 28 else 0.93
-        return {**base, "reps": lo, "weight": lighter(top, factor, step, equipment), "status": "return",
-                "reason": f"{gap} Tage Pause – vorsichtig wieder einsteigen ({round(factor * 100)} % der letzten Last)"}
+        return _at_floor({**base, "reps": lo, "weight": down(factor), "status": "return",
+                          "reason": f"{gap} Tage Pause – vorsichtig wieder einsteigen ({round(factor * 100)} % der letzten Last)"},
+                         top)
 
     if deload:
         if top:
-            return {**base, "reps": hi, "weight": lighter(top, DELOAD_FACTOR, step, equipment),
-                    "status": "deload", "reason": "Entlastungswoche: ca. 10 % leichter, nichts bis ans Limit"}
+            return _at_floor({**base, "reps": hi, "weight": down(DELOAD_FACTOR),
+                              "status": "deload", "reason": "Entlastungswoche: ca. 10 % leichter, nichts bis ans Limit"}, top)
         return {**base, "reps": max(lo, hi - 2), "weight": None, "status": "deload",
                 "reason": "Entlastungswoche: weniger Wiederholungen, nichts bis ans Limit"}
 
@@ -213,8 +232,8 @@ def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, r
         weakest_now = min(s["reps"] for s in last)
         weakest_prev = min(s["reps"] for s in history[1]["sets"])
         if prev_top == top and weakest_now < lo and weakest_prev < lo:
-            return {**base, "reps": lo, "weight": lighter(top, DROP_FACTOR, step, equipment),
-                    "status": "drop", "reason": f"zweimal unter {lo} Wiederholungen – etwas leichter und sauber aufbauen"}
+            return _at_floor({**base, "reps": lo, "weight": down(DROP_FACTOR), "status": "drop",
+                              "reason": f"zweimal unter {lo} Wiederholungen – etwas leichter und sauber aufbauen"}, top)
 
     # Oberes Ende in allen Saetzen geschafft geht vor der Plateau-Pruefung: wer nach einem „noch einmal gleich“
     # wieder oben ankommt, steckt nicht fest, sondern ist bereit fuer mehr Gewicht.
@@ -225,10 +244,9 @@ def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, r
         and all(s["reps"] >= hi for s in history[1]["sets"])
 
     if top and not at_top and is_plateau(history, 2 if novice else PLATEAU_SESSIONS):
-        return {**base, "reps": lo, "weight": lighter(top, DELOAD_FACTOR, step, equipment),
-                "status": "plateau",
-                "reason": f"{2 if novice else PLATEAU_SESSIONS} Einheiten ohne Fortschritt – 10 % leichter neu aufbauen "
-                          "(oder die Übung im nächsten Block wechseln)"}
+        return _at_floor({**base, "reps": lo, "weight": down(DELOAD_FACTOR), "status": "plateau",
+                          "reason": f"{2 if novice else PLATEAU_SESSIONS} Einheiten ohne Fortschritt – 10 % leichter neu "
+                                    "aufbauen (oder die Übung im nächsten Block wechseln)"}, top)
 
     if at_top:
         if avg_rpe is not None and avg_rpe >= 9.5 and rir >= 2 and not held_before:

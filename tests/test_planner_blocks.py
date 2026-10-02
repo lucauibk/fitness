@@ -243,3 +243,17 @@ def test_fatigue_compares_against_the_own_baseline(profile_id):
     now, base = autoregulate.fatigue(profile_id, hard_day)
     assert now >= autoregulate.FATIGUE_HIGH * base
     assert any("Trainingslast" in s for s in autoregulate.deload_signals(profile_id, db.active_split(profile_id), hard_day))
+
+
+def test_fatigue_stays_quiet_after_a_break_and_during_a_planned_ramp(profile_id):
+    sp, day, ids = _setup(profile_id)
+    bench = ids["Bankdrücken"][1]
+    for week, n in enumerate([12, 12, 12, 12, 12, 14, 16, 18]):                  # geplanter Anstieg im Block
+        for k in (0, 2, 4):
+            _bulk(profile_id, bench, MONDAY + timedelta(weeks=week, days=k), n)
+    now, ref = autoregulate.fatigue(profile_id, MONDAY + timedelta(weeks=7, days=6))
+    assert now < autoregulate.FATIGUE_HIGH * ref
+    back = MONDAY + timedelta(weeks=10)                                          # zwei Wochen Pause, dann zurueck
+    for k in (0, 2, 4):
+        _bulk(profile_id, bench, back + timedelta(days=k), 18)
+    assert autoregulate.fatigue(profile_id, back + timedelta(days=6)) is None

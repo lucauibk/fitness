@@ -526,7 +526,7 @@ WRITABLE = {
     "split_days": ("split_id", "position", "label", "weekdays"),
     "split_exercises": ("split_day_id", "exercise_id", "position", "target_sets",
                         "target_reps_min", "target_reps_max", "target_weight",
-                        "rest_seconds", "notes", "base_sets", "peak_sets"),
+                        "rest_seconds", "notes", "base_sets", "peak_sets", "generated"),
     "workouts": ("profile_id", "split_day_id", "title", "started_at", "finished_at", "notes"),
     "bodyweight": ("profile_id", "date", "kg"),
 }
