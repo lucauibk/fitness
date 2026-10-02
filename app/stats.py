@@ -346,7 +346,8 @@ def day_plan(profile_id, day):
             "rest_seconds": item.get("rest_seconds"),
             "last": s["last"], "suggest": {"reps": s["reps"], "weight": s["weight"],
                                            "reason": s["reason"],
-                                           "raise_weight": s["raise_weight"], "status": s.get("status")},
+                                           "raise_weight": s["raise_weight"], "status": s.get("status"),
+                                           "estimate": bool(s.get("estimate"))},
         })
     return {"id": day["id"], "label": day["label"], "weekdays": day.get("weekdays") or [],
             "exercises": items, "block": st}

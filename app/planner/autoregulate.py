@@ -10,7 +10,7 @@ import json
 from datetime import date, timedelta
 
 from .. import db, stats
-from . import blocks, explain, generate, progression
+from . import blocks, cold_start, explain, generate, progression
 from .muscles import GROUPS, LABEL, PATTERN_GROUP, landmark
 
 MISSED_MIN = 2          # so viele Saetze muessen fehlen, damit nachgeholt wird
@@ -106,11 +106,25 @@ def extend_block(block, params):
     blocks._save_params(block["id"], params, weeks=block["weeks"] + 1)
 
 
+def reclassify(profile_id):
+    """Erfahrung aus den Daten nachziehen – nur wenn sie nicht von Hand gesetzt wurde."""
+    profile = db.get_row("profiles", profile_id) or {}
+    if profile.get("experience") and not profile.get("experience_auto"):
+        return
+    level, why = cold_start.infer_experience(profile_id)
+    order = ["einsteiger", "fortgeschritten", "erfahren"]
+    if level and order.index(level) > order.index(profile.get("experience") or "einsteiger"):
+        db.update_row("profiles", profile_id, {"experience": level, "experience_auto": 1})
+        explain.log(profile_id, "info", f"Einstufung angehoben auf „{level}“: {why}. Der nächste Block "
+                    "startet mit mehr Volumen.")
+
+
 def review(profile_id, on_date=None):
     on_date = on_date or date.today()
     split = db.active_split(profile_id)
     if not split:
         return {"block": None, "events": []}
+    reclassify(profile_id)
     block = blocks.ensure(profile_id, split)
     st = blocks.state(block, on_date)
     if st["finished"]:

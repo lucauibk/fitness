@@ -45,6 +45,7 @@ export function startDraft(day) {
       pattern: e.pattern,
       rest: e.rest_seconds || null,
       adjusted: e.adjusted || null,
+      estimate: Boolean(e.suggest?.estimate),   // erstes Mal: Startgewicht ist geschätzt, Tasten kalibrieren
       reps_min: e.target_reps_min,
       reps_max: e.target_reps_max,
       last: e.last,
@@ -109,6 +110,17 @@ const lastWorkSet = (ex) => [...ex.sets].reverse().find((x) => x.done && !x.warm
 
 /** RPE einmal pro Uebung statt als Spalte in jeder Zeile: erscheint, sobald die Uebung
  *  fertig ist, auch in der zugeklappten Karte – optional, ein Tipp. */
+/** Erstes Mal an dieser Übung: nach dem ersten Satz sagt man, wie es war – die übrigen Sätze passen sich an. */
+function calibRow(ex, index) {
+  return `<div class="rpe-row calib" role="group" aria-label="Wie war der Satz bei ${esc(ex.name)}?">
+    <span class="hint">Startgewicht war geschätzt – wie war der Satz?</span>
+    <div class="rpe-chips">
+      <button type="button" class="chip-btn" data-calib="${index}" data-level="easy">leicht</button>
+      <button type="button" class="chip-btn" data-calib="${index}" data-level="ok">passt</button>
+      <button type="button" class="chip-btn" data-calib="${index}" data-level="hard">zu schwer</button>
+    </div></div>`;
+}
+
 function rpeRow(ex, index) {
   const s = lastWorkSet(ex);
   if (!s) return "";
@@ -155,6 +167,7 @@ function exerciseCard(ex, index, open) {
       <span class="grow"></span>
       <button type="button" class="btn small ghost" data-ex-menu="${index}" aria-label="Weitere Aktionen für ${esc(ex.name)}">⋯ Mehr</button>
     </div>` : ""}
+    ${ex.estimate && !ex.calibrated && done >= 1 && !complete ? calibRow(ex, index) : ""}
     ${complete ? rpeRow(ex, index) : ""}
   </div>`;
 }
@@ -721,6 +734,21 @@ export async function mount(el) {
     if (focus) {
       const i = Number(focus.dataset.focus);
       return update((d) => { d.focus = focusIndex(d) === i ? -1 : i; });
+    }
+    const calib = t("[data-calib]");
+    if (calib) {
+      const i = Number(calib.dataset.calib);
+      const factor = { easy: 1.1, ok: 1, hard: 0.9 }[calib.dataset.level];
+      return update((d) => {
+        const ex = d.exercises[i];
+        const last = [...ex.sets].reverse().find((x) => x.done && !x.warmup);
+        if (last) last.rpe = { easy: 6, ok: 8, hard: 10 }[calib.dataset.level];
+        ex.sets.filter((x) => !x.done && x.weight != null).forEach((x) => {
+          const step = x.weight < 20 ? 1 : 2.5;
+          x.weight = Math.max(step, Math.round((x.weight * factor) / step) * step);
+        });
+        ex.calibrated = true;
+      });
     }
     const rpe = t("[data-rpe]");
     if (rpe) {

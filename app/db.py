@@ -205,7 +205,9 @@ MIGRATIONS = {
                  # Ernaehrung: Ziele (nutrition_auto=1 -> berechnet)
                  "activity_level": "TEXT", "kcal_goal": "INTEGER", "protein_goal": "INTEGER",
                  "carbs_goal": "INTEGER", "fat_goal": "INTEGER",
-                 "nutrition_auto": "INTEGER DEFAULT 1", "water_goal_ml": "INTEGER"},
+                 "nutrition_auto": "INTEGER DEFAULT 1", "water_goal_ml": "INTEGER",
+                 # 1 = Erfahrung wurde von der App aus den Einheiten abgeleitet (darf sich weiter aendern)
+                 "experience_auto": "INTEGER"},
     # Empfohlene Satzpause je Uebung
     "split_exercises": {"rest_seconds": "INTEGER", "base_sets": "INTEGER"},
     # Aufwaermsatz: zaehlt nicht in Volumen, Bestleistungen und Progression
@@ -488,7 +490,7 @@ def backup(tag=None):
 # Whitelist je Tabelle: nur diese Spalten duerfen ueber die API geschrieben werden,
 # damit Spaltennamen nie ungeprueft aus dem Request in SQL landen.
 WRITABLE = {
-    "profiles": ("name", "color", "birth_year", "sex", "height_cm", "goal", "experience",
+    "profiles": ("name", "color", "birth_year", "sex", "height_cm", "goal", "experience", "experience_auto",
                  "days_per_week", "session_minutes", "limitations", "train_weekdays", "focus",
                  "activity_level", "kcal_goal", "protein_goal", "carbs_goal", "fat_goal",
                  "nutrition_auto", "water_goal_ml"),

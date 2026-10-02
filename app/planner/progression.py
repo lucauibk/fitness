@@ -103,7 +103,7 @@ def rpe_drift(history):
 
 
 def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, rir=2, deload=False,
-              experience=None):
+              experience=None, start_weight=None):
     """Naechster Vorschlag fuer eine Uebung. history: neueste Einheit zuerst.
     Anfaenger: reine Wiederholungs-Regeln (lineare Steigerung), keine RPE-Logik – sie schaetzen ihre
     Reserve um 4-5 Wiederholungen daneben; Plateau schon nach zwei Stillstaenden."""
@@ -111,6 +111,9 @@ def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, r
     hi = max(hi, lo)
     base = {"range": [lo, hi], "raise_weight": False, "status": "progress", "trend": e1rm_trend(history)}
     if not history:
+        if start_weight:
+            return {**base, "reps": lo, "weight": start_weight[0], "status": "start", "last": [], "estimate": True,
+                    "reason": f"erstes Mal – Startgewicht {start_weight[1]}; mit ≈ {rir} Wiederholungen übrig?"}
         return {**base, "reps": lo, "weight": None, "status": "start", "last": [],
                 "reason": f"erstes Mal – wähle ein Gewicht, mit dem du ≈ {rir} Wiederholungen übrig hast"}
     last = history[0]["sets"]
@@ -167,5 +170,11 @@ def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, r
 def for_exercise(profile_id, exercise_id, lo, hi, target_sets=None, rir=2, deload=False):
     ex = db.one("SELECT equipment_type, pattern FROM exercises WHERE id=?", (exercise_id,)) or {}
     experience = (db.one("SELECT experience FROM profiles WHERE id=?", (profile_id,)) or {}).get("experience")
-    return recommend(sessions(profile_id, exercise_id), lo, hi, target_sets,
-                     ex.get("equipment_type"), ex.get("pattern"), rir, deload, experience)
+    history = sessions(profile_id, exercise_id)
+    start = None
+    if not history:
+        from . import cold_start
+        kg, why = cold_start.starting_weight(profile_id, exercise_id)
+        start = (kg, why) if kg else None
+    return recommend(history, lo, hi, target_sets, ex.get("equipment_type"), ex.get("pattern"), rir,
+                     deload, experience, start)

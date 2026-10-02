@@ -289,7 +289,10 @@ def api_profile(profile_id: int):
 @app.patch("/api/profiles/{profile_id}")
 def api_update_profile(profile_id: int, body: ProfileIn):
     _found(db.get_row("profiles", profile_id))
-    return db.profile_out(_found(db.update_row("profiles", profile_id, _profile_in(_data(body)))))
+    data = _profile_in(_data(body))
+    if "experience" in data:
+        data["experience_auto"] = None      # von Hand gesetzt: die App stuft nicht mehr selbst um
+    return db.profile_out(_found(db.update_row("profiles", profile_id, data)))
 
 
 @app.get("/api/export/{kind}.csv")
