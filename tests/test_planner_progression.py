@@ -139,3 +139,16 @@ def test_barbell_start_weight_is_at_least_the_empty_bar(profile_id):
     ex = db.one("SELECT id FROM exercises WHERE equipment_type='barbell' AND pattern='v_push' AND archived=0")
     kg, _ = cold_start.starting_weight(profile_id, ex["id"])
     assert kg >= 20
+
+
+def test_kalman_estimate_smooths_an_outlier_but_follows_real_progress():
+    steady = [sess((8, 100), date=f"2026-09-{d:02d}") for d in (22, 15, 8, 1)]       # neueste zuerst
+    m, sigma = pg.estimate(steady)
+    assert abs(m - 100 * (1 + 8 / 30)) < 0.5 and sigma < 0.1 * m
+    outlier = [sess((8, 120), date="2026-09-29")] + steady                            # ein Ausreisser-Tag
+    assert m < pg.estimate(outlier)[0] < 120 * (1 + 8 / 30)
+    climbing = [sess((8, w), date=f"2026-0{9 if d < 10 else 8}-{d:02d}")
+                for w, d in ((110, 1), (107.5, 25), (105, 18), (102.5, 11), (100, 4))]
+    assert pg.estimate(climbing)[0] > 105 * (1 + 8 / 30)                              # folgt dem Anstieg
+    rpe8 = [sess((8, 100, 8))]
+    assert pg.estimate(rpe8)[0] == 100 * (1 + 10 / 30)                                # 2 Wdh. in Reserve

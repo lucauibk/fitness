@@ -93,6 +93,53 @@ def best_e1rm(sess):
     return max(vals) if vals else None
 
 
+def kalman_step(m, sigma, observed, reps, novice=False):
+    """Ein Kalman-Schritt fuer den e1RM: -> (m, sigma). Messrauschen 5 % bei <= 5 Wdh., sonst 8 %,
+    Anfaenger x1,5 (sie schaetzen ihre Reserve ungenau)."""
+    noise = (0.05 if reps <= 5 else 0.08) * observed * (1.5 if novice else 1.0)
+    gain = sigma ** 2 / (sigma ** 2 + noise ** 2)
+    return m + gain * (observed - m), ((1 - gain) * sigma ** 2) ** 0.5
+
+
+START_SPREAD = 0.10       # erste Einheit: ±10 %
+DRIFT_PER_WEEK = 0.015    # so viel darf sich die wahre Kraft je Woche unbemerkt veraendern
+
+
+def _session_e1rm(sess):
+    """Bester e1RM einer Einheit; mit gemeldeter Anstrengung zaehlen die Wiederholungen in Reserve mit."""
+    best = None
+    for s in sess["sets"]:
+        if not s["weight"] or not s["reps"] or s["reps"] > 12:
+            continue
+        reserve = max(0, 10 - s["rpe"]) if s.get("rpe") is not None else 0
+        value = s["weight"] * (1 + (s["reps"] + reserve) / 30)
+        if best is None or value > best[0]:
+            best = (value, s["reps"])
+    return best
+
+
+def estimate(history, novice=False):
+    """Kalman-Schaetzung des aktuellen Einer-Maximums aus dem Verlauf (neueste Einheit zuerst).
+    Glaettet Ausreisser-Tage; die Unsicherheit waechst mit Pausen. -> (e1RM, sigma) | None"""
+    m = sigma = last = None
+    for sess in reversed(history):
+        obs = _session_e1rm(sess)
+        if not obs:
+            continue
+        try:
+            day = date.fromisoformat(sess.get("date") or "")
+        except ValueError:
+            day = None
+        if m is None:
+            m, sigma = obs[0], obs[0] * START_SPREAD
+        else:
+            weeks = max(1.0, ((day - last).days / 7) if day and last else 1.0)
+            sigma = (sigma ** 2 + (DRIFT_PER_WEEK * m) ** 2 * weeks) ** 0.5
+            m, sigma = kalman_step(m, sigma, obs[0], obs[1], novice)
+        last = day or last
+    return (m, sigma) if m else None
+
+
 def e1rm_trend(history):
     """Prozent-Aenderung des geschaetzten Einer-Maximums von der aeltesten zur neuesten Einheit."""
     vals = [v for v in (best_e1rm(h) for h in reversed(history)) if v]

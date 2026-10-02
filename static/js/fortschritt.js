@@ -90,7 +90,9 @@ function bestRow(b) {
       <div class="row-meta"><span>${esc(setsSummary([b], b.unit))}</span>
         <span>${dm(b.date)}</span></div>
     </div>
-    ${b.one_rm ? `<span class="row-aside">1RM ≈ <b>${String(b.one_rm).replace(".", ",")}</b></span>` : ""}
+    ${b.one_rm_now ? `<span class="row-aside" title="Schätzung aus den letzten Einheiten">1RM ≈ <b>${
+      String(b.one_rm_now).replace(".", ",")}</b> ±${b.one_rm_spread} %</span>`
+      : b.one_rm ? `<span class="row-aside">1RM ≈ <b>${String(b.one_rm).replace(".", ",")}</b></span>` : ""}
     ${icon("right", "chev")}
   </div>`;
 }

@@ -90,8 +90,13 @@ def best_per_exercise(profile_id):
                 "date": _local_date(s["at"]).isoformat() if _local_date(s["at"]) else None,
             }
     out = sorted(best.values(), key=lambda b: (b["muscle_group"] or "", b["exercise"]))
+    from .planner import progression
     for b in out:
         b.pop("score", None)
+        # aktuelle Schaetzung (Kalman ueber die letzten Einheiten) statt nur des besten Einzelsatzes
+        est = progression.estimate(progression.sessions(profile_id, b["exercise_id"], limit=12))
+        b["one_rm_now"] = round(est[0], 1) if est else None
+        b["one_rm_spread"] = round(100 * est[1] / est[0]) if est else None
     return out
 
 

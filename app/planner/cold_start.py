@@ -66,8 +66,8 @@ def _from_same_pattern(profile_id, pattern, equipment, exercise_id):
                      (pattern, exercise_id))
     estimates = []
     for o in others:
-        hist = progression.sessions(profile_id, o["id"], limit=3)
-        best = max((v for v in (progression.best_e1rm(h) for h in hist) if v), default=None)
+        est = progression.estimate(progression.sessions(profile_id, o["id"], limit=12))
+        best = est[0] if est else None
         if best:
             ratio = EQUIPMENT_FACTOR.get(equipment, 1.0) / EQUIPMENT_FACTOR.get(o["equipment_type"], 1.0)
             estimates.append(best * ratio)
@@ -75,10 +75,8 @@ def _from_same_pattern(profile_id, pattern, equipment, exercise_id):
 
 
 def update_estimate(m, sigma, observed, reps, novice=False):
-    """Kalman-Schritt fuer den e1RM: -> (m, sigma). Rauschen 5 % bei <=5, 8 % bei 6-10 Wdh., Anfaenger ×1,5."""
-    noise = (0.05 if reps <= 5 else 0.08) * observed * (1.5 if novice else 1.0)
-    gain = sigma ** 2 / (sigma ** 2 + noise ** 2)
-    return m + gain * (observed - m), ((1 - gain) * sigma ** 2) ** 0.5
+    """Kalman-Schritt fuer den e1RM (siehe progression.kalman_step)."""
+    return progression.kalman_step(m, sigma, observed, reps, novice)
 
 
 MIN_EXERCISES_FOR_LEVEL = 3
@@ -107,8 +105,8 @@ def infer_experience(profile_id):
     ratios = []
     for ex in db.rows("SELECT id, name, pattern, equipment_type FROM exercises WHERE archived=0"
                       " AND pattern IN ('squat','hinge','h_push','v_pull','h_pull','v_push')"):
-        hist = progression.sessions(profile_id, ex["id"], limit=4)
-        e1 = max((v for v in (progression.best_e1rm(h) for h in hist) if v), default=None)
+        est = progression.estimate(progression.sessions(profile_id, ex["id"], limit=12))
+        e1 = est[0] if est else None
         base = prior_e1rm(profile, bw, ex["pattern"], ex["equipment_type"])
         if e1 and base:
             margin = GUIDED_MARGIN if ex["equipment_type"] in ("machine", "cable", "smith") else 1.0
