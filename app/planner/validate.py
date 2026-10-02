@@ -16,11 +16,21 @@ def _catalog():
         "SELECT id, name, pattern, contraindications FROM exercises")}
 
 
+def peak_sets(item, pattern, ratios):
+    """Saetze der Spitzenwoche: aus dem Plan (peak_sets), bei alten Plaenen aus Woche 1 hochgerechnet."""
+    if item.get("peak_sets"):
+        return item["peak_sets"]
+    peak = max((ratios.get(PATTERN_GROUP.get(pattern)) or [1.0])[:-1])
+    return min(vp_max, round((item.get("target_sets") or 0) * peak))
+
+
 def analyze(plan, injuries=(), minutes=None, goal="aufbau", rotate=False, experience="fortgeschritten", focus=()):
     cat = _catalog()
     # Der Plan ist Woche 1; geprueft wird die Spitzenwoche des Blocks (dort zaehlt das Volumen).
     ratios = blocks.ratios_for(goal, experience, focus)
-    weekly = {g: 0 for g in GROUPS}
+    pattern_of = lambda item: (cat.get(item["exercise_id"]) or {}).get("pattern")     # noqa: E731
+    weekly = vp.weekly_volume(plan["days"], lambda item: (pattern_of(item), peak_sets(item, pattern_of(item), ratios)),
+                              plan.get("cycle") or 1.0)
     days_with = {g: set() for g in GROUPS}
     patterns = set()
     pushing = pulling = 0.0
@@ -37,11 +47,9 @@ def analyze(plan, injuries=(), minutes=None, goal="aufbau", rotate=False, experi
             if not ex:
                 continue
             g = PATTERN_GROUP.get(ex["pattern"])
-            peak = max((ratios.get(g) or [1.0])[:-1])
-            sets = item.get("peak_sets") or min(vp_max, round((item.get("target_sets") or 0) * peak))
+            sets = peak_sets(item, ex["pattern"], ratios)
             sets_today += sets
             if g:
-                weekly[g] += sets * times
                 days_with[g].update((i, k) for k in range(times))
                 patterns.add(ex["pattern"])
                 if ex["pattern"] in ("h_push", "v_push", "chest_iso"):
@@ -61,10 +69,6 @@ def analyze(plan, injuries=(), minutes=None, goal="aufbau", rotate=False, experi
             findings.append({"level": "info", "group": "zeit",
                              "text": f"„{day['label']}“ hat {sets_today} Sätze – für {minutes} Minuten sind ≈ {per_session} realistisch."})
 
-    # Po arbeitet bei Kniebeuge, Ausfallschritt und Hueftbeuge indirekt mit
-    weekly["po"] += round(0.5 * sum(
-        item.get("target_sets", 0) for d in plan["days"] for item in d.get("exercises", [])
-        if (cat.get(item["exercise_id"]) or {}).get("pattern") in ("squat", "lunge", "hinge")))
     n_days = len(plan["days"])
     for g in BIG:
         if weekly[g] and len(days_with[g]) < MIN_FREQUENCY and n_days >= 3 and not rotate:

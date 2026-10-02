@@ -135,3 +135,14 @@ def test_lengthened_exercises_get_a_bonus():
     base = {"name": "X", "sfr": 4, "difficulty": 1, "equipment_type": "machine", "pattern": "leg_iso_back"}
     s = {"experience": "fortgeschritten", "goal": "aufbau", "age": None}
     assert score({**base, "lengthened": 1}, s) > score({**base, "lengthened": None}, s)
+
+
+def test_validator_counts_same_weekly_sets_as_generator(profile_id):
+    """Vorschau-Volumen und Pruefung rechnen gleich – auch bei Wechselplaenen und doppelten Wochentagen."""
+    for p, key, plan in _all_plans(profile_id, focus="po"):
+        weekly = validate.analyze(plan, goal=plan["goal"], rotate=plan["rotate"], experience=plan["experience"],
+                                  focus=plan["focus"])["weekly"]
+        assert weekly == plan["volume"]["planned"], key
+        assert not [f for f in validate.analyze(plan, goal=plan["goal"], experience=plan["experience"],
+                                                focus=plan["focus"])["findings"]
+                    if "mehr als sich erholen" in f["text"]], key

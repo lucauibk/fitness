@@ -4,7 +4,7 @@ Woche 1 startet nahe MEV, jede Woche kommen Saetze dazu (Richtung MAV, bei Fokus
 die letzte Woche ist ein Deload. Quellen: Renaissance Periodization (Volumen-Landmarken),
 Schoenfeld et al. (Dosis-Wirkung, abnehmender Nutzen ab ca. 12-20 Saetzen), Bell et al. (Deload).
 """
-from .muscles import GROUPS
+from .muscles import GROUPS, PATTERN_GROUP
 
 LEVEL = {"einsteiger": 0.0, "fortgeschritten": 0.6, "erfahren": 1.0}
 GOAL_FACTOR = {"kraft": 0.8, "aufbau": 1.0, "abnehmen": 0.9, "fitness": 0.85}
@@ -26,6 +26,23 @@ def capacity(days, minutes, goal="aufbau"):
     per_set = MINUTES_PER_SET.get(goal, 3.2)
     per_session = max(6, min(MAX_SETS_PER_SESSION, int((minutes - WARMUP_MINUTES) / per_set)))
     return days * per_session, per_session
+
+
+def weekly_volume(days, item_sets, cycle=1.0):
+    """Direkte Saetze pro Woche je Muskelgruppe – dieselbe Rechnung fuer Generator und Pruefung.
+    item_sets(uebung) -> (Muster, Saetze). Ein Tag mit mehreren Wochentagen zaehlt mehrfach; beim
+    Wechselplan (cycle = Plantage / Einheiten pro Woche) verteilt sich ein Durchlauf auf mehr als eine Woche.
+    Indirekte Arbeit (Po bei Kniebeugen, Trizeps beim Druecken) zaehlt nicht: sie steckt schon in den
+    Landmarken (muscles.GROUPS)."""
+    out = {g: 0 for g in GROUPS}
+    for day in days:
+        times = max(1, len(day.get("weekdays") or []))
+        for item in day.get("exercises", []):
+            pattern, sets = item_sets(item)
+            g = PATTERN_GROUP.get(pattern)
+            if g:
+                out[g] += (sets or 0) * times
+    return {g: round(v / (cycle or 1.0)) for g, v in out.items()}
 
 
 def rir_by_week(weeks):

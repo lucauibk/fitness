@@ -309,13 +309,8 @@ def generate(profile, option_key, overrides=None, variation=0):
     _fill_gaps(days, by_pattern, peak, per_session, goal, age, focus_groups, weeks_t, used)
     _balance_push_pull(days, by_pattern, per_session, goal, age, focus_groups, weeks_t, peak, used)
 
-    planned_by_week = [{g: 0 for g in GROUPS} for _ in range(n_weeks)]
-    for d in days:
-        times = max(1, len(d["weekdays"]))
-        for e in d["exercises"]:
-            for w, sets in enumerate(e["week_sets"]):
-                planned_by_week[w][group_of(e["pattern"])] += sets * times
-    planned_by_week = [{g: round(v / cycle) for g, v in wk.items()} for wk in planned_by_week]
+    planned_by_week = [vp.weekly_volume(days, lambda e, w=w: (e["pattern"], e["week_sets"][w]), cycle)
+                       for w in range(n_weeks)]
     planned_peak = {g: max(wk[g] for wk in planned_by_week[: n_weeks - 1]) for g in GROUPS}
     short = [(LABEL[g], planned_peak[g], t) for g, t in peak.items() if t >= 4 and planned_peak[g] < t - 2]
     if short:
