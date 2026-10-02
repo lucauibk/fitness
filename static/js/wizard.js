@@ -41,7 +41,8 @@ export function openWizard(profile) {
     return;
   }
   const st = {
-    available: [...(profile.available_weekdays || [])],
+    // Profile von vor der Trennung haben noch keine freien Tage: dann die bisher geplanten vorwählen
+    available: [...(profile.available_weekdays?.length ? profile.available_weekdays : profile.train_weekdays || [])],
     days: profile.days_per_week || 3,
     touched: false,            // Einheiten pro Woche von Hand gewählt? Dann ändert die Empfehlung sie nicht mehr
     experience: profile.experience || "einsteiger",
