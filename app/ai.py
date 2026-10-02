@@ -12,7 +12,7 @@ import re
 import urllib.error
 import urllib.request
 
-from . import db
+from . import db, stats
 from .stats import GROUP_LABEL
 
 log = logging.getLogger(__name__)
@@ -243,7 +243,7 @@ def read_measurement(image_b64, media_type):
     try:
         from datetime import date as _date
         day = _date.fromisoformat(day).isoformat() if day else None
-        if day and day > _date.today().isoformat():
+        if day and day > stats.today().isoformat():
             day = None
     except (TypeError, ValueError):
         day = None

@@ -6,7 +6,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
-from .. import db
+from .. import db, stats
 from ..common import current_profile
 from ..planner import autoregulate, blocks, explain, generate, store
 from ..planner.muscles import GROUPS, LABEL
@@ -47,7 +47,7 @@ def new_block(profile_id: int = Depends(current_profile)):
     block = blocks.ensure(profile_id, split) if split else None
     if not block:
         return {"block": None}
-    nb, _ = autoregulate.rollover(profile_id, block, split, date.today())
+    nb, _ = autoregulate.rollover(profile_id, block, split, stats.today())
     return {"block": blocks.state(nb)}
 
 

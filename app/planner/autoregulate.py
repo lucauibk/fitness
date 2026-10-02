@@ -29,13 +29,17 @@ def _split_rows(split):
 
 def actual_sets(profile_id, start, end):
     """{Gruppe: Saetze} und {Gruppe: [RPE]} im Zeitraum [start, end]."""
+    # Zeitstempel sind UTC – gezaehlt wird nach dem Wiener Kalendertag (Einheit kurz nach Mitternacht)
     rows = db.rows(
-        "SELECT e.pattern, s.rpe FROM sets s JOIN workouts w ON w.id = s.workout_id"
-        " JOIN exercises e ON e.id = s.exercise_id"
+        "SELECT e.pattern, s.rpe, COALESCE(w.started_at, w.finished_at) AS at FROM sets s"
+        " JOIN workouts w ON w.id = s.workout_id JOIN exercises e ON e.id = s.exercise_id"
         " WHERE w.profile_id=? AND s.warmup=0 AND substr(COALESCE(w.started_at, w.finished_at),1,10) BETWEEN ? AND ?",
-        (profile_id, start.isoformat(), end.isoformat()))
+        (profile_id, (start - timedelta(days=1)).isoformat(), (end + timedelta(days=1)).isoformat()))
     sets, rpes = {g: 0 for g in GROUPS}, {g: [] for g in GROUPS}
     for r in rows:
+        day = stats._local_date(r["at"])
+        if not day or not start <= day <= end:
+            continue
         g = PATTERN_GROUP.get(r["pattern"])
         if g:
             sets[g] += 1
@@ -138,7 +142,7 @@ def review(profile_id, on_date=None):
 
 
 def _review(profile_id, on_date=None):
-    on_date = on_date or date.today()
+    on_date = on_date or stats.today()
     split = db.active_split(profile_id)
     if not split:
         return {"block": None, "events": []}
@@ -283,7 +287,7 @@ def rollover(profile_id, block, split, on_date=None):
     age = (date.today().year - int(profile["birth_year"])) if profile.get("birth_year") else None
     nb = blocks.create(profile_id, split["id"], block["goal"], block["experience"],
                        db.parse_focus(profile.get("focus")), age, variation,
-                       start=blocks.monday(on_date or date.today()))
+                       start=blocks.monday(on_date or stats.today()))
     explain.log(profile_id, "info", f"Neuer Block gestartet (Woche 1 von {nb['weeks']})"
                 + (f", {swapped} Isolationsübungen gewechselt" if swapped else ""), None, split["id"])
     return nb, split

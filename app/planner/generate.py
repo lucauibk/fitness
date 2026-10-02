@@ -5,9 +5,8 @@ Gewaehlt wird nach Bewegungsmuster, Verletzungen, Geraet, Schwierigkeit und SFR.
 """
 import itertools
 import math
-from datetime import date
 
-from .. import db, splits
+from .. import db, splits, stats
 from . import volume_plan as vp
 from .catalog_data import ACCESSORIES, STAPLES
 from .muscles import BIG, COMPOUND, GROUPS, INJURY_AREAS, LABEL, PATTERN_GROUP, group_of
@@ -387,7 +386,7 @@ def generate(profile, option_key, overrides=None, variation=0):
     if opt.get("rotate") and s.get("weekdays"):
         basis.insert(0, "Die Tage wechseln automatisch der Reihe nach – an deinen Trainingstagen "
                      + " · ".join(splits.WD[d] for d in s["weekdays"]) + ".")
-    today = date.today()
+    today = stats.today()
     return {
         "option": option_key,
         "name": f"{GOALS[goal]} · {opt['name']} · {MONTHS[today.month - 1]} {today.year}",

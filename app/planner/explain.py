@@ -1,11 +1,9 @@
 """Jede Anpassung des Plans bekommt einen Satz – gespeichert und in der App sichtbar."""
-from datetime import date
-
-from .. import db
+from .. import db, stats
 
 
 def log(profile_id, kind, text, exercise_id=None, split_id=None, day=None):
-    day = (day or date.today()).isoformat()
+    day = (day or stats.today()).isoformat()
     dup = db.one("SELECT id FROM plan_events WHERE profile_id=? AND date=? AND kind=? AND text=?",
                  (profile_id, day, kind, text))
     if dup:

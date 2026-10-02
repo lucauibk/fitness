@@ -9,7 +9,7 @@ import math
 import threading
 from datetime import date, timedelta
 
-from .. import db
+from .. import db, stats
 from . import volume_plan as vp
 from .generate import FOCUS_GROUPS
 from .muscles import PATTERN_GROUP
@@ -53,7 +53,7 @@ def _create(profile_id, split_id, goal, experience, focus, age, variation, start
     params = {"rir": vp.rir_by_week(weeks), "ratios": ratios_for(goal, experience, focus, age, weeks),
               "adjust": {}, "reviewed": 0, "variation": variation, "cycle": cycle}
     return db.insert_row("blocks", {
-        "profile_id": profile_id, "split_id": split_id, "start_date": (start or monday(date.today())).isoformat(),
+        "profile_id": profile_id, "split_id": split_id, "start_date": (start or monday(stats.today())).isoformat(),
         "weeks": weeks, "goal": goal, "experience": experience, "params": json.dumps(params), "active": 1})
 
 
@@ -88,7 +88,7 @@ def ensure(profile_id, split=None):
 
 
 def week_no(block, on_date=None):
-    on_date = on_date or date.today()
+    on_date = on_date or stats.today()
     start = date.fromisoformat(block["start_date"])
     return max(1, (monday(on_date) - monday(start)).days // 7 + 1)
 

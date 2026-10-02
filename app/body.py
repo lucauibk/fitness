@@ -1,8 +1,7 @@
 """Koerpermessungen: manuell oder aus einer Studio-Koerperanalyse (ViCoach)."""
 import math
-from datetime import date
 
-from . import db
+from . import db, stats
 
 # Plausible Bereiche – alles ausserhalb wird verworfen (vor allem beim Einlesen per KI)
 RANGES = {
@@ -71,7 +70,7 @@ def save(profile_id, data):
         if bf is not None:
             values["body_fat_pct"] = bf
             estimated = 1
-    day = data.get("date") or date.today().isoformat()
+    day = data.get("date") or stats.today().isoformat()
     row = {"profile_id": profile_id, "date": day,
            "source": data.get("source") if data.get("source") in ("manuell", "vicoach") else "manuell",
            "notes": (data.get("notes") or "").strip()[:300] or None,

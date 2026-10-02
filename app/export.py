@@ -3,13 +3,13 @@
 import csv
 import io
 
-from . import db
+from . import db, stats
 
 # Bereich -> (Dateiname, Spaltenueberschriften, SQL mit einem ?-Platzhalter fuer das Profil)
 EXPORTS = {
     "saetze": ("saetze.csv",
                ["Datum", "Einheit", "Übung", "Satz", "Wiederholungen", "Gewicht (kg)", "RPE", "Aufwärmsatz"],
-               "SELECT substr(w.started_at, 1, 10), COALESCE(d.label, w.title, 'Training'), e.name,"
+               "SELECT COALESCE(w.started_at, w.finished_at), COALESCE(d.label, w.title, 'Training'), e.name,"
                " s.set_no, s.reps, s.weight, s.rpe, CASE WHEN s.warmup THEN 'ja' ELSE '' END"
                " FROM sets s JOIN workouts w ON w.id = s.workout_id"
                " JOIN exercises e ON e.id = s.exercise_id"
@@ -46,6 +46,8 @@ def to_csv(kind, profile_id):
     params = {"p": profile_id} if ":p" in sql else (profile_id,)
     with db.connect() as c:
         rows = c.execute(sql, params).fetchall()
+    if kind == "saetze":        # Zeitstempel sind UTC – im Export steht der Wiener Kalendertag
+        rows = [(stats._local_date(r[0]) or r[0], *r[1:]) for r in rows]
     out = io.StringIO()
     writer = csv.writer(out, delimiter=";")
     writer.writerow(header)

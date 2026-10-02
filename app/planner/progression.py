@@ -7,7 +7,7 @@ nur `sessions()` und `for_exercise()` greifen auf die Datenbank zu.
 """
 from datetime import date
 
-from .. import db
+from .. import db, stats
 
 PLATEAU_SESSIONS = 3
 DELOAD_FACTOR = 0.9
@@ -33,7 +33,8 @@ def sessions(profile_id, exercise_id, limit=6):
         if r["wid"] not in index:
             if len(out) >= limit:
                 break
-            index[r["wid"]] = {"date": (r["at"] or "")[:10], "sets": []}
+            local = stats._local_date(r["at"])
+            index[r["wid"]] = {"date": local.isoformat() if local else (r["at"] or "")[:10], "sets": []}
             out.append(index[r["wid"]])
         index[r["wid"]]["sets"].append({"reps": r["reps"] or 0, "weight": r["weight"], "rpe": r["rpe"]})
     return out
@@ -44,7 +45,7 @@ LAYOFF_DAYS = 14
 
 def _days_since(iso, today=None):
     try:
-        return ((today or date.today()) - date.fromisoformat((iso or "")[:10])).days
+        return ((today or stats.today()) - date.fromisoformat((iso or "")[:10])).days
     except ValueError:
         return None
 
@@ -194,7 +195,8 @@ def for_exercise(profile_id, exercise_id, lo, hi, target_sets=None, rir=2, deloa
         from . import cold_start
         kg, why = cold_start.starting_weight(profile_id, exercise_id)
         start = (kg, why) if kg else None
-    last = db.one("SELECT MAX(substr(COALESCE(started_at, finished_at), 1, 10)) AS d FROM workouts WHERE profile_id=?",
-                  (profile_id,))
+    last = db.one("SELECT COALESCE(started_at, finished_at) AS at FROM workouts WHERE profile_id=?"
+                  " ORDER BY COALESCE(started_at, finished_at) DESC LIMIT 1", (profile_id,))
+    last_day = stats._local_date((last or {}).get("at"))
     return recommend(history, lo, hi, target_sets, ex.get("equipment_type"), ex.get("pattern"), rir,
-                     deload, experience, start, last_workout=(last or {}).get("d"))
+                     deload, experience, start, last_workout=last_day.isoformat() if last_day else None)

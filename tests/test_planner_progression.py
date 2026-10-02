@@ -96,3 +96,20 @@ def test_layoff_counts_the_last_workout_overall_not_the_exercise():
     h = [sess((10, 100), (10, 100), (10, 100), date="2026-08-01")]        # Uebung lange nicht gemacht
     assert rec(h, today=date(2026, 9, 3), last_workout="2026-09-01")["status"] != "return"
     assert rec(h, today=date(2026, 9, 3))["status"] == "return"
+
+
+def test_dates_follow_vienna_not_utc(profile_id):
+    """Eine Einheit um 00:30 Wiener Zeit liegt in UTC noch am Vortag – zaehlen muss der Wiener Tag."""
+    from datetime import date as d
+    from app import db
+    from app.planner import autoregulate, progression
+    with db.connect() as c:
+        ex = c.execute("INSERT INTO exercises (name, muscle_group, pattern) VALUES (?, 'brust', 'h_push')",
+                       (f"TZ-Test {profile_id}",)).lastrowid
+        w = c.execute("INSERT INTO workouts (profile_id, started_at) VALUES (?, '2026-09-27T22:30:00.000Z')",
+                      (profile_id,)).lastrowid                                      # Montag 00:30 in Wien
+        c.execute("INSERT INTO sets (workout_id, exercise_id, set_no, reps, weight) VALUES (?, ?, 1, 8, 50)", (w, ex))
+    assert progression.sessions(profile_id, ex)[0]["date"] == "2026-09-28"
+    week_of_sunday, _ = autoregulate.actual_sets(profile_id, d(2026, 9, 21), d(2026, 9, 27))
+    week_of_monday, _ = autoregulate.actual_sets(profile_id, d(2026, 9, 28), d(2026, 10, 4))
+    assert week_of_sunday["brust"] == 0 and week_of_monday["brust"] == 1
