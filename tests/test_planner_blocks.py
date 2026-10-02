@@ -86,3 +86,15 @@ def test_events_are_deduplicated(profile_id):
     explain.log(profile_id, "info", "Test")
     explain.log(profile_id, "info", "Test")
     assert len([e for e in explain.recent(profile_id) if e["text"] == "Test"]) == 1
+
+
+def test_deleting_a_plan_removes_block_and_events_but_keeps_workouts(profile_id):
+    sp, day, ids = _setup(profile_id)
+    blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    explain.log(profile_id, "info", "Plan-Hinweis", None, sp["id"])
+    _log(profile_id, day["id"], ids["Bankdrücken"][1], MONDAY)
+    db.delete_row("splits", sp["id"])
+    assert db.one("SELECT 1 AS x FROM blocks WHERE split_id=?", (sp["id"],)) is None
+    assert db.one("SELECT 1 AS x FROM plan_events WHERE split_id=?", (sp["id"],)) is None
+    w = db.one("SELECT split_day_id FROM workouts WHERE profile_id=?", (profile_id,))
+    assert w is not None and w["split_day_id"] is None

@@ -558,6 +558,8 @@ def delete_row(table, row_id):
                 # Absolvierte Einheiten bleiben erhalten, verlieren nur die Zuordnung
                 c.execute("UPDATE workouts SET split_day_id=NULL WHERE split_day_id=?", (day,))
             c.execute("DELETE FROM split_days WHERE split_id=?", (row_id,))
+            c.execute("DELETE FROM blocks WHERE split_id=?", (row_id,))
+            c.execute("DELETE FROM plan_events WHERE split_id=?", (row_id,))
         elif table == "split_days":
             c.execute("DELETE FROM split_exercises WHERE split_day_id=?", (row_id,))
             c.execute("UPDATE workouts SET split_day_id=NULL WHERE split_day_id=?", (row_id,))

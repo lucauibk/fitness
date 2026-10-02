@@ -120,6 +120,7 @@ function render() {
             <span>${s.days.map((d) => esc(d.label)).join(" · ") || "noch leer"}</span></span>
         </button>
         ${s.active ? `<span class="pill ok">aktiv</span>` : `<button type="button" class="btn small tonal" data-activate="${s.id}">Wechseln</button>`}
+        <button type="button" class="icon-btn" data-delete-split="${s.id}" aria-label="„${esc(s.name)}“ löschen">${icon("trash")}</button>
       </div>`).join("")}</div>
     ${open ? `<div class="plan-head">
         <h3 class="group-title">${esc(open.name)}</h3>
@@ -185,13 +186,38 @@ function editSplit(split) {
   if (!isNew) {
     armDelete($("[data-delete]", sheet), () => {
       closeSheet();
-      if (openSplitId === split.id) { openSplitId = null; detail = null; }
-      deleteLater(`splits/${split.id}`, `„${split.name}“ gelöscht`, {
-        onDone: () => { splits = null; },
-      });
-      splits = null;
+      removePlan(split);
     }, "Löschen", "Split mit allen Tagen löschen? Absolvierte Einheiten bleiben erhalten.");
   }
+}
+
+/** Plan löschen (mit Rückgängig); der aktive Plan wird durch den nächsten ersetzt. */
+function removePlan(split) {
+  if (openSplitId === split.id) { openSplitId = null; detail = null; }
+  deleteLater(`splits/${split.id}`, `„${split.name}“ gelöscht`, {
+    onDone: () => { splits = null; blockInfo = null; changed(); },
+  });
+  splits = null;
+  render();
+}
+
+/** Zweiter Tipp bestätigt – ein versehentliches Löschen soll nicht gehen. */
+let confirmDelete = null;
+function askDeletePlan(split, btn) {
+  if (confirmDelete?.id === split.id) {
+    clearTimeout(confirmDelete.timer);
+    confirmDelete = null;
+    return removePlan(split);
+  }
+  clearTimeout(confirmDelete?.timer);
+  btn.classList.add("armed");
+  btn.setAttribute("aria-label", `„${split.name}“ wirklich löschen – nochmal tippen`);
+  confirmDelete = { id: split.id, timer: setTimeout(() => {
+    confirmDelete = null;
+    btn.classList.remove("armed");
+    btn.setAttribute("aria-label", `„${split.name}“ löschen`);
+  }, 3500) };
+  toast(`Nochmal tippen, um „${split.name}“ zu löschen`);
 }
 
 function editDay(day, splitId) {
@@ -558,6 +584,7 @@ function openPlanMenu() {
       try { await api("planner/new-block", { method: "POST" }); toast("Neuer Block gestartet"); changed(); await load(); }
       catch (e) { toast(e.message, { error: true }); }
     } },
+    open && { label: "Plan löschen", icon: "trash", run: () => removePlan(splits.find((x) => x.id === open.id) || open) },
     open && { label: "Split umbenennen", icon: "edit", run: () => editSplit(splits.find((s) => s.id === open.id)) },
     { label: "Neuen Plan mit Assistent", icon: "spark", run: async () => {
       const profile = await api(`profiles/${getProfile()}`).catch(() => null);
@@ -626,6 +653,8 @@ export async function mount(el) {
     if (t("[data-add-split]")) return editSplit(null);
     const editS = t("[data-edit-split]");
     if (editS) return editSplit(splits.find((s) => s.id === Number(editS.dataset.editSplit)));
+    const delS = t("[data-delete-split]");
+    if (delS) return askDeletePlan(splits.find((x) => x.id === Number(delS.dataset.deleteSplit)), delS);
     const openS = t("[data-open-split]");
     if (openS) {
       try {
