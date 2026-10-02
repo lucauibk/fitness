@@ -69,3 +69,12 @@ def test_e1rm_trend_and_rpe_drift():
     drifting = [sess((10, 50, 9)), sess((10, 50, 8)), sess((10, 50, 7.5))]
     assert pg.rpe_drift(drifting)
     assert not pg.rpe_drift([sess((10, 50, 8)), sess((10, 50, 8)), sess((10, 50, 8))])
+
+
+def test_novice_ignores_rpe_and_plateaus_after_two_sessions():
+    top = [sess((12, 50, 10), (12, 50, 10), (12, 50, 10))]
+    assert rec(top, experience="einsteiger")["raise_weight"]              # kein Halten wegen RPE
+    assert not rec(top, experience="fortgeschritten", rir=2)["raise_weight"]
+    stalled = [sess((9, 50), (8, 50), (8, 50)), sess((9, 50), (8, 50), (8, 50))]
+    assert rec(stalled, experience="einsteiger")["status"] == "plateau"
+    assert rec(stalled, experience="fortgeschritten")["status"] != "plateau"

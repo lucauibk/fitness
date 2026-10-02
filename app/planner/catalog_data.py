@@ -144,3 +144,13 @@ ACCESSORIES = {
     "Latzug einarmig", "Rudern Kabel einarmig", "Kabel-Brustpresse", "Liegestütze", "Step-ups",
     "Trap-Bar-Kreuzheben", "Smith Split Squat", "Arnold Press",
 }
+
+
+# Uebungen mit Belastung in der gedehnten Position (mehr Wachstumsreiz laut Maeo 2021, Kassiano 2023)
+LENGTHENED = {
+    "Beinbeuger sitzend", "Beinbeuger einbeinig", "Rumänisches Kreuzheben", "Rumänisches Kreuzheben Kurzhantel",
+    "Schrägbank-Curls", "Trizeps über Kopf", "Trizeps über Kopf Kurzhantel", "Kabelzug-Fliegende",
+    "Kabel-Fliegende von unten", "Kurzhantel-Fliegende", "Butterfly", "Kabel-Pullover", "Latzug",
+    "Wadenheben", "Wadenheben sitzend", "Bulgarian Split Squat", "Hackenschmidt-Kniebeuge",
+    "Schrägbankdrücken Kurzhantel", "Scott-Curls Maschine", "Hip Thrust Maschine",
+}

@@ -23,11 +23,14 @@ MIN_SETS = 2
 MIN_EXERCISES = 3
 ALLOWED_DIFFICULTY = {"einsteiger": 1, "fortgeschritten": 2, "erfahren": 3}
 TEMPLATES = splits.TEMPLATES
+# Standard-Split nach Trainingstagen (Frequenz ≥ 2×/Woche je Muskel; Schoenfeld 2016/2019, Pelland 2025)
+DEFAULT_SPLIT = {2: "gk2", 3: "gk3", 4: "okuk4", 5: "pplokuk5", 6: "ppl6"}
+MAX_SESSION_SETS_PER_MUSCLE = 8
 
 
 def catalog():
     return db.rows("SELECT id, name, muscle_group, unit, pattern, kind, equipment_type, difficulty,"
-                   " sfr, contraindications FROM exercises WHERE archived=0 AND pattern IS NOT NULL ORDER BY id")
+                   " sfr, contraindications, lengthened FROM exercises WHERE archived=0 AND pattern IS NOT NULL ORDER BY id")
 
 
 def usable(exercise, injuries):
@@ -53,6 +56,8 @@ def score(ex, s):
     sc = 2.0 * (ex["sfr"] or 3)
     if ex["name"] in STAPLES:
         sc += 3
+    if ex.get("lengthened"):
+        sc += 1.5            # Last in der gedehnten Position: mehr Reiz bei gleichem Aufwand
     if ex["name"] in ACCESSORIES and ex["pattern"] in COMPOUND:
         sc -= 3
     over = max(0, (ex["difficulty"] or 2) - ALLOWED_DIFFICULTY[s["experience"]])
@@ -143,6 +148,15 @@ def distribute(plan, targets, per_session, focus_groups=()):
             assigned[slot["day"]][slot["idx"]] = [slot["pattern"], sets]
 
     for day, slots in enumerate(assigned):
+        # nie mehr als 8 harte Saetze je Muskel und Einheit (Rest bleibt auf anderen Tagen)
+        for g in {group_of(v[0]) for v in slots.values()}:
+            mine = sorted((i for i in slots if group_of(slots[i][0]) == g), key=lambda i: -i)
+            while sum(slots[i][1] for i in mine) > MAX_SESSION_SETS_PER_MUSCLE:
+                idx = next((i for i in mine if slots[i][1] > MIN_SETS), None)
+                if idx is None:
+                    break
+                slots[idx][1] -= 1
+
         def order(idx):
             # zuerst fallen Isolationsuebungen weg, bei Grunduebungen eher Druecken als Ziehen
             pattern = slots[idx][0]

@@ -98,3 +98,30 @@ def test_deleting_a_plan_removes_block_and_events_but_keeps_workouts(profile_id)
     assert db.one("SELECT 1 AS x FROM plan_events WHERE split_id=?", (sp["id"],)) is None
     w = db.one("SELECT split_day_id FROM workouts WHERE profile_id=?", (profile_id,))
     assert w is not None and w["split_day_id"] is None
+
+
+def test_block_continues_when_no_fatigue_signals_and_stops_at_eight_weeks(profile_id):
+    sp, day, ids = _setup(profile_id)
+    block = blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    weeks0 = block["weeks"]
+    deload_week = MONDAY + timedelta(weeks=weeks0 - 1)
+    res = autoregulate.review(profile_id, deload_week)
+    nb = blocks.active(profile_id)
+    assert nb["weeks"] == weeks0 + 1 and not blocks.state(nb, deload_week)["deload"]
+    assert blocks.state(nb, MONDAY + timedelta(weeks=weeks0))["deload"]       # die Entlastung ruecke nach hinten
+    assert any("Weiter ohne Entlastung" in e["text"] for e in res["events"])
+    # bei 8 Wochen ist Schluss: dann kommt die Entlastung
+    for _ in range(5):
+        cur = blocks.active(profile_id)
+        autoregulate.review(profile_id, MONDAY + timedelta(weeks=cur["weeks"] - 1))
+    assert blocks.active(profile_id)["weeks"] <= autoregulate.MAX_BLOCK_WEEKS
+
+
+def test_fatigue_signals_trigger_deload_at_block_end(profile_id):
+    sp, day, ids = _setup(profile_id)
+    block = blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    for name in ("Bankdrücken", "Latzug"):
+        for i, rpe in enumerate((7, 8, 9)):
+            _log(profile_id, day["id"], ids[name][1], MONDAY + timedelta(weeks=i, days=1), rpe=rpe)
+    autoregulate.review(profile_id, MONDAY + timedelta(weeks=block["weeks"] - 1))
+    assert blocks.active(profile_id)["weeks"] <= block["weeks"]

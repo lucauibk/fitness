@@ -65,10 +65,10 @@ def create_plan(body: CreateIn, profile_id: int = Depends(current_profile)):
     profile = db.profile_out(db.get_row("profiles", profile_id))
     overrides = {"days": body.days, "weekdays": [], "goal": body.goal, "minutes": body.minutes,
                  "focus": body.focus}
-    options = generate.split_options(profile, overrides)
-    if not options:
+    key = generate.DEFAULT_SPLIT.get(body.days)
+    if not key:
         raise HTTPException(400, "Für diese Tageszahl gibt es keinen passenden Split.")
-    plan = generate.generate(profile, options[0]["key"], overrides)
+    plan = generate.generate(profile, key, overrides)
     db.update_row("profiles", profile_id, {"days_per_week": body.days})
     split = store.save_plan(profile_id, plan, activate=True)
     return {"split": split, "plan": {"name": plan["name"], "basis": plan["basis"]}}

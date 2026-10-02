@@ -71,6 +71,41 @@ def _bump(block, params, week, split, group, why):
     return done
 
 
+MAX_BLOCK_WEEKS = 8
+
+
+def deload_signals(profile_id, split):
+    """Hinweise auf aufgelaufene Ermuedung. Zwei davon -> Entlastung (Bell et al.: bedarfsgesteuert,
+    ein fester Rhythmus ist nicht belegt)."""
+    rows = _split_rows(split)
+    hist = {e["exercise_id"]: progression.sessions(profile_id, e["exercise_id"]) for e in rows}
+    signals = []
+    drifting = [e["name"] for e in rows if progression.rpe_drift(hist[e["exercise_id"]])]
+    if len(drifting) >= 2:
+        signals.append(f"Anstrengung steigt bei gleichem Gewicht ({', '.join(drifting[:3])})")
+    falling = [e["name"] for e in rows
+               if len(hist[e["exercise_id"]]) >= 3 and (progression.e1rm_trend(hist[e["exercise_id"]][:3]) or 0) < -2]
+    if len(falling) >= 2:
+        signals.append(f"Leistung sinkt ({', '.join(falling[:3])})")
+    stuck = [e["name"] for e in rows if progression.is_plateau(hist[e["exercise_id"]])]
+    if len(stuck) >= 2:
+        signals.append(f"Stillstand bei mehreren Übungen ({', '.join(stuck[:3])})")
+    recent = db.rows("SELECT soreness FROM checkins WHERE profile_id=? ORDER BY date DESC LIMIT 3", (profile_id,))
+    sore = sum(1 for r in recent if max((json.loads(r["soreness"] or "{}") or {"x": 0}).values()) >= 2)
+    if len(recent) >= 3 and sore >= 3:
+        signals.append("Muskelkater hält dauerhaft an")
+    return signals
+
+
+def extend_block(block, params):
+    """Eine weitere Trainingswoche vor die Entlastung schieben (Volumen bleibt auf dem Gipfel)."""
+    ratios = {g: v[:-1] + [v[-2] if len(v) >= 2 else v[-1], v[-1]] for g, v in params["ratios"].items()}
+    rir = params.get("rir") or []
+    params["ratios"] = ratios
+    params["rir"] = (rir[:-1] + [rir[-2] if len(rir) >= 2 else 1, rir[-1]]) if rir else rir
+    blocks._save_params(block["id"], params, weeks=block["weeks"] + 1)
+
+
 def review(profile_id, on_date=None):
     on_date = on_date or date.today()
     split = db.active_split(profile_id)
@@ -95,16 +130,22 @@ def review(profile_id, on_date=None):
     actual, rpes = actual_sets(profile_id, prev_start, prev_end)
     plan = planned_sets(block, split, prev)
 
-    # 1. Fruehe Entlastung bei steigender Anstrengung
-    if not st["deload"] and week >= 3:
-        drifting = [e for e in _split_rows(split) if progression.rpe_drift(progression.sessions(profile_id, e["exercise_id"]))]
-        if len(drifting) >= 2:
-            block["weeks"] = week
-            blocks._save_params(block["id"], params, weeks=week)
-            explain.log(profile_id, "deload", "Entlastungswoche vorgezogen: bei gleichem Gewicht wird es "
-                        f"anstrengender ({', '.join(e['name'] for e in drifting[:3])}) – diese Woche leichter, danach neuer Block.",
-                        None, split["id"])
-            return {"block": blocks.state(blocks.active(profile_id), on_date), "events": explain.recent(profile_id, 10)}
+    # 1. Entlastung nur bei Bedarf: zwei Signale -> jetzt; sonst am Blockende eine Woche weiter (bis 8 Wochen)
+    signals = deload_signals(profile_id, split)
+    if not st["deload"] and week >= 3 and len(signals) >= 2:
+        block["weeks"] = week
+        blocks._save_params(block["id"], params, weeks=week)
+        explain.log(profile_id, "deload", "Entlastungswoche vorgezogen: " + "; ".join(signals)
+                    + " – diese Woche leichter, danach neuer Block.", None, split["id"])
+        return {"block": blocks.state(blocks.active(profile_id), on_date), "events": explain.recent(profile_id, 10)}
+    if st["deload"] and len(signals) < 2 and block["weeks"] < MAX_BLOCK_WEEKS:
+        extend_block(block, params)
+        params["reviewed"] = week
+        blocks._save_params(block["id"], params)
+        explain.log(profile_id, "info", "Weiter ohne Entlastung: Leistung und Anstrengung passen noch – "
+                    "eine zusätzliche Trainingswoche.", None, split["id"])
+        block = blocks.active(profile_id)
+        return {"block": blocks.state(block, on_date), "events": explain.recent(profile_id, 10)}
 
     if not st["deload"] and not was_deload:
         for g in GROUPS:

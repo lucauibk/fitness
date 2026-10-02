@@ -1,6 +1,6 @@
 """Katalog einspielen: neue Uebungen einmalig anlegen, Eigenschaften nur in leere Felder schreiben.
 Eigene Aenderungen, bestehende Ids und geloeschte Uebungen bleiben unangetastet."""
-from .catalog_data import EXERCISES
+from .catalog_data import EXERCISES, LENGTHENED
 from .muscles import COMPOUND
 
 FLAG = "catalog_v3"
@@ -21,5 +21,7 @@ def apply(c):
             " WHERE name = ?",
             (ex["pattern"], kind, ex["equipment_type"], ex["difficulty"], ex["sfr"],
              ex["contraindications"], ex["name"]))
+    for name in LENGTHENED:
+        c.execute("UPDATE exercises SET lengthened = 1 WHERE name = ? AND lengthened IS NULL", (name,))
     if first:
         c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, datetime('now'))", (FLAG,))

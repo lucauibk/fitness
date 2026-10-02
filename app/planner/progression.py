@@ -74,10 +74,10 @@ def e1rm_trend(history):
     return round((vals[-1] - vals[0]) / vals[0] * 100, 1)
 
 
-def is_plateau(history):
-    """Drei Einheiten am selben Gewicht ohne mehr Wiederholungen (und nicht am oberen Ende)."""
-    recent = history[:PLATEAU_SESSIONS]
-    if len(recent) < PLATEAU_SESSIONS:
+def is_plateau(history, sessions=PLATEAU_SESSIONS):
+    """Drei Einheiten (Anfaenger: zwei) am selben Gewicht ohne mehr Wiederholungen."""
+    recent = history[:sessions]
+    if len(recent) < sessions:
         return False
     tops = [_top_weight(h["sets"]) for h in recent]
     if None in tops or len(set(tops)) != 1:
@@ -102,8 +102,12 @@ def rpe_drift(history):
     return len(set(tops)) == 1 and tops[0] is not None and avg[0] - avg[-1] >= 1.0   # neu - alt
 
 
-def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, rir=2, deload=False):
-    """Naechster Vorschlag fuer eine Uebung. history: neueste Einheit zuerst."""
+def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, rir=2, deload=False,
+              experience=None):
+    """Naechster Vorschlag fuer eine Uebung. history: neueste Einheit zuerst.
+    Anfaenger: reine Wiederholungs-Regeln (lineare Steigerung), keine RPE-Logik – sie schaetzen ihre
+    Reserve um 4-5 Wiederholungen daneben; Plateau schon nach zwei Stillstaenden."""
+    novice = experience == "einsteiger"
     hi = max(hi, lo)
     base = {"range": [lo, hi], "raise_weight": False, "status": "progress", "trend": e1rm_trend(history)}
     if not history:
@@ -129,14 +133,14 @@ def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, r
             return {**base, "reps": lo, "weight": max(step, _round_to(top * DROP_FACTOR, step)),
                     "status": "drop", "reason": f"zweimal unter {lo} Wiederholungen – etwas leichter und sauber aufbauen"}
 
-    if top and is_plateau(history):
+    if top and is_plateau(history, 2 if novice else PLATEAU_SESSIONS):
         return {**base, "reps": lo, "weight": max(step, _round_to(top * DELOAD_FACTOR, step)),
                 "status": "plateau",
-                "reason": f"{PLATEAU_SESSIONS} Einheiten ohne Fortschritt – 10 % leichter neu aufbauen "
+                "reason": f"{2 if novice else PLATEAU_SESSIONS} Einheiten ohne Fortschritt – 10 % leichter neu aufbauen "
                           "(oder die Übung im nächsten Block wechseln)"}
 
     at_top = all(s["reps"] >= hi for s in last) and len(last) >= (target_sets or 1)
-    rpes = [s["rpe"] for s in last if s["rpe"] is not None]
+    rpes = [] if novice else [s["rpe"] for s in last if s["rpe"] is not None]
     avg_rpe = sum(rpes) / len(rpes) if rpes else None
     if at_top:
         if avg_rpe is not None and avg_rpe >= 9.5 and rir >= 2:
@@ -162,5 +166,6 @@ def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, r
 
 def for_exercise(profile_id, exercise_id, lo, hi, target_sets=None, rir=2, deload=False):
     ex = db.one("SELECT equipment_type, pattern FROM exercises WHERE id=?", (exercise_id,)) or {}
+    experience = (db.one("SELECT experience FROM profiles WHERE id=?", (profile_id,)) or {}).get("experience")
     return recommend(sessions(profile_id, exercise_id), lo, hi, target_sets,
-                     ex.get("equipment_type"), ex.get("pattern"), rir, deload)
+                     ex.get("equipment_type"), ex.get("pattern"), rir, deload, experience)

@@ -114,3 +114,24 @@ def test_recommended_plans_pass_the_validator_for_normal_budgets(profile_id):
 def test_alternatives_respect_injuries():
     names = {e["name"] for e in generate.alternatives("squat", injuries={"knee"})}
     assert "Kniebeuge" not in names and "Beinpresse" in names
+
+
+def test_default_split_per_day_count_and_session_cap(profile_id):
+    from app.planner.generate import DEFAULT_SPLIT, MAX_SESSION_SETS_PER_MUSCLE
+    from app.planner.muscles import group_of
+    for days, key in DEFAULT_SPLIT.items():
+        p = _profile(profile_id, train_weekdays=None, days_per_week=days, session_minutes=90)
+        plan = generate.generate(p, key, {"days": days, "weekdays": []})
+        assert len(plan["days"]) >= 2
+        for d in plan["days"]:
+            per_group = {}
+            for e in d["exercises"]:
+                per_group[group_of(e["pattern"])] = per_group.get(group_of(e["pattern"]), 0) + e["peak_sets"]
+            assert max(per_group.values()) <= MAX_SESSION_SETS_PER_MUSCLE, (key, d["label"], per_group)
+
+
+def test_lengthened_exercises_get_a_bonus():
+    from app.planner.generate import score
+    base = {"name": "X", "sfr": 4, "difficulty": 1, "equipment_type": "machine", "pattern": "leg_iso_back"}
+    s = {"experience": "fortgeschritten", "goal": "aufbau", "age": None}
+    assert score({**base, "lengthened": 1}, s) > score({**base, "lengthened": None}, s)

@@ -217,7 +217,7 @@ MIGRATIONS = {
                   "muscles_secondary": "TEXT", "equipment": "TEXT", "video_query": "TEXT",
                   # Auswahl-Eigenschaften fuer den Plan-Ersteller (app/planner/catalog_data.py)
                   "equipment_type": "TEXT", "difficulty": "INTEGER", "sfr": "INTEGER",
-                  "contraindications": "TEXT"},
+                  "contraindications": "TEXT", "lengthened": "INTEGER"},
     # Portion mit Beschriftung und Packungsgroesse fuer die Mengeneingabe
     "foods": {"serving_label": "TEXT", "pack_g": "REAL"},
 }
