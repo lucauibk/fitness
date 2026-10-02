@@ -47,6 +47,16 @@ def main():
                 hit("Fehler", ctx, repr(e))
                 continue
             exs = [e for d in plan["days"] for e in d["exercises"]]
+            vol = plan["volume"]
+            focus_groups = {g for f in fl for g in generate.FOCUS_GROUPS[f]}
+            for g, t in vol["target"].items():
+                if vol["planned"][g] < t - 2:      # wie der Hinweis „Nicht ganz erreicht“ im Generator
+                    kind = f"Ziel verfehlt ({'Fokus' if g in focus_groups else 'sonst'}): {g}"
+                    hit(kind, ctx, f"{vol['planned'][g]} statt {t}")
+                    if o["recommended"]:
+                        hit(kind + " [empfohlen]", ctx, f"{vol['planned'][g]} statt {t}")
+            if vol["planned"]["po"] == 0:
+                hit("Po ohne direkte Übung", ctx)
             if "trizeps" not in {group_of(e["pattern"]) for e in exs}:
                 hit("ohne Trizeps", ctx)
             push = sum(e["peak_sets"] for e in exs if e["pattern"] in generate.PUSH) \

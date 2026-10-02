@@ -115,7 +115,7 @@ def analyze(profile_id, split_id=None):
     focus_groups = {t for f in (profile.get("focus") or []) for t in generate.FOCUS_GROUPS.get(f, [])}
     target, notes, per_session = vp.weekly_targets(
         profile.get("experience") or "einsteiger", goal, focus_groups,
-        sessions, profile.get("session_minutes"))
+        sessions, None)          # die Dauer wird nicht abgefragt: Ziele nur nach Volumen
 
     items = [(day, ex) for day in split["days"] for ex in day["exercises"]]
     used_ids = {ex["exercise_id"] for _, ex in items}

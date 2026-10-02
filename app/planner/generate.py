@@ -103,8 +103,14 @@ def score(ex, s):
     return sc
 
 
-def _slots(plan):
-    """Moegliche Uebungsplaetze je Tag: Muster der Vorlage, hoechstens drei je Muskelgruppe."""
+REGION = {"brust": "oben", "ruecken": "oben", "schultern": "oben", "bizeps": "oben", "trizeps": "oben",
+          "quads": "unten", "beinbeuger": "unten", "po": "unten", "waden": "unten"}
+
+
+def _slots(plan, targets=None):
+    """Moegliche Uebungsplaetze je Tag: Muster der Vorlage, hoechstens drei je Muskelgruppe. Reichen die Plaetze
+    eines Muskels nicht fuer sein Ziel (z. B. Po im Ganzkoerperplan, Bizeps-Fokus), kommen Plaetze an Tagen
+    derselben Koerperregion dazu – am Tag mit den wenigsten Plaetzen."""
     out = []
     for label, _ in plan:
         seen, slots = {}, []
@@ -115,6 +121,21 @@ def _slots(plan):
             seen[g] = seen.get(g, 0) + 1
             slots.append(pattern)
         out.append(slots)
+    weight = [max(1, len(wds)) for _, wds in plan]
+    for g, target in sorted((targets or {}).items()):
+        patterns = GROUP_PATTERNS.get(g, ())
+        if target < MIN_SETS or not patterns:
+            continue
+        fits = [d for d, slots in enumerate(out) if REGION.get(g) is None
+                or any(REGION.get(group_of(p)) == REGION[g] for p in slots)]
+        for _ in range(3):
+            room = sum(MAX_SETS * weight[d] for d, slots in enumerate(out) for p in slots if group_of(p) == g)
+            free = [d for d in fits if sum(group_of(p) == g for p in out[d]) < 2]
+            if room >= target or not free:
+                break
+            d = min(free, key=lambda d: (sum(group_of(p) == g for p in out[d]), len(out[d]), d))
+            mine = [p for p in out[d] if group_of(p) == g]
+            out[d].append(next((p for p in patterns if p not in mine), patterns[0]))
     return out
 
 
@@ -153,9 +174,10 @@ def _pick_slots(group, slots, count):
     return picked[:count]
 
 
-def distribute(plan, targets, per_session, focus_groups=()):
-    """Spitzenwochen-Saetze auf Tage verteilen. -> je Tag [(Muster, Saetze)]"""
-    slots_per_day = _slots(plan)
+def distribute(plan, targets, per_session, focus_groups=(), cycle=1.0):
+    """Spitzenwochen-Saetze auf Tage verteilen (targets je Durchlauf, beim Wechselplan also mal cycle).
+    -> je Tag [(Muster, Saetze)]"""
+    slots_per_day = _slots(plan, targets)
     weight = [max(1, len(wds)) for _, wds in plan]       # ein Tag mit zwei Wochentagen kommt zweimal pro Woche dran
     by_group = {}
     for day, slots in enumerate(slots_per_day):
@@ -195,7 +217,7 @@ def distribute(plan, targets, per_session, focus_groups=()):
         def spare(idx, sets, day=day):
             # bleibt der Muskel ohne diese Saetze noch auf Erhaltung (ueber die ganze Woche)?
             g = group_of(assigned[day][idx][0])
-            return _weekly(assigned, weight).get(g, 0) - sets * weight[day] >= GROUPS[g][1]
+            return _weekly(assigned, weight).get(g, 0) - sets * weight[day] >= GROUPS[g][1] * cycle
 
         def keeps_frequency(idx, day=day):
             # grosse Muskeln sollen an zwei Tagen dran bleiben (Schoenfeld 2016)
@@ -204,6 +226,11 @@ def distribute(plan, targets, per_session, focus_groups=()):
             on_day = sum(1 for p, _ in assigned[day].values() if group_of(p) == g)
             return g not in BIG or on_day > 1 or sum(weight[d] for d in others) >= 2
 
+        def last_one(idx, day=day):
+            # die einzige Uebung eines Muskels in der Woche bleibt (z. B. Rumpf) – notfalls mit weniger Saetzen
+            g = group_of(assigned[day][idx][0])
+            return sum(group_of(p) == g for sl in assigned for p, _ in sl.values()) <= 1
+
         def order(idx):
             # zuerst Muskeln ueber Erhaltung, dann Isolationsuebungen, bei Grunduebungen eher Druecken als Ziehen
             pattern = slots[idx][0]
@@ -211,9 +238,15 @@ def distribute(plan, targets, per_session, focus_groups=()):
                     -slots[idx][1])
         # Zu lang: erst ganze Uebungen streichen (nie Ziehen – Schulterbalance), deren Muskel auch ohne sie auf Erhaltung bleibt (Rumpf und Po
         # arbeiten bei den Grunduebungen mit) – sonst wuerden alle Uebungen auf 2 Saetze gestutzt
+        # Knapp zu lang: erst grosse Uebungen (ueber 3 Saetze) von Muskeln ueber Erhaltung um je einen Satz kuerzen
+        while sum(v[1] for v in slots.values()) > per_session:
+            big = [i for i in slots if slots[i][1] > 3 and group_of(slots[i][0]) not in focus_groups and spare(i, 1)]
+            if not big:
+                break
+            slots[min(big, key=order)][1] -= 1
         while sum(v[1] for v in slots.values()) > per_session and len(slots) > MIN_EXERCISES:
             cands = [i for i in slots if slots[i][0] not in PULL and group_of(slots[i][0]) not in focus_groups
-                     and spare(i, slots[i][1]) and keeps_frequency(i)]
+                     and spare(i, slots[i][1]) and keeps_frequency(i) and not last_one(i)]
             if not cands:
                 break
             slots.pop(min(cands, key=lambda i: (GROUPS[group_of(slots[i][0])][1] > 0, slots[i][0] in COMPOUND,
@@ -301,7 +334,7 @@ def generate(profile, option_key, overrides=None, variation=0):
 
     plan = splits.layout(opt, s.get("weekdays"))
     cycle = len(plan) / sessions if opt.get("rotate") else 1.0
-    per_day = distribute(plan, {g: round(v * cycle) for g, v in peak.items()}, per_session, focus_groups)
+    per_day = distribute(plan, {g: round(v * cycle) for g, v in peak.items()}, per_session, focus_groups, cycle)
 
     used, days = {}, []
     for i, (label, weekdays) in enumerate(plan):

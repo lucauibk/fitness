@@ -185,23 +185,24 @@ def test_kurze_einheit_wird_nicht_an_einer_hochrechnung_gemessen(profile_id):
     assert "Minuten" not in _texts(session_feedback.evaluate(profile_id, w))
 
 
-def test_mit_hinterlegter_wunschdauer_wird_die_laenge_beurteilt(profile_id):
+def test_dauer_wird_an_der_satzzahl_gemessen_nicht_an_alten_profil_minuten(profile_id):
+    """Die Dauer wird nicht mehr abgefragt: eine alte Angabe im Profil spielt keine Rolle."""
     ex = _exercise("Beinstrecker")
     with db.connect() as c:
-        c.execute("UPDATE profiles SET session_minutes=60 WHERE id=?", (profile_id,))
-    day = _day(profile_id, [(ex, 3, 8, 12)])
-    w = _workout(profile_id, _sets(ex, 3), day, minutes=15)
+        c.execute("UPDATE profiles SET session_minutes=120, goal='aufbau' WHERE id=?", (profile_id,))
+    day = _day(profile_id, [(ex, 6, 8, 12)])
+    w = _workout(profile_id, _sets(ex, 6), day, minutes=10)
 
-    assert "statt rund 60 Minuten" in _texts(session_feedback.evaluate(profile_id, w))
+    texte = _texts(session_feedback.evaluate(profile_id, w))
+    assert "statt rund 27 Minuten" in texte               # 8 min Aufwaermen + 6 x 3,2 min
+    assert "120" not in texte
 
 
 def test_sofort_eingetippte_einheit_meldet_keine_null_minuten(profile_id):
     """"nur 0 statt rund 40 Minuten" liest sich wie ein Fehler - ist aber nur eine
     nachtraeglich eingetippte Einheit."""
     ex = _exercise("Butterfly")
-    with db.connect() as c:
-        c.execute("UPDATE profiles SET session_minutes=60 WHERE id=?", (profile_id,))
-    w = _workout(profile_id, _sets(ex, 3), minutes=0.2)
+    w = _workout(profile_id, _sets(ex, 6), minutes=0.2)
 
     texte = _texts(session_feedback.evaluate(profile_id, w))
     assert "keine ganze Minute" in texte
