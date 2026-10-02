@@ -24,5 +24,5 @@ def save_plan(profile_id, plan, activate=True):
         age = (date.today().year - int(profile["birth_year"])) if profile.get("birth_year") else None
         blocks.create(profile_id, split_id, plan.get("goal") or profile.get("goal"),
                       plan.get("experience") or profile.get("experience"),
-                      plan.get("focus") or db.parse_focus(profile.get("focus")), age)
+                      plan.get("focus") or db.parse_focus(profile.get("focus")), age, cycle=plan.get("cycle", 1.0))
     return db.split_detail(split_id)

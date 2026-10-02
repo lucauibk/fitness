@@ -48,11 +48,15 @@ def planned_sets(block, split, week):
     """Geplante Saetze je Gruppe in einer Blockwoche."""
     day = date.fromisoformat(block["start_date"]) + timedelta(weeks=week - 1)
     out = {g: 0 for g in GROUPS}
-    for e in _split_rows(split):
-        g = PATTERN_GROUP.get(e.get("pattern"))
-        if g:
-            out[g] += blocks.sets_for(block, e, day)
-    return out
+    days = split["days"]
+    cycle = blocks._params(block).get("cycle") or 1.0       # Wechselplan: ein Durchlauf dauert laenger als eine Woche
+    for d in days:
+        times = max(1, len(d.get("weekdays") or []))
+        for e in d["exercises"]:
+            g = PATTERN_GROUP.get(e.get("pattern"))
+            if g:
+                out[g] += blocks.sets_for(block, e, day) * times
+    return {g: round(v / cycle) for g, v in out.items()}
 
 
 def _bump(block, params, week, split, group, why, budget=None, planned=None):

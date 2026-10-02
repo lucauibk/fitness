@@ -36,13 +36,13 @@ def ratios_for(goal, experience, focus=(), age=None, weeks=None):
     return {g: [(x / v[0]) if v[0] else 1.0 for x in v] for g, v in t.items()}
 
 
-def create(profile_id, split_id, goal=None, experience=None, focus=(), age=None, variation=0, start=None):
+def create(profile_id, split_id, goal=None, experience=None, focus=(), age=None, variation=0, start=None, cycle=1.0):
     """Neuen Block fuer einen Split anlegen; die aktuellen Plan-Saetze werden Woche 1."""
     with LOCK:
-        return _create(profile_id, split_id, goal, experience, focus, age, variation, start)
+        return _create(profile_id, split_id, goal, experience, focus, age, variation, start, cycle)
 
 
-def _create(profile_id, split_id, goal, experience, focus, age, variation, start):
+def _create(profile_id, split_id, goal, experience, focus, age, variation, start, cycle=1.0):
     goal = goal if goal in vp.GOAL_FACTOR else "aufbau"
     experience = experience if experience in vp.BLOCK_WEEKS else "einsteiger"
     weeks = vp.BLOCK_WEEKS[experience]
@@ -51,7 +51,7 @@ def _create(profile_id, split_id, goal, experience, focus, age, variation, start
         c.execute("UPDATE split_exercises SET base_sets = target_sets WHERE split_day_id IN"
                   " (SELECT id FROM split_days WHERE split_id=?)", (split_id,))
     params = {"rir": vp.rir_by_week(weeks), "ratios": ratios_for(goal, experience, focus, age, weeks),
-              "adjust": {}, "reviewed": 0, "variation": variation}
+              "adjust": {}, "reviewed": 0, "variation": variation, "cycle": cycle}
     return db.insert_row("blocks", {
         "profile_id": profile_id, "split_id": split_id, "start_date": (start or monday(date.today())).isoformat(),
         "weeks": weeks, "goal": goal, "experience": experience, "params": json.dumps(params), "active": 1})

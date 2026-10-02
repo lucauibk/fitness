@@ -27,6 +27,7 @@ def analyze(plan, injuries=(), minutes=None, goal="aufbau", rotate=False, experi
     findings = []
     per_session = vp.capacity(max(2, len(plan["days"])), minutes, goal)[1]
     for i, day in enumerate(plan["days"]):
+        times = max(1, len(day.get("weekdays") or []))      # Tag mit mehreren Wochentagen zaehlt mehrfach
         exs = day.get("exercises", [])
         sets_today = 0
         if not exs:
@@ -40,8 +41,8 @@ def analyze(plan, injuries=(), minutes=None, goal="aufbau", rotate=False, experi
             sets = item.get("peak_sets") or min(vp_max, round((item.get("target_sets") or 0) * peak))
             sets_today += sets
             if g:
-                weekly[g] += sets
-                days_with[g].add(i)
+                weekly[g] += sets * times
+                days_with[g].update((i, k) for k in range(times))
                 patterns.add(ex["pattern"])
                 if ex["pattern"] in ("h_push", "v_push", "chest_iso"):
                     pushing += sets

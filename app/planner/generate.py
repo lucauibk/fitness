@@ -158,6 +158,7 @@ def _pick_slots(group, slots, count):
 def distribute(plan, targets, per_session, focus_groups=()):
     """Spitzenwochen-Saetze auf Tage verteilen. -> je Tag [(Muster, Saetze)]"""
     slots_per_day = _slots(plan)
+    weight = [max(1, len(wds)) for _, wds in plan]       # ein Tag mit zwei Wochentagen kommt zweimal pro Woche dran
     by_group = {}
     for day, slots in enumerate(slots_per_day):
         for nth, pattern in enumerate(slots):
@@ -169,16 +170,18 @@ def distribute(plan, targets, per_session, focus_groups=()):
         if target < MIN_SETS:
             continue
         days_available = len({sl["day"] for sl in slots})
-        count = max(1, min(len(slots), math.ceil(target / MAX_SETS)))
-        while count < len(slots) and target / count > 4 and count < days_available:
+        # Wie oft pro Woche muss der Muskel drankommen, damit die Saetze je Einheit im Rahmen bleiben?
+        reachable = sum(weight[d] for d in {sl["day"] for sl in slots})
+        need = max(math.ceil(target / MAX_SETS), min(math.ceil(target / 4), reachable),     # lieber verteilen als 5 am Stueck
+                   2 if group in BIG_GROUPS and target >= 6 and days_available >= 2 else 1)
+        variety = min(len(GROUP_PATTERNS.get(group, ())), 2 if target < 8 else 3, len(slots))
+        count = max(1, variety)
+        while count < len(slots) and sum(weight[sl["day"]] for sl in _pick_slots(group, slots, count)) < need:
             count += 1
-        if group in BIG_GROUPS and target >= 6 and days_available >= 2:
-            count = max(count, 2)           # grosse Muskeln mindestens zweimal pro Woche
-        count = max(count, min(len(GROUP_PATTERNS.get(group, ())), 2 if target < 8 else 3, len(slots)))
         picked = _pick_slots(group, slots, count)
-        base, rest = divmod(target, count)
-        for i, slot in enumerate(sorted(picked, key=lambda sl: (sl["day"], sl["idx"]))):
-            sets = min(MAX_SETS, max(MIN_SETS, base + (1 if i < rest else 0)))
+        appearances = sum(weight[sl["day"]] for sl in picked)
+        for slot in sorted(picked, key=lambda sl: (sl["day"], sl["idx"])):
+            sets = min(MAX_SETS, max(MIN_SETS, math.ceil(target / appearances)))
             assigned[slot["day"]][slot["idx"]] = [slot["pattern"], sets]
 
     for day, slots in enumerate(assigned):
@@ -308,9 +311,10 @@ def generate(profile, option_key, overrides=None, variation=0):
 
     planned_by_week = [{g: 0 for g in GROUPS} for _ in range(n_weeks)]
     for d in days:
+        times = max(1, len(d["weekdays"]))
         for e in d["exercises"]:
             for w, sets in enumerate(e["week_sets"]):
-                planned_by_week[w][group_of(e["pattern"])] += sets
+                planned_by_week[w][group_of(e["pattern"])] += sets * times
     planned_by_week = [{g: round(v / cycle) for g, v in wk.items()} for wk in planned_by_week]
     planned_peak = {g: max(wk[g] for wk in planned_by_week[: n_weeks - 1]) for g in GROUPS}
     short = [(LABEL[g], planned_peak[g], t) for g, t in peak.items() if t >= 4 and planned_peak[g] < t - 2]
@@ -331,6 +335,7 @@ def generate(profile, option_key, overrides=None, variation=0):
         "reason": opt["text"], "reasons": info.get("reasons", []), "frequency": info.get("frequency", {}),
         "focus": focus, "rotate": bool(opt.get("rotate")), "weekdays_chosen": s.get("weekdays") or [],
         "volume": {"target": peak, "planned": planned_peak, "labels": LABEL},
+        "cycle": cycle,
         "block": {"weeks": n_weeks, "rir": vp.rir_by_week(n_weeks), "target": weeks_t,
                   "planned": planned_by_week, "variation": variation},
         "basis": info.get("pro", [])[:2] + basis,
