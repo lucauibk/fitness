@@ -37,6 +37,7 @@ export function openWizard(profile) {
     minutes: profile?.session_minutes ?? 60,
     focus: [...(profile?.focus || [])],
     limits: (profile?.limitations || "").split(/[,;\n]/).map((x) => x.trim()).filter(Boolean),
+    split: null,               // gewählte Aufteilung; null = die empfohlene
     sug: null,
   };
   const sheet = openSheet({ title: "Plan erstellen", body: "", wide: true });
@@ -54,8 +55,19 @@ export function openWizard(profile) {
       st.sug = await api(`planner/suggest?${q}`);
       if (!st.touched) st.days = st.sug.recommended;
       if (st.days > maxDays()) st.days = maxDays();
+      if (st.split && !st.sug.splits.some((o) => o.key === st.split)) st.split = null;
     } catch { st.sug = null; }
     paint();
+  }
+
+  /** Aufteilungen für die gewählte Einheitenzahl: die empfohlene ist vorgewählt, die anderen sind Alternativen. */
+  function splitChoice() {
+    const list = st.sug?.splits || [];
+    if (list.length < 2) return "";
+    const current = list.find((o) => o.key === st.split) || list.find((o) => o.recommended) || list[0];
+    return `<h3 class="form-section">Aufteilung</h3>
+      <div class="chips">${list.map((o) => chip("data-split", o.key, `${esc(o.name)}${o.recommended ? " ✓" : ""}`, o.key === current.key)).join("")}</div>
+      <p class="hint">${esc(current.text)} ${current.pro.map((x) => esc(x)).join(" ")}${current.contra.length ? ` Nachteil: ${esc(current.contra[0])}` : ""}</p>`;
   }
 
   function paint() {
@@ -76,6 +88,7 @@ export function openWizard(profile) {
         .map((n) => chip("data-days", n, `${n}×`, st.days === n, n > maxDays() ? "disabled" : "")).join("")}</div>
       <p class="hint">${st.sug ? `Empfohlen: ${st.sug.recommended}× pro Woche. ` : ""}${picked ? `Trainingstage: ${picked}.` : ""}
         ${free > st.days ? "Die übrigen freien Tage bleiben als Reserve zum Nachholen." : ""}</p>
+      ${splitChoice()}
       <h3 class="form-section">Dauer pro Einheit</h3>
       <div class="chips">${[...MINUTES, 0].map((m) => chip("data-minutes", m, m ? `${m} min` : "egal", st.minutes === m)).join("")}</div>
       <details class="field-more"><summary>Mehr Aufmerksamkeit für Muskeln, Beschwerden</summary>
@@ -97,7 +110,7 @@ export function openWizard(profile) {
           goal: st.goal, experience: st.experience, session_minutes: st.minutes || null, focus: st.focus, limitations } });
         await api("planner/create", { method: "POST", body: {
           days: st.days, available: st.available, goal: st.goal, experience: st.experience,
-          minutes: st.minutes, focus: st.focus } });
+          minutes: st.minutes, focus: st.focus, split: st.split } });
         window.dispatchEvent(new CustomEvent("wizard-changed"));
         closeSheet();
         toast("Plan erstellt – er passt sich ab jetzt an");
@@ -122,7 +135,9 @@ export function openWizard(profile) {
       return suggest();
     }
     const days = t("[data-days]");
-    if (days && !days.disabled) { st.days = Number(days.dataset.days); st.touched = true; return suggest(); }
+    if (days && !days.disabled) { st.days = Number(days.dataset.days); st.touched = true; st.split = null; return suggest(); }
+    const split = t("[data-split]");
+    if (split) { st.split = split.dataset.split; return paint(); }
     const min = t("[data-minutes]");
     if (min) { st.minutes = Number(min.dataset.minutes); return suggest(); }
     const focus = t("[data-focus]");

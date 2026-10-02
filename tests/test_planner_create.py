@@ -80,3 +80,23 @@ def test_pick_days_prefers_even_spacing_and_avoids_runs():
     assert pick_days([0, 1, 2, 3, 4], 4) == [0, 1, 3, 4]
     assert pick_days([2, 3, 4, 5, 6], 2) == [2, 5]
     assert pick_days([], 3) == [0, 2, 4]
+
+
+def test_suggest_offers_splits_with_a_recommendation_that_depends_on_experience(profile_id):
+    novice = pr.suggest(available="", minutes=60, goal="aufbau", experience="einsteiger", days=3, profile_id=profile_id)
+    adv = pr.suggest(available="", minutes=60, goal="aufbau", experience="fortgeschritten", days=3, profile_id=profile_id)
+    rec = lambda r: next(o["key"] for o in r["splits"] if o["recommended"])      # noqa: E731
+    assert rec(novice) == "gk3" and rec(adv) != "gk3"
+    assert len(novice["splits"]) >= 3
+
+
+def test_chosen_split_is_used_and_new_plans_vary_isolation_exercises(profile_id):
+    pr.create_plan(pr.CreateIn(days=3, split="ppl3"), profile_id)
+    assert [d["label"] for d in db.active_split(profile_id)["days"]] == ["Push", "Pull", "Beine"]
+
+    def isolation(pid):
+        return {e["name"] for d in db.active_split(pid)["days"] for e in d["exercises"] if e["kind"] == "isolation"}
+    pr.create_plan(pr.CreateIn(days=3, split="gk3"), profile_id)
+    first = isolation(profile_id)
+    pr.create_plan(pr.CreateIn(days=3, split="gk3"), profile_id)
+    assert isolation(profile_id) != first

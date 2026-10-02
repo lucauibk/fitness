@@ -58,6 +58,12 @@ class CreateIn(BaseModel):
     minutes: Optional[int] = Field(None, ge=0, le=120)
     focus: Optional[list[str]] = None
     experience: Optional[str] = None
+    split: Optional[str] = None          # gewaehlte Aufteilung; sonst die empfohlene
+
+
+def _options(profile, sessions, weekdays, goal, experience, minutes, focus=None):
+    return generate.split_options(profile, {"days": sessions, "weekdays": weekdays, "goal": goal,
+                                            "experience": experience, "minutes": minutes, "focus": focus})
 
 
 @router.post("/create")
@@ -72,12 +78,16 @@ def create_plan(body: CreateIn, profile_id: int = Depends(current_profile)):
                  "focus": body.focus}
     available = db.parse_weekdays(body.available) if body.available is not None else db.parse_weekdays(profile.get("train_weekdays"))
     sessions = max(2, min(body.days, len(available) or 7))      # nie mehr Einheiten als freie Tage
-    key = generate.DEFAULT_SPLIT.get(sessions)
-    if not key:
-        raise HTTPException(400, "Für diese Tageszahl gibt es keinen passenden Split.")
     weekdays = generate.pick_days(available, sessions)
     overrides.update({"days": sessions, "weekdays": weekdays})
-    plan = generate.generate(profile, key, overrides)
+    options = _options(profile, sessions, weekdays, body.goal, body.experience, minutes, body.focus)
+    keys = [o["key"] for o in options]
+    key = body.split if body.split in keys else (keys[0] if keys else generate.DEFAULT_SPLIT.get(sessions))
+    if not key:
+        raise HTTPException(400, "Für diese Tageszahl gibt es keinen passenden Split.")
+    # Jeder neue Plan nimmt andere Isolationsuebungen als der vorige (Grunduebungen bleiben)
+    variation = db.one("SELECT COUNT(*) AS n FROM splits WHERE profile_id=?", (profile_id,))["n"]
+    plan = generate.generate(profile, key, overrides, variation=variation)
     if any(b - a == 1 for a, b in zip(weekdays, weekdays[1:])) and key.startswith("gk"):
         plan["basis"].append("Einige Trainingstage liegen direkt hintereinander – bei Ganzkörper-Einheiten "
                              "ist das nicht ideal. Mit einem freien Tag dazwischen läuft es besser.")
@@ -111,4 +121,9 @@ def suggest(available: str = "", minutes: Optional[int] = None, goal: Optional[s
                                   minutes if minutes is not None else profile.get("session_minutes") or 60,
                                   len(free) or 7)
     chosen = max(2, min(days or n, len(free) or 7))
-    return {"recommended": n, "max": len(free) or 7, "weekdays": generate.pick_days(free, chosen)}
+    weekdays = generate.pick_days(free, chosen)
+    mins = minutes if minutes is not None else profile.get("session_minutes") or 60
+    options = _options(profile, chosen, weekdays, goal, experience, mins)
+    return {"recommended": n, "max": len(free) or 7, "weekdays": weekdays,
+            "splits": [{"key": o["key"], "name": o["name"], "text": o["text"], "recommended": o["recommended"],
+                        "pro": o.get("pro", [])[:2], "contra": o.get("contra", [])[:1]} for o in options]}
