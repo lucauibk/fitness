@@ -89,11 +89,38 @@ def _bump(block, params, week, split, group, why, budget=None, planned=None):
 
 
 MAX_BLOCK_WEEKS = 8
+FATIGUE_TAU_DAYS = 5          # harte Saetze klingen mit etwa 5 Tagen Zeitkonstante ab
+FATIGUE_HIGH = 1.3            # 30 % ueber dem eigenen Schnitt der Vorwochen
+FATIGUE_BASELINE_DAYS = 28
 
 
-def deload_signals(profile_id, split):
+def fatigue(profile_id, on_date=None):
+    """Ermuedungswert: Summe der harten Saetze, exponentiell abklingend (Banister-artig, ohne Anpassung).
+    -> (Schnitt der letzten 7 Tage, Schnitt der vier Wochen davor) | None, wenn es dafuer noch zu wenig Verlauf gibt."""
+    import math
+    on_date = on_date or stats.today()
+    per_day = {}
+    for r in db.rows("SELECT COALESCE(w.started_at, w.finished_at) AS at, COUNT(*) AS n FROM sets s"
+                     " JOIN workouts w ON w.id = s.workout_id WHERE w.profile_id=? AND s.warmup=0"
+                     " GROUP BY w.id", (profile_id,)):
+        d = stats._local_date(r["at"])
+        if d and d <= on_date:
+            per_day[d] = per_day.get(d, 0) + r["n"]
+    if not per_day or (on_date - min(per_day)).days < FATIGUE_BASELINE_DAYS + 7:
+        return None
+
+    def value(day):
+        return sum(n * math.exp(-(day - d).days / FATIGUE_TAU_DAYS) for d, n in per_day.items() if d <= day)
+    # Tageswerte schwanken mit dem Trainingsrhythmus – verglichen werden Durchschnitte: letzte 7 Tage
+    # gegen die vier Wochen davor
+    recent = [value(on_date - timedelta(days=k)) for k in range(7)]
+    past = [value(on_date - timedelta(days=k)) for k in range(7, 7 + FATIGUE_BASELINE_DAYS)]
+    return sum(recent) / len(recent), sum(past) / len(past)
+
+
+def deload_signals(profile_id, split, on_date=None):
     """Hinweise auf aufgelaufene Ermuedung. Zwei davon -> Entlastung (Bell et al.: bedarfsgesteuert,
-    ein fester Rhythmus ist nicht belegt)."""
+    ein fester Rhythmus ist nicht belegt). Der Ermuedungswert allein loest nie eine Entlastung aus."""
     rows = _split_rows(split)
     hist = {e["exercise_id"]: progression.sessions(profile_id, e["exercise_id"]) for e in rows}
     signals = []
@@ -111,6 +138,9 @@ def deload_signals(profile_id, split):
     sore = sum(1 for r in recent if max((json.loads(r["soreness"] or "{}") or {"x": 0}).values()) >= 2)
     if len(recent) >= 3 and sore >= 3:
         signals.append("Muskelkater hält dauerhaft an")
+    load = fatigue(profile_id, on_date)
+    if load and load[1] > 0 and load[0] >= FATIGUE_HIGH * load[1]:
+        signals.append(f"Trainingslast {round(100 * (load[0] / load[1] - 1))} % über deinem Schnitt der Vorwochen")
     return signals
 
 
@@ -167,7 +197,7 @@ def _review(profile_id, on_date=None):
     plan = planned_sets(block, split, prev)
 
     # 1. Entlastung nur bei Bedarf: zwei Signale -> jetzt; sonst am Blockende eine Woche weiter (bis 8 Wochen)
-    signals = deload_signals(profile_id, split)
+    signals = deload_signals(profile_id, split, on_date)
     if not st["deload"] and week >= 3 and len(signals) >= 2:
         block["weeks"] = week
         # Diese Woche ist jetzt die Entlastung: Reserve wie im Deload, und als geprueft markieren – sonst

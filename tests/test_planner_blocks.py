@@ -215,3 +215,31 @@ def test_early_deload_survives_a_second_review_in_the_same_week(profile_id, monk
     autoregulate.review(profile_id, week3)
     st = blocks.state(blocks.active(profile_id), week3)
     assert st["deload"] and st["weeks"] == 3 and st["rir"] == 4
+
+
+def _bulk(profile_id, ex_id, day, sets):
+    at = datetime(day.year, day.month, day.day, 17).isoformat()
+    with db.connect() as c:
+        w = c.execute("INSERT INTO workouts (profile_id, started_at) VALUES (?, ?)", (profile_id, at)).lastrowid
+        c.executemany("INSERT INTO sets (workout_id, exercise_id, set_no, reps, weight, warmup) VALUES (?,?,?,10,50,0)",
+                      [(w, ex_id, k + 1) for k in range(sets)])
+
+
+def test_fatigue_compares_against_the_own_baseline(profile_id):
+    sp, day, ids = _setup(profile_id)
+    bench = ids["Bankdrücken"][1]
+    start = MONDAY
+    assert autoregulate.fatigue(profile_id, start) is None                         # noch kein Verlauf
+    for week in range(6):                                                          # 6 Wochen gleichmaessig
+        for k in (0, 2, 4):
+            _bulk(profile_id, bench, start + timedelta(weeks=week, days=k), 12)
+    steady_day = start + timedelta(weeks=6)
+    now, base = autoregulate.fatigue(profile_id, steady_day)
+    assert 0.8 * base < now < 1.2 * base
+    assert not any("Trainingslast" in s for s in autoregulate.deload_signals(profile_id, db.active_split(profile_id), steady_day))
+    for k in range(5):                                                             # eine Woche doppelt so viel, taeglich
+        _bulk(profile_id, bench, steady_day + timedelta(days=k), 24)
+    hard_day = steady_day + timedelta(days=4)
+    now, base = autoregulate.fatigue(profile_id, hard_day)
+    assert now >= autoregulate.FATIGUE_HIGH * base
+    assert any("Trainingslast" in s for s in autoregulate.deload_signals(profile_id, db.active_split(profile_id), hard_day))
