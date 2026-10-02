@@ -51,7 +51,9 @@ def test_available_days_are_not_training_days(profile_id):
     """Mittwoch bis Sonntag frei heisst nicht fuenf Einheiten."""
     pr.create_plan(pr.CreateIn(days=3, available=[2, 3, 4, 5, 6]), profile_id)
     assert _weekdays(profile_id) == [2, 4, 6]                           # Mi, Fr, So
-    assert db.parse_weekdays(db.get_row("profiles", profile_id)["train_weekdays"]) == [2, 3, 4, 5, 6]
+    prof = db.get_row("profiles", profile_id)
+    assert db.parse_weekdays(prof["available_weekdays"]) == [2, 3, 4, 5, 6]     # freie Tage bleiben erhalten
+    assert db.parse_weekdays(prof["train_weekdays"]) == [2, 4, 6]               # geplante Tage getrennt
     pr.create_plan(pr.CreateIn(days=4, available=[2, 3, 4, 5, 6]), profile_id)
     assert _weekdays(profile_id) == [2, 3, 5, 6]                        # nie drei Tage am Stueck
 
@@ -67,10 +69,10 @@ def test_suggestion_recommends_by_level_and_time_and_caps_at_available(profile_i
     assert generate.recommended_days("fortgeschritten", "aufbau", 60, 7) == 4
     assert generate.recommended_days("fortgeschritten", "aufbau", 45, 7) == 5
     assert generate.recommended_days("erfahren", "aufbau", 90, 3) == 3
-    res = pr.suggest(available="2,3,4,5,6", minutes=60, goal="aufbau", experience="einsteiger", days=None,
+    res = pr.suggest(available="2,3,4,5,6", minutes=60, goal="aufbau", experience="einsteiger", days=None, focus="",
                      profile_id=profile_id)
     assert res["recommended"] == 3 and res["weekdays"] == [2, 4, 6] and res["max"] == 5
-    assert pr.suggest(available="", minutes=60, goal=None, experience="einsteiger", days=4,
+    assert pr.suggest(available="", minutes=60, goal=None, experience="einsteiger", days=4, focus="",
                       profile_id=profile_id)["weekdays"] == [0, 1, 3, 5]
 
 
@@ -83,8 +85,8 @@ def test_pick_days_prefers_even_spacing_and_avoids_runs():
 
 
 def test_suggest_offers_splits_with_a_recommendation_that_depends_on_experience(profile_id):
-    novice = pr.suggest(available="", minutes=60, goal="aufbau", experience="einsteiger", days=3, profile_id=profile_id)
-    adv = pr.suggest(available="", minutes=60, goal="aufbau", experience="fortgeschritten", days=3, profile_id=profile_id)
+    novice = pr.suggest(available="", minutes=60, goal="aufbau", experience="einsteiger", days=3, focus="", profile_id=profile_id)
+    adv = pr.suggest(available="", minutes=60, goal="aufbau", experience="fortgeschritten", days=3, focus="", profile_id=profile_id)
     rec = lambda r: next(o["key"] for o in r["splits"] if o["recommended"])      # noqa: E731
     assert rec(novice) == "gk3" and rec(adv) != "gk3"
     assert len(novice["splits"]) >= 3

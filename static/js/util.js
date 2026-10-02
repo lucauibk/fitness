@@ -440,10 +440,13 @@ export const isPendingDelete = (path) => pendingDeletes.has(path);
 const dataChanged = () => window.dispatchEvent(new CustomEvent("data-changed"));
 
 export function deleteLater(path, message, { onDone } = {}) {
+  // Profil jetzt festhalten: wechselt man in den 5 Sekunden das Profil, soll die Löschung trotzdem
+  // beim ursprünglichen Profil ankommen (sonst 403 nach "gelöscht").
+  const bound = withProfile(path).replace(/^\/api\//, "");
   const commit = async () => {
     if (!pendingDeletes.has(path)) return;
     pendingDeletes.delete(path);
-    try { await api(path, { method: "DELETE" }); } catch (e) { toast(e.message, { error: true }); }
+    try { await api(bound, { method: "DELETE" }); } catch (e) { toast(e.message, { error: true }); }
     onDone?.();
     dataChanged();
   };

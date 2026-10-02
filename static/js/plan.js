@@ -135,18 +135,30 @@ function render() {
   if (refocus) { root.querySelector(refocus)?.focus({ preventScroll: true }); refocus = null; }
 }
 
+/** Zustand vergessen (Profilwechsel): sonst fragt load() den Split des vorigen Profils ab. */
+export function reset() {
+  splits = null; detail = null; openSplitId = null; blockInfo = null; sortingDay = null; exercises = null;
+}
+
+// Neu erstellter Plan: gleich diesen zeigen statt des vorher geöffneten.
+window.addEventListener("plan-created", (ev) => {
+  openSplitId = ev.detail?.splitId ?? null;
+  splits = null;
+  detail = null;
+});
+
 export async function load() {
   if (!splits) root.innerHTML = skeleton(4);
   splits = await api("splits");
   blockInfo = await api("planner/block").catch(() => null);
-  const wanted = openSplitId ?? splits.find((s) => s.active)?.id ?? splits[0]?.id;
-  if (wanted) {
-    openSplitId = wanted;
-    try {
-      detail = await api(`splits/${wanted}`);
-    } catch { detail = null; openSplitId = null; }
-  } else {
-    detail = null;
+  // Wunsch: der zuletzt geöffnete Plan, sonst der aktive, sonst irgendeiner – fällt einer weg (gelöscht,
+  // anderes Profil), geht es mit dem nächsten weiter statt mit leerer Ansicht.
+  const order = [openSplitId, splits.find((s) => s.active)?.id, splits[0]?.id]
+    .filter((id, i, all) => id && all.indexOf(id) === i && splits.some((s) => s.id === id));
+  detail = null;
+  openSplitId = null;
+  for (const id of order) {
+    try { detail = await api(`splits/${id}`); openSplitId = id; break; } catch { /* nächster Kandidat */ }
   }
   render();
 }

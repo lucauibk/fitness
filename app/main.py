@@ -290,8 +290,8 @@ def api_profile(profile_id: int):
 def api_update_profile(profile_id: int, body: ProfileIn):
     _found(db.get_row("profiles", profile_id))
     data = _profile_in(_data(body))
-    if "experience" in data:
-        data["experience_auto"] = None      # von Hand gesetzt: die App stuft nicht mehr selbst um
+    if "experience" in data and data["experience"] != db.get_row("profiles", profile_id).get("experience"):
+        data["experience_auto"] = None      # von Hand geaendert: die App stuft nicht mehr selbst um
     return db.profile_out(_found(db.update_row("profiles", profile_id, data)))
 
 
@@ -393,7 +393,7 @@ def api_delete_split(split_id: int, profile_id: int = Depends(current_profile)):
     db.delete_row("splits", split_id)
     rest = db.list_rows_where("splits", "profile_id", profile_id)
     if was_active and rest:
-        db.activate_split(rest[0]["id"], profile_id)
+        db.activate_split(rest[-1]["id"], profile_id)       # der zuletzt angelegte Plan rueckt nach
     return {"ok": True}
 
 

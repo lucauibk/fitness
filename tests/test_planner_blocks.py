@@ -171,3 +171,19 @@ def test_first_plateau_does_not_swap_but_a_repeated_one_does(profile_id):
                                   "date": old, "kind": "plateau", "text": "Latzug: früherer Stillstand"})
     assert autoregulate.swap_plateaus(profile_id, db.active_split(profile_id))            # zweiter Stillstand
     assert db.one("SELECT exercise_id FROM split_exercises WHERE id=?", (ids["Latzug"][0],))["exercise_id"] != ex_id
+
+
+def test_switching_back_to_a_plan_resumes_its_block_instead_of_restarting(profile_id):
+    sp, day, ids = _setup(profile_id)
+    first = blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    other = db.insert_row("splits", {"profile_id": profile_id, "name": "Zweiter", "active": 0})
+    db.insert_row("split_days", {"split_id": other["id"], "position": 0, "label": "X", "weekdays": "1"})
+    db.activate_split(other["id"], profile_id)
+    second = blocks.ensure(profile_id)
+    assert second["id"] != first["id"] and second["split_id"] == other["id"]
+    db.activate_split(sp["id"], profile_id)
+    back = blocks.ensure(profile_id)
+    assert back["id"] == first["id"] and back["start_date"] == first["start_date"]
+    assert db.one("SELECT COUNT(*) AS n FROM blocks WHERE profile_id=? AND active=1", (profile_id,))["n"] == 1
+    db.activate_split(other["id"], profile_id)
+    assert blocks.ensure(profile_id)["id"] == second["id"]

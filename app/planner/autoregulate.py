@@ -129,6 +129,11 @@ def reclassify(profile_id):
 
 
 def review(profile_id, on_date=None):
+    with blocks.LOCK:                       # parallele /today-Aufrufe duerfen nicht doppelt nachholen
+        return _review(profile_id, on_date)
+
+
+def _review(profile_id, on_date=None):
     on_date = on_date or date.today()
     split = db.active_split(profile_id)
     if not split:

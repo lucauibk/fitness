@@ -6,6 +6,7 @@ und reproduzierbar. Anpassungen aus dem Wochen-Check stehen in params["adjust"].
 """
 import json
 import math
+import threading
 from datetime import date, timedelta
 
 from .. import db
@@ -14,6 +15,7 @@ from .generate import FOCUS_GROUPS
 from .muscles import PATTERN_GROUP
 
 MAX_EXERCISE_SETS = 6
+LOCK = threading.RLock()      # Erstellen, Aktivieren und Wochen-Check nie gleichzeitig
 
 
 def monday(d):
@@ -36,6 +38,11 @@ def ratios_for(goal, experience, focus=(), age=None, weeks=None):
 
 def create(profile_id, split_id, goal=None, experience=None, focus=(), age=None, variation=0, start=None):
     """Neuen Block fuer einen Split anlegen; die aktuellen Plan-Saetze werden Woche 1."""
+    with LOCK:
+        return _create(profile_id, split_id, goal, experience, focus, age, variation, start)
+
+
+def _create(profile_id, split_id, goal, experience, focus, age, variation, start):
     goal = goal if goal in vp.GOAL_FACTOR else "aufbau"
     experience = experience if experience in vp.BLOCK_WEEKS else "einsteiger"
     weeks = vp.BLOCK_WEEKS[experience]
@@ -54,18 +61,30 @@ def active(profile_id):
     return db.one("SELECT * FROM blocks WHERE profile_id=? AND active=1 ORDER BY id DESC LIMIT 1", (profile_id,))
 
 
+def for_split(split_id):
+    return db.one("SELECT * FROM blocks WHERE split_id=? ORDER BY id DESC LIMIT 1", (split_id,))
+
+
 def ensure(profile_id, split=None):
-    """Aktiver Block fuer den aktiven Split; fehlt er (alter Plan), wird er angelegt."""
-    split = split or db.active_split(profile_id)
-    if not split:
-        return None
-    block = active(profile_id)
-    if block and block["split_id"] == split["id"]:
-        return block
-    profile = db.get_row("profiles", profile_id) or {}
-    age = (date.today().year - int(profile["birth_year"])) if profile.get("birth_year") else None
-    return create(profile_id, split["id"], profile.get("goal"), profile.get("experience"),
-                  db.parse_focus(profile.get("focus")), age)
+    """Aktiver Block fuer den aktiven Split. Wechselt man zu einem Split mit frueherem Block, laeuft dieser
+    weiter (Woche, Anpassungen, Basis-Saetze bleiben); nur ein Split ohne Block bekommt einen neuen."""
+    with LOCK:
+        split = split or db.active_split(profile_id)
+        if not split:
+            return None
+        block = active(profile_id)
+        if block and block["split_id"] == split["id"]:
+            return block
+        earlier = for_split(split["id"])
+        if earlier:
+            with db.connect() as c:
+                c.execute("UPDATE blocks SET active=0 WHERE profile_id=?", (profile_id,))
+                c.execute("UPDATE blocks SET active=1 WHERE id=?", (earlier["id"],))
+            return db.get_row("blocks", earlier["id"])
+        profile = db.get_row("profiles", profile_id) or {}
+        age = (date.today().year - int(profile["birth_year"])) if profile.get("birth_year") else None
+        return create(profile_id, split["id"], profile.get("goal"), profile.get("experience"),
+                      db.parse_focus(profile.get("focus")), age)
 
 
 def week_no(block, on_date=None):

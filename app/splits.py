@@ -171,7 +171,9 @@ def rank(days, weekdays, profile, count):
     """Alle passenden Optionen, bewertet und begruendet. profile: goal, experience,
     minutes, focus, age."""
     days = min(max(int(days or 3), 2), 6)
-    weekdays = sorted(set(weekdays or [])) or DEFAULT_DAYS[days]
+    weekdays = sorted(set(weekdays or []))
+    if len(weekdays) != days:
+        weekdays = DEFAULT_DAYS[days]          # Tage passen nicht zur Einheitenzahl: Standardtage bewerten
     exp = profile.get("experience") or "einsteiger"
     goal = profile.get("goal") or "aufbau"
     minutes = profile.get("minutes") or 60
@@ -223,7 +225,7 @@ def rank(days, weekdays, profile, count):
             placed = {wd: label for label, wds in layout(opt, weekdays) for wd in wds}
             overlap = 0
             for a, b in pairs:
-                if opt.get("rotate"):
+                if opt.get("rotate") or a not in placed or b not in placed:
                     continue  # wechselt ohnehin die Hälfte
                 shared = (day_groups(placed[a], count) & day_groups(placed[b], count)) & set(RECOVERY)
                 overlap += len(shared)
