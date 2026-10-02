@@ -354,7 +354,20 @@ def api_splits(profile_id: int = Depends(current_profile)):
 @app.get("/api/splits/{split_id}")
 def api_split(split_id: int, profile_id: int = Depends(current_profile)):
     _owns_split(split_id, profile_id)
-    return _found(db.split_detail(split_id))
+    split = _found(db.split_detail(split_id))
+    _with_minutes(split, profile_id)
+    return split
+
+
+def _with_minutes(split, profile_id):
+    """Geschaetzte Dauer je Tag aus den Saetzen der aktuellen Blockwoche – die Dauer wird nicht abgefragt,
+    sie ergibt sich aus dem Volumen."""
+    from .planner import blocks, volume_plan as vp
+    block = blocks.for_split(split["id"])
+    goal = (block or {}).get("goal") or (db.get_row("profiles", profile_id) or {}).get("goal") or "aufbau"
+    for day in split["days"]:
+        sets = sum(blocks.sets_for(block, e) if block else e["target_sets"] for e in day["exercises"])
+        day["minutes"] = vp.session_minutes(sets, goal) if sets else None
 
 
 @app.post("/api/splits")

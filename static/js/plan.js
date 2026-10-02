@@ -61,7 +61,7 @@ function dayCard(day) {
       <div>
         <div class="card-title">${esc(day.label)}</div>
         <div class="row-meta"><span>${daysLabel(day.weekdays)}</span>
-          <span>${day.exercises.length} Übungen</span></div>
+          <span>${day.exercises.length} Übungen</span>${day.minutes ? `<span>≈ ${day.minutes} min</span>` : ""}</div>
       </div>
       ${icon("down", "chev")}
     </summary>
