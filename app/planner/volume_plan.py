@@ -83,12 +83,18 @@ def fit_to_capacity(targets, total):
     peak = max(sum(v[w] for v in targets.values()) for w in range(weeks - 1))
     if peak <= total:
         return targets, None
-    f = total / peak
-    out = {g: [(min(x, GROUPS[g][1]) if round(x * f) < GROUPS[g][1] else round(x * f)) if x else 0 for x in v]
+    # Erhaltung (MV) hat Vorrang: gekuerzt wird nur der Zuschlag darueber – auch der des Fokus –, und zwar
+    # fuer alle Muskeln im selben Verhaeltnis. Sonst blieben die Ziele ueber der Zeit, und die Verteilung auf die
+    # Tage wuerde zufaellig einzelne Muskeln unter Erhaltung druecken.
+    pw = max(range(weeks - 1), key=lambda w: sum(v[w] for v in targets.values()))
+    base = sum(min(v[pw], GROUPS[g][1]) for g, v in targets.items())
+    extra = peak - base
+    f = max(0.0, (total - base) / extra) if extra else 0.0
+    out = {g: [(min(x, GROUPS[g][1]) + int(max(0, x - GROUPS[g][1]) * f)) if x else 0 for x in v]
            for g, v in targets.items()}
     left = max(sum(v[w] for v in out.values()) for w in range(weeks - 1))
     note = (f"Deine Zeit reicht für ≈ {total} Sätze pro Woche, der Block würde {peak} verlangen – "
-            "das Volumen ist anteilig gekürzt (nicht unter Erhaltung).")
+            "gekürzt ist nur, was über die Erhaltung hinausgeht.")
     if left > total:
         note += (f" Selbst gekürzt bleiben ≈ {left} Sätze – für dieses Volumen bräuchte es mehr Zeit "
                  "pro Einheit oder einen zusätzlichen Trainingstag.")

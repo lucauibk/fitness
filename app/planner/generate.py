@@ -10,7 +10,7 @@ from datetime import date
 from .. import db, splits
 from . import volume_plan as vp
 from .catalog_data import ACCESSORIES, STAPLES
-from .muscles import COMPOUND, GROUPS, INJURY_AREAS, LABEL, PATTERN_GROUP, group_of
+from .muscles import BIG, COMPOUND, GROUPS, INJURY_AREAS, LABEL, PATTERN_GROUP, group_of
 from .profile_model import EXPERIENCE, GOALS, settings_from
 
 MONTHS = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
@@ -194,10 +194,32 @@ def distribute(plan, targets, per_session, focus_groups=()):
                     break
                 slots[idx][1] -= 1
 
+        def spare(idx, sets, day=day):
+            # bleibt der Muskel ohne diese Saetze noch auf Erhaltung (ueber die ganze Woche)?
+            g = group_of(assigned[day][idx][0])
+            return _weekly(assigned, weight).get(g, 0) - sets * weight[day] >= GROUPS[g][1]
+
+        def keeps_frequency(idx, day=day):
+            # grosse Muskeln sollen an zwei Tagen dran bleiben (Schoenfeld 2016)
+            g = group_of(assigned[day][idx][0])
+            others = {d for d, sl in enumerate(assigned) if d != day and any(group_of(p) == g for p, _ in sl.values())}
+            on_day = sum(1 for p, _ in assigned[day].values() if group_of(p) == g)
+            return g not in BIG or on_day > 1 or sum(weight[d] for d in others) >= 2
+
         def order(idx):
-            # zuerst fallen Isolationsuebungen weg, bei Grunduebungen eher Druecken als Ziehen
+            # zuerst Muskeln ueber Erhaltung, dann Isolationsuebungen, bei Grunduebungen eher Druecken als Ziehen
             pattern = slots[idx][0]
-            return (group_of(pattern) in focus_groups, pattern in COMPOUND, pattern in PULL, -slots[idx][1])
+            return (group_of(pattern) in focus_groups, not spare(idx, 1), pattern in COMPOUND, pattern in PULL,
+                    -slots[idx][1])
+        # Zu lang: erst ganze Uebungen streichen (nie Ziehen – Schulterbalance), deren Muskel auch ohne sie auf Erhaltung bleibt (Rumpf und Po
+        # arbeiten bei den Grunduebungen mit) – sonst wuerden alle Uebungen auf 2 Saetze gestutzt
+        while sum(v[1] for v in slots.values()) > per_session and len(slots) > MIN_EXERCISES:
+            cands = [i for i in slots if slots[i][0] not in PULL and group_of(slots[i][0]) not in focus_groups
+                     and spare(i, slots[i][1]) and keeps_frequency(i)]
+            if not cands:
+                break
+            slots.pop(min(cands, key=lambda i: (GROUPS[group_of(slots[i][0])][1] > 0, slots[i][0] in COMPOUND,
+                                                slots[i][1], -i)))
         while sum(v[1] for v in slots.values()) > per_session and any(v[1] > MIN_SETS for v in slots.values()):
             idx = next(i for i in sorted(slots, key=order) if slots[i][1] > MIN_SETS)
             slots[idx][1] -= 1
@@ -214,6 +236,14 @@ def distribute(plan, targets, per_session, focus_groups=()):
             if sum(v[1] for v in slots.values()) + MIN_SETS <= per_session:
                 slots[idx] = [pattern, MIN_SETS]
     return [[tuple(slot) for _, slot in sorted(day.items())] for day in assigned]
+
+
+def _weekly(assigned, weight):
+    out = {}
+    for day, slots in enumerate(assigned):
+        for pattern, sets in slots.values():
+            out[group_of(pattern)] = out.get(group_of(pattern), 0) + sets * weight[day]
+    return out
 
 
 def _pick(candidates, used, taken, variation):

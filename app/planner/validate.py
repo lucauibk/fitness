@@ -71,7 +71,8 @@ def analyze(plan, injuries=(), minutes=None, goal="aufbau", rotate=False, experi
 
     n_days = len(plan["days"])
     for g in BIG:
-        if weekly[g] and len(days_with[g]) < MIN_FREQUENCY and n_days >= 3 and not rotate:
+        # unter 6 Saetzen passt der Muskel gut in eine Einheit – dann ist einmal pro Woche kein Mangel
+        if weekly[g] >= 6 and len(days_with[g]) < MIN_FREQUENCY and n_days >= 3 and not rotate:
             findings.append({"level": "info", "group": g,
                              "text": f"{LABEL[g]} kommt nur an {len(days_with[g])} Tag pro Woche dran – "
                                      "zweimal pro Woche wächst besser."})
