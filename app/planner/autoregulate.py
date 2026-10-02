@@ -10,7 +10,7 @@ import json
 from datetime import date, timedelta
 
 from .. import db, stats
-from . import blocks, cold_start, explain, generate, progression
+from . import blocks, cold_start, explain, generate, progression, volume_plan as vp
 from .muscles import GROUPS, LABEL, PATTERN_GROUP, landmark
 
 MISSED_MIN = 2          # so viele Saetze muessen fehlen, damit nachgeholt wird
@@ -170,6 +170,10 @@ def _review(profile_id, on_date=None):
     signals = deload_signals(profile_id, split)
     if not st["deload"] and week >= 3 and len(signals) >= 2:
         block["weeks"] = week
+        # Diese Woche ist jetzt die Entlastung: Reserve wie im Deload, und als geprueft markieren – sonst
+        # wuerde ein zweiter Aufruf in derselben Woche (weniger Signale) die Entlastung wieder aufheben.
+        params["rir"] = (params.get("rir") or vp.rir_by_week(week))[: week - 1] + [vp.DELOAD_RIR]
+        params["reviewed"] = week
         blocks._save_params(block["id"], params, weeks=week)
         explain.log(profile_id, "deload", "Entlastungswoche vorgezogen: " + "; ".join(signals)
                     + " – diese Woche leichter, danach neuer Block.", None, split["id"])
@@ -183,7 +187,7 @@ def _review(profile_id, on_date=None):
         block = blocks.active(profile_id)
         return {"block": blocks.state(block, on_date), "events": explain.recent(profile_id, 10)}
 
-    if not st["deload"] and not was_deload:
+    if not st["deload"] and not was_deload and _full_week(profile_id, block, split, prev, prev_start, prev_end):
         this_week = planned_sets(block, split, week)
         budget = [max(1, round(0.2 * sum(this_week.values())))]      # Nachholen: hoechstens +20 %
         for g in GROUPS:
@@ -200,6 +204,20 @@ def _review(profile_id, on_date=None):
     params["reviewed"] = week
     blocks._save_params(block["id"], params)
     return {"block": st, "events": explain.recent(profile_id, 10)}
+
+
+def _full_week(profile_id, block, split, prev, start, end):
+    """Nachholen nur nach einer echten Trainingswoche: nicht nach einer angebrochenen ersten Blockwoche (Plan erst
+    ab Mittwoch) und nicht, wenn fast nichts trainiert wurde (Urlaub, krank) – dann wuerde sich nur Arbeit stapeln."""
+    created = stats._local_date((block.get("created_at") or "").replace(" ", "T") + "+00:00") \
+        if block.get("created_at") else None
+    if prev == 1 and created and start + timedelta(days=1) < created <= end:
+        return False
+    done = sum(1 for w in db.rows("SELECT COALESCE(started_at, finished_at) AS at FROM workouts WHERE profile_id=?",
+                                  (profile_id,)) if (d := stats._local_date(w["at"])) and start <= d <= end)
+    sessions = sum(max(1, len(d.get("weekdays") or [])) for d in split["days"])
+    sessions = round(sessions / (blocks._params(block).get("cycle") or 1.0))
+    return done * 3 >= sessions
 
 
 def _swap_exercise(profile_id, split, item, injuries, why):
@@ -272,7 +290,8 @@ def rollover(profile_id, block, split, on_date=None):
     in_plan = {e["exercise_id"] for e in _split_rows(split)}
     swapped = 0
     for e in _split_rows(split):
-        if e.get("pattern") in generate.COMPOUND or e.get("pattern") is None:
+        # nur Isolationsuebungen, die der Plan-Ersteller gewaehlt hat – selbst eingetragene bleiben
+        if e.get("pattern") in generate.COMPOUND or e.get("pattern") is None or not e.get("generated"):
             continue
         alts = [a for a in generate.alternatives(e["pattern"], in_plan, injuries)][:3]
         if not alts:
@@ -285,7 +304,9 @@ def rollover(profile_id, block, split, on_date=None):
         swapped += 1
     split = db.active_split(profile_id)
     age = (date.today().year - int(profile["birth_year"])) if profile.get("birth_year") else None
-    nb = blocks.create(profile_id, split["id"], block["goal"], block["experience"],
+    # Ziel und Erfahrung aus dem Profil: eine Hoeherstufung (reclassify) wirkt ab dem neuen Block
+    nb = blocks.create(profile_id, split["id"], profile.get("goal") or block["goal"],
+                       profile.get("experience") or block["experience"],
                        db.parse_focus(profile.get("focus")), age, variation,
                        start=blocks.monday(on_date or stats.today()))
     explain.log(profile_id, "info", f"Neuer Block gestartet (Woche 1 von {nb['weeks']})"

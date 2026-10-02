@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS split_exercises (
     target_reps_max INTEGER DEFAULT 12,  -- oben angekommen -> Gewicht erhoehen
     target_weight REAL,
     rest_seconds INTEGER,              -- empfohlene Satzpause
-    notes TEXT
+    notes TEXT,
+    generated INTEGER                  -- 1 = vom Plan-Ersteller gewaehlt (darf am Blockende wechseln)
 );
 CREATE TABLE IF NOT EXISTS workouts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,7 +214,9 @@ MIGRATIONS = {
     # Empfohlene Satzpause je Uebung
     "split_exercises": {"rest_seconds": "INTEGER", "base_sets": "INTEGER",
                         # Obergrenze der Blockwochen (Zeitbudget der Einheit); NULL = keine
-                        "peak_sets": "INTEGER"},
+                        "peak_sets": "INTEGER",
+                        # 1 = vom Plan-Ersteller gewaehlt; selbst eingetragene Uebungen wechselt die App nie
+                        "generated": "INTEGER"},
     # Aufwaermsatz: zaehlt nicht in Volumen, Bestleistungen und Progression
     "sets": {"warmup": "INTEGER DEFAULT 0"},
     # Bewegungsmuster: danach waehlt der Assistent Uebungen aus

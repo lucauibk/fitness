@@ -71,14 +71,20 @@ def test_rpe_drift_pulls_deload_forward(profile_id):
 
 def test_rollover_starts_new_block_and_swaps_isolation_only(profile_id):
     sp, day, ids = _setup(profile_id)
+    with db.connect() as c:                  # Seitheben hat der Plan-Ersteller gewaehlt, den Curl die Person selbst
+        c.execute("UPDATE split_exercises SET generated=1 WHERE id IN (?, ?, ?)",
+                  (ids["Bankdrücken"][0], ids["Latzug"][0], ids["Seitheben"][0]))
+    db.update_row("profiles", profile_id, {"experience": "erfahren"})        # inzwischen hoeher eingestuft
     old = blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
     later = MONDAY + timedelta(weeks=old["weeks"] + 1)
     res = autoregulate.review(profile_id, later)
     new = blocks.active(profile_id)
     assert new["id"] != old["id"] and blocks.state(new, later)["week"] == 1
+    assert new["experience"] == "erfahren"                                   # neuer Block nach dem Profil
     names = {e["name"] for e in db.active_split(profile_id)["days"][0]["exercises"]}
     assert {"Bankdrücken", "Latzug"} <= names                                # Grundübungen bleiben
-    assert not {"Seitheben", "Bizepscurls Kurzhantel"} <= names              # Isolation gewechselt
+    assert "Seitheben" not in names                                          # gewählte Isolation gewechselt
+    assert "Bizepscurls Kurzhantel" in names                                 # selbst eingetragene bleibt
     assert any(e["kind"] == "swap" for e in res["events"])
 
 
@@ -130,7 +136,8 @@ def test_fatigue_signals_trigger_deload_at_block_end(profile_id):
 def test_catch_up_is_capped_to_twenty_percent_and_mrv(profile_id):
     sp, day, ids = _setup(profile_id)
     blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
-    # Woche 1 komplett ausgelassen -> alles fehlt, Nachholen darf trotzdem nur ein Fuenftel der Woche sein
+    # Woche 1 nur ein Satz -> fast alles fehlt, Nachholen darf trotzdem nur ein Fuenftel der Woche sein
+    _log(profile_id, day["id"], ids["Bankdrücken"][1], MONDAY, sets=1)
     autoregulate.review(profile_id, MONDAY + timedelta(weeks=1))
     block = blocks.active(profile_id)
     adj = blocks._params(block)["adjust"].get("2", {})
@@ -187,3 +194,24 @@ def test_switching_back_to_a_plan_resumes_its_block_instead_of_restarting(profil
     assert db.one("SELECT COUNT(*) AS n FROM blocks WHERE profile_id=? AND active=1", (profile_id,))["n"] == 1
     db.activate_split(other["id"], profile_id)
     assert blocks.ensure(profile_id)["id"] == second["id"]
+
+
+def test_no_catch_up_after_an_empty_week(profile_id):
+    """Urlaub oder krank: nichts trainiert -> nichts nachholen, sonst stapelt sich die Arbeit."""
+    sp, day, ids = _setup(profile_id)
+    blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    autoregulate.review(profile_id, MONDAY + timedelta(weeks=1))
+    assert not blocks._params(blocks.active(profile_id))["adjust"].get("2")
+
+
+def test_early_deload_survives_a_second_review_in_the_same_week(profile_id, monkeypatch):
+    """Vorgezogene Entlastung: der zweite Aufruf derselben Woche (weniger Signale) darf sie nicht aufheben."""
+    sp, day, ids = _setup(profile_id)
+    blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    week3 = MONDAY + timedelta(weeks=2)
+    monkeypatch.setattr(autoregulate, "deload_signals", lambda *a: ["A", "B"])
+    autoregulate.review(profile_id, week3)
+    monkeypatch.setattr(autoregulate, "deload_signals", lambda *a: [])
+    autoregulate.review(profile_id, week3)
+    st = blocks.state(blocks.active(profile_id), week3)
+    assert st["deload"] and st["weeks"] == 3 and st["rir"] == 4

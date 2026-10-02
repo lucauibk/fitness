@@ -15,7 +15,8 @@ def save_plan(profile_id, plan, activate=True):
                                (split_id, pos, day["label"], db.format_weekdays(day.get("weekdays")))).lastrowid
             for ex_pos, ex in enumerate(day["exercises"]):
                 c.execute("INSERT INTO split_exercises (split_day_id, exercise_id, position, target_sets,"
-                          " base_sets, peak_sets, target_reps_min, target_reps_max, rest_seconds) VALUES (?,?,?,?,?,?,?,?,?)",
+                          " base_sets, peak_sets, target_reps_min, target_reps_max, rest_seconds, generated)"
+                          " VALUES (?,?,?,?,?,?,?,?,?,1)",
                           (day_id, ex["exercise_id"], ex_pos, ex["target_sets"], ex["target_sets"],
                            ex.get("peak_sets"), ex["target_reps_min"], ex["target_reps_max"], ex.get("rest_seconds")))
     if activate:

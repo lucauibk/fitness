@@ -465,6 +465,8 @@ def api_update_split_exercise(item_id: int, body: SplitExerciseIn,
     _check_range(data, item)
     if data.get("target_sets"):
         data["base_sets"] = data["target_sets"]     # eine Aenderung im Plan ist die neue Woche 1
+    if data.get("exercise_id") and data["exercise_id"] != item["exercise_id"]:
+        data["generated"] = None                    # selbst gewaehlt: die App wechselt sie nicht mehr
     return _found(db.update_row("split_exercises", item_id, data))
 
 
