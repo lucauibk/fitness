@@ -115,7 +115,7 @@ def rpe_drift(history):
 
 
 def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, rir=2, deload=False,
-              experience=None, start_weight=None, today=None):
+              experience=None, start_weight=None, today=None, last_workout=None):
     """Naechster Vorschlag fuer eine Uebung. history: neueste Einheit zuerst.
     Anfaenger: reine Wiederholungs-Regeln (lineare Steigerung), keine RPE-Logik – sie schaetzen ihre
     Reserve um 4-5 Wiederholungen daneben; Plateau schon nach zwei Stillstaenden."""
@@ -133,7 +133,7 @@ def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, r
     step = step_for(equipment, pattern, top)
     base["last"] = last
 
-    gap = _days_since(history[0].get("date"), today)
+    gap = _days_since(last_workout or history[0].get("date"), today)
     if not deload and top and gap is not None and gap > LAYOFF_DAYS:
         factor = 0.87 if gap > 28 else 0.93
         return {**base, "reps": lo, "weight": max(step, _round_to(top * factor, step)), "status": "return",
@@ -194,5 +194,7 @@ def for_exercise(profile_id, exercise_id, lo, hi, target_sets=None, rir=2, deloa
         from . import cold_start
         kg, why = cold_start.starting_weight(profile_id, exercise_id)
         start = (kg, why) if kg else None
+    last = db.one("SELECT MAX(substr(COALESCE(started_at, finished_at), 1, 10)) AS d FROM workouts WHERE profile_id=?",
+                  (profile_id,))
     return recommend(history, lo, hi, target_sets, ex.get("equipment_type"), ex.get("pattern"), rir,
-                     deload, experience, start)
+                     deload, experience, start, last_workout=(last or {}).get("d"))

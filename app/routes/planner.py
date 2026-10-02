@@ -63,7 +63,8 @@ def create_plan(body: CreateIn, profile_id: int = Depends(current_profile)):
     """Ein Tipp: aus der Tageszahl (und dem, was im Profil steht) wird ein aktiver Plan mit Block.
     Alles Weitere sind Voreinstellungen, die sich spaeter anpassen lassen."""
     profile = db.profile_out(db.get_row("profiles", profile_id))
-    overrides = {"days": body.days, "weekdays": [], "goal": body.goal, "minutes": body.minutes,
+    minutes = body.minutes if body.minutes is not None else (profile.get("session_minutes") or 60)
+    overrides = {"days": body.days, "weekdays": [], "goal": body.goal, "minutes": minutes,
                  "focus": body.focus}
     key = generate.DEFAULT_SPLIT.get(body.days)
     if not key:

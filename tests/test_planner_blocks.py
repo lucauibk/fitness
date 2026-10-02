@@ -154,12 +154,20 @@ def test_pain_report_replaces_loading_exercises_and_remembers_the_area(profile_i
         autoregulate.report_pain(profile_id, "kopf")
 
 
-def test_second_plateau_swaps_the_variant(profile_id):
+def _stalled(profile_id, day, ex_id):
+    for i in range(3):
+        _log(profile_id, day["id"], ex_id, date.today() - timedelta(days=14 - i * 3), reps=9 if i == 0 else 8, weight=50)
+
+
+def test_first_plateau_does_not_swap_but_a_repeated_one_does(profile_id):
     sp, day, ids = _setup(profile_id)
     blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
     ex_id = ids["Latzug"][1]
-    for i in range(3):
-        _log(profile_id, day["id"], ex_id, date.today() - timedelta(days=14 - i * 3), reps=9 if i == 0 else 8, weight=50)
-    explain.log(profile_id, "plateau", "Latzug: Test", ex_id, sp["id"])
-    assert autoregulate.swap_plateaus(profile_id, db.active_split(profile_id))
+    _stalled(profile_id, day, ex_id)
+    explain.log(profile_id, "plateau", "Latzug: erster Stillstand (heute gemeldet)", ex_id, sp["id"])
+    assert not autoregulate.swap_plateaus(profile_id, db.active_split(profile_id))       # erst Reset
+    old = (date.today() - timedelta(days=30)).isoformat()
+    db.insert_row("plan_events", {"profile_id": profile_id, "split_id": sp["id"], "exercise_id": ex_id,
+                                  "date": old, "kind": "plateau", "text": "Latzug: früherer Stillstand"})
+    assert autoregulate.swap_plateaus(profile_id, db.active_split(profile_id))            # zweiter Stillstand
     assert db.one("SELECT exercise_id FROM split_exercises WHERE id=?", (ids["Latzug"][0],))["exercise_id"] != ex_id

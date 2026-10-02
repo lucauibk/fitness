@@ -37,7 +37,7 @@ def analyze(plan, injuries=(), minutes=None, goal="aufbau", rotate=False, experi
                 continue
             g = PATTERN_GROUP.get(ex["pattern"])
             peak = max((ratios.get(g) or [1.0])[:-1])
-            sets = min(vp_max, round((item.get("target_sets") or 0) * peak))
+            sets = item.get("peak_sets") or min(vp_max, round((item.get("target_sets") or 0) * peak))
             sets_today += sets
             if g:
                 weekly[g] += sets

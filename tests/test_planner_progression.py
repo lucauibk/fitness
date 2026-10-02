@@ -90,3 +90,9 @@ def test_layoff_resumes_lighter():
     assert (short["status"], short["weight"]) == ("return", 95.0)          # 93 % von 100 kg, auf 5 kg gerundet
     assert (long["status"], long["weight"]) == ("return", 85.0)            # 87 %
     assert rec(h, today=date(2026, 9, 8))["status"] != "return"
+
+
+def test_layoff_counts_the_last_workout_overall_not_the_exercise():
+    h = [sess((10, 100), (10, 100), (10, 100), date="2026-08-01")]        # Uebung lange nicht gemacht
+    assert rec(h, today=date(2026, 9, 3), last_workout="2026-09-01")["status"] != "return"
+    assert rec(h, today=date(2026, 9, 3))["status"] == "return"

@@ -456,7 +456,7 @@ const PAIN_AREAS = [["knee", "Knie"], ["lower_back", "Rücken"], ["shoulder", "S
 function reportPain(exIndex) {
   const sheet = openSheet({
     title: "Wo tut es weh?",
-    body: `<p class="hint">Belastende Übungen werden im Plan ersetzt und nicht mehr automatisch gesteigert.
+    body: `<p class="hint">Belastende Übungen werden im Plan ersetzt und künftig nicht mehr vorgeschlagen.
         Bei anhaltenden Schmerzen bitte ärztlich abklären lassen.</p>
       <div class="chips">${PAIN_AREAS.map(([k, l]) => `<button type="button" class="chip" data-area="${k}">${l}</button>`).join("")}</div>`,
   });

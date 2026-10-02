@@ -208,10 +208,15 @@ def swap_plateaus(profile_id, split, today=None):
     injuries = generate.settings_from(profile)["injuries"]
     for item in _split_rows(split):
         hist = progression.sessions(profile_id, item["exercise_id"])
-        if not progression.is_plateau(hist):
+        window = 2 if (profile.get("experience") or "einsteiger") == "einsteiger" else progression.PLATEAU_SESSIONS
+        if not progression.is_plateau(hist, window):
             continue
+        # Nur ein Stillstand VOR den jetzt stagnierenden Einheiten zaehlt als "schon einmal zurueckgesetzt";
+        # sonst wuerde der erste Stillstand sofort den Tausch ausloesen.
+        stall_since = hist[window - 1]["date"]
         earlier = db.one("SELECT COUNT(*) AS n FROM plan_events WHERE profile_id=? AND exercise_id=? AND kind='plateau'"
-                         " AND date >= date('now','-56 day')", (profile_id, item["exercise_id"]))["n"]
+                         " AND date < ? AND date >= date(?, '-56 day')",
+                         (profile_id, item["exercise_id"], stall_since, stall_since))["n"]
         if earlier and _swap_exercise(profile_id, split, item, injuries,
                                       "weiter Stillstand nach dem Reset – neue Variante, gleicher Muskel"):
             return True
@@ -219,7 +224,7 @@ def swap_plateaus(profile_id, split, today=None):
 
 
 def report_pain(profile_id, area):
-    """Schmerz melden: Bereich ins Profil, belastende Uebungen im Plan ersetzen, nicht mehr automatisch steigern."""
+    """Schmerz melden: Bereich ins Profil, belastende Uebungen im Plan ersetzen."""
     from .muscles import INJURY_AREAS
     if area not in INJURY_AREAS:
         raise ValueError("Unbekannter Körperbereich.")
@@ -240,8 +245,8 @@ def report_pain(profile_id, area):
                                      f"belastet {label} – ersetzt")
                 if new:
                     swapped.append({"from": item["name"], "to": new["name"]})
-    explain.log(profile_id, "info", f"Schmerz bei {label} gemeldet: belastende Übungen ersetzt, "
-                "kein automatisches Steigern dort.", None, split["id"] if split else None)
+    explain.log(profile_id, "info", f"Schmerz bei {label} gemeldet: belastende Übungen im Plan ersetzt.",
+                None, split["id"] if split else None)
     return {"limitations": ", ".join(current), "swapped": swapped}
 
 

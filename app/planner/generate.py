@@ -270,6 +270,7 @@ def generate(profile, option_key, overrides=None, variation=0):
         days.append({"label": label, "weekdays": list(weekdays), "exercises": chosen})
 
     _fill_gaps(days, by_pattern, peak, per_session, goal, age, focus_groups, weeks_t, used)
+    _balance_push_pull(days, by_pattern, per_session, goal, age, focus_groups, weeks_t, peak, used)
 
     planned_by_week = [{g: 0 for g in GROUPS} for _ in range(n_weeks)]
     for d in days:
@@ -327,6 +328,62 @@ def _fill_gaps(days, by_pattern, peak, per_session, goal, age, focus_groups, wee
         day["exercises"].append(_entry(ex, pattern, max(MIN_SETS, min(need, room)), goal, age, focus_groups, weeks_t, peak))
 
 
+PUSH = ("h_push", "v_push", "chest_iso")
+MAX_PUSH_PULL = 1.3
+
+
+def _balance_push_pull(days, by_pattern, per_session, goal, age, focus_groups, weeks_t, peak, used):
+    """Druecken : Ziehen hoechstens 1,3 : 1 – erst Ziehen ergaenzen, wo Zeit ist, sonst eine Druckuebung kuerzen."""
+    def totals():
+        push = sum(e["peak_sets"] for d in days for e in d["exercises"] if e["pattern"] in PUSH)
+        push += 0.5 * sum(e["peak_sets"] for d in days for e in d["exercises"] if e["pattern"] == "triceps")
+        pull = sum(e["peak_sets"] for d in days for e in d["exercises"] if e["pattern"] in PULL)
+        pull += 0.5 * sum(e["peak_sets"] for d in days for e in d["exercises"] if e["pattern"] == "biceps")
+        return push, pull
+
+    for _ in range(4):
+        push, pull = totals()
+        if not push or push <= MAX_PUSH_PULL * max(pull, 1):
+            return
+        added = False
+        for pattern in ("h_pull", "rear_delt", "v_pull"):
+            for day in sorted(days, key=lambda d: sum(e["peak_sets"] for e in d["exercises"])):
+                room = per_session - sum(e["peak_sets"] for e in day["exercises"])
+                taken = {e["exercise_id"] for e in day["exercises"]}
+                ex = _pick(by_pattern.get(pattern, []), used, taken, 0)
+                if ex and room >= MIN_SETS and not any(e["pattern"] == pattern for e in day["exercises"]):
+                    used[ex["id"]] = used.get(ex["id"], 0) + 1
+                    day["exercises"].append(_entry(ex, pattern, MIN_SETS, goal, age, focus_groups, weeks_t, peak))
+                    added = True
+                    break
+            if added:
+                break
+        if added:
+            continue
+        # keine Zeit mehr: Brust-Isolation streichen, sonst die groesste Druckuebung um einen Satz kuerzen
+        cand = [(d, e) for d in days for e in d["exercises"] if e["pattern"] == "chest_iso" and len(d["exercises"]) > MIN_EXERCISES]
+        if cand:
+            cand[0][0]["exercises"].remove(cand[0][1])
+            continue
+        pushes = [e for d in days for e in d["exercises"] if e["pattern"] in PUSH and e["peak_sets"] > MIN_SETS]
+        if not pushes:
+            return
+        e = max(pushes, key=lambda x: x["peak_sets"])
+        e["peak_sets"] -= 1
+        e["week_sets"] = _week_sets(e["pattern"], e["peak_sets"], weeks_t, peak)
+        e["target_sets"] = e["week_sets"][0]
+
+
+def _week_sets(pattern, peak_sets, weeks_t, peak):
+    """Saetze je Blockwoche einer Uebung aus dem Wochenverlauf ihrer Muskelgruppe."""
+    g = group_of(pattern)
+    ratios = [(w / peak[g]) if peak.get(g) else 1 for w in weeks_t[g]]
+    week_sets = [max(MIN_SETS if i < len(ratios) - 1 else 1, min(peak_sets, round(peak_sets * r)))
+                 for i, r in enumerate(ratios)]
+    week_sets[-1] = max(1, math.ceil(week_sets[0] / 2))          # Deload: halbe Saetze
+    return week_sets
+
+
 def _entry(ex, pattern, peak_sets, goal, age, focus_groups, weeks_t, peak):
     compound = pattern in COMPOUND
     lo, hi = vp.reps_for(pattern, goal, compound)
@@ -335,10 +392,7 @@ def _entry(ex, pattern, peak_sets, goal, age, focus_groups, weeks_t, peak):
     elif age and age >= 40 and not compound:
         lo, hi = max(lo, 10), max(hi, 15)
     g = group_of(pattern)
-    ratios = [(w / peak[g]) if peak.get(g) else 1 for w in weeks_t[g]]
-    week_sets = [max(MIN_SETS if i < len(ratios) - 1 else 1, min(peak_sets, round(peak_sets * r)))
-                 for i, r in enumerate(ratios)]
-    week_sets[-1] = max(1, math.ceil(week_sets[0] / 2))          # Deload: halbe Saetze
+    week_sets = _week_sets(pattern, peak_sets, weeks_t, peak)
     return {
         "exercise_id": ex["id"], "name": ex["name"], "pattern": pattern,
         "muscle_group": ex["muscle_group"], "unit": ex["unit"],

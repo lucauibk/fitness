@@ -27,3 +27,17 @@ def test_creating_again_replaces_active_plan_but_keeps_the_old_one(profile_id):
     assert db.active_split(profile_id)["id"] == second
     assert db.get_row("splits", first) is not None
     assert blocks.active(profile_id)["split_id"] == second
+
+
+@pytest.mark.parametrize("minutes", [45, 60, 90])
+def test_saved_plan_never_exceeds_the_session_time_budget_in_any_block_week(profile_id, minutes):
+    from datetime import timedelta
+    from app.planner import volume_plan as vp
+    pr.create_plan(pr.CreateIn(days=3, minutes=minutes), profile_id)
+    split, block = db.active_split(profile_id), blocks.active(profile_id)
+    per_session = vp.capacity(3, minutes, "aufbau")[1]
+    start = blocks.monday(__import__("datetime").date.fromisoformat(block["start_date"]))
+    for w in range(block["weeks"]):
+        for d in split["days"]:
+            total = sum(blocks.sets_for(block, e, start + timedelta(weeks=w)) for e in d["exercises"])
+            assert total <= per_session + 2, (minutes, w, d["label"], total)

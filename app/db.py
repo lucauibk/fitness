@@ -209,7 +209,9 @@ MIGRATIONS = {
                  # 1 = Erfahrung wurde von der App aus den Einheiten abgeleitet (darf sich weiter aendern)
                  "experience_auto": "INTEGER"},
     # Empfohlene Satzpause je Uebung
-    "split_exercises": {"rest_seconds": "INTEGER", "base_sets": "INTEGER"},
+    "split_exercises": {"rest_seconds": "INTEGER", "base_sets": "INTEGER",
+                        # Obergrenze der Blockwochen (Zeitbudget der Einheit); NULL = keine
+                        "peak_sets": "INTEGER"},
     # Aufwaermsatz: zaehlt nicht in Volumen, Bestleistungen und Progression
     "sets": {"warmup": "INTEGER DEFAULT 0"},
     # Bewegungsmuster: danach waehlt der Assistent Uebungen aus
@@ -518,7 +520,7 @@ WRITABLE = {
     "split_days": ("split_id", "position", "label", "weekdays"),
     "split_exercises": ("split_day_id", "exercise_id", "position", "target_sets",
                         "target_reps_min", "target_reps_max", "target_weight",
-                        "rest_seconds", "notes", "base_sets"),
+                        "rest_seconds", "notes", "base_sets", "peak_sets"),
     "workouts": ("profile_id", "split_day_id", "title", "started_at", "finished_at", "notes"),
     "bodyweight": ("profile_id", "date", "kg"),
 }
