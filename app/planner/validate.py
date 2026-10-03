@@ -24,6 +24,26 @@ def peak_sets(item, pattern, ratios):
     return min(vp_max, round((item.get("target_sets") or 0) * peak))
 
 
+PUSH = ("h_push", "v_push", "chest_iso")
+PULL = ("h_pull", "v_pull", "rear_delt")
+
+
+def push_pull(items):
+    """(Druecken, Ziehen) aus [(Muster, Saetze)]. Seitheben zaehlt zu keiner Seite, Arme halb
+    (Trizeps hilft beim Druecken, Bizeps beim Ziehen)."""
+    push = pull = 0.0
+    for pattern, sets in items:
+        if pattern in PUSH:
+            push += sets
+        elif pattern in PULL:
+            pull += sets
+        elif pattern == "triceps":
+            push += 0.5 * sets
+        elif pattern == "biceps":
+            pull += 0.5 * sets
+    return push, pull
+
+
 def analyze(plan, injuries=(), minutes=None, goal="aufbau", rotate=False, experience="fortgeschritten", focus=()):
     cat = _catalog()
     # Der Plan ist Woche 1; geprueft wird die Spitzenwoche des Blocks (dort zaehlt das Volumen).
@@ -33,7 +53,7 @@ def analyze(plan, injuries=(), minutes=None, goal="aufbau", rotate=False, experi
                               plan.get("cycle") or 1.0)
     days_with = {g: set() for g in GROUPS}
     patterns = set()
-    pushing = pulling = 0.0
+    loads = []
     findings = []
     per_session = vp.capacity(max(2, len(plan["days"])), minutes, goal)[1]
     for i, day in enumerate(plan["days"]):
@@ -52,14 +72,7 @@ def analyze(plan, injuries=(), minutes=None, goal="aufbau", rotate=False, experi
             if g:
                 days_with[g].update((i, k) for k in range(times))
                 patterns.add(ex["pattern"])
-                if ex["pattern"] in ("h_push", "v_push", "chest_iso"):
-                    pushing += sets
-                elif ex["pattern"] in ("h_pull", "v_pull", "rear_delt"):
-                    pulling += sets
-                elif ex["pattern"] == "triceps":
-                    pushing += 0.5 * sets
-                elif ex["pattern"] == "biceps":
-                    pulling += 0.5 * sets
+                loads.append((ex["pattern"], sets))         # je Tageszeile wie im Generator (_balance_push_pull)
             bad = set((ex["contraindications"] or "").split(",")) & set(injuries)
             if bad:
                 findings.append({"level": "warn", "group": "verletzung",
@@ -74,8 +87,8 @@ def analyze(plan, injuries=(), minutes=None, goal="aufbau", rotate=False, experi
         # unter 6 Saetzen passt der Muskel gut in eine Einheit – dann ist einmal pro Woche kein Mangel
         if weekly[g] >= 6 and len(days_with[g]) < MIN_FREQUENCY and n_days >= 3 and not rotate:
             findings.append({"level": "info", "group": g,
-                             "text": f"{LABEL[g]} kommt nur an {len(days_with[g])} Tag pro Woche dran – "
-                                     "zweimal pro Woche wächst besser."})
+                             "text": f"{LABEL[g]}: alle {weekly[g]} Sätze an einem Tag – auf zwei Tage verteilt "
+                                     "bringt jeder Satz mehr."})
     for g, (_, mv, mev, mav, mrv) in GROUPS.items():
         if g == "rumpf":
             continue
@@ -89,7 +102,7 @@ def analyze(plan, injuries=(), minutes=None, goal="aufbau", rotate=False, experi
         elif weekly[g] < mv - 1:
             findings.append({"level": "info", "group": g,
                              "text": f"{LABEL[g]}: {weekly[g]} Sätze pro Woche reichen nicht einmal zum Erhalten."})
-    push, pull = pushing, pulling
+    push, pull = push_pull(loads)
     if pull and push / pull > 1.6:
         findings.append({"level": "warn", "group": "balance",
                          "text": "Viel mehr Drücken als Ziehen – mehr Rudern oder Latzug schützt die Schultern."})

@@ -974,3 +974,5 @@ h1, h2, .page-title, .group-title { font-weight: 800; letter-spacing: 0.01em; }
 .block-card { margin-bottom: var(--s3); }
 .block-card .weekbars { margin: var(--s3) 0; }
 .quiet-events .hint { margin: var(--s1) 0 0; }
+.struct-day { margin: var(--s3) 0; }
+.struct-day .row-title small { color: var(--muted, inherit); font-weight: 400; }

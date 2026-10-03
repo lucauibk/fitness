@@ -485,8 +485,8 @@ function volumeRows(data) {
       <span class="bar-value">${v.actual}${v.actual === v.target ? "" : ` / ${v.target}`}
         <small>${v.frequency}×</small></span>
     </div>`).join("")}</div>
-  <p class="hint">Sätze pro Woche (Ist / Richtwert) und wie oft die Gruppe drankommt.
-    Richtwerte kommen aus deinem Ziel, deiner Erfahrung, dem Fokus und deiner Zeit.</p>`;
+  <p class="hint">Sätze pro Woche in Woche 1 (Ist / Richtwert) und wie oft die Gruppe drankommt. Bis zum
+    Blockende steigert die App die Sätze automatisch. Richtwerte kommen aus Ziel, Erfahrung und Fokus.</p>`;
 }
 
 function suggestionRows(data) {
@@ -504,6 +504,8 @@ function suggestionRows(data) {
       </div>
       ${s.action?.type === "open_exercise"
         ? `<button type="button" class="btn small ghost" data-open-ex="${s.action.exercise_id}">Öffnen</button>`
+        : s.action?.type === "open_day"
+        ? `<button type="button" class="btn small ghost" data-open-day="${s.action.day_id}">Ändern</button>`
         : s.action ? `<button type="button" class="btn small tonal" data-apply="${i}">Übernehmen</button>` : ""}
     </div>`).join("");
 }
@@ -519,6 +521,35 @@ function adviceCard(data) {
   </div>`;
 }
 
+/** Struktur-Vorschlag (Tag ergänzen, A/B-Varianten): höchstens einer, mit Vorschau vor dem Übernehmen. */
+function structureCard(data, weekday) {
+  const st = data.structure;
+  if (!st) return "";
+  const days = st.days.map((d) => {
+    const wd = d.new && weekday != null ? [weekday] : d.weekdays;
+    return `<div class="struct-day">
+      <p class="row-title">${esc(d.label)} <small>${esc(daysLabel(wd))}</small>${d.new ? ` <span class="pill">neu</span>` : ""}</p>
+      <ul class="plain">${d.exercises.map((e) => `<li>${esc(e.name)} · ${e.sets} × ${esc(e.reps)}${
+        e.before != null && e.before !== e.sets ? ` <small>(vorher ${e.before})</small>` : ""}${
+        e.moved ? " <small>(umgezogen)</small>" : ""}</li>`).join("")}</ul></div>`;
+  }).join("");
+  const volume = st.volume.length ? `<p class="hint">Sätze pro Woche: ${st.volume.map((v) =>
+    `${esc(v.label)} ${v.before} → ${v.after}`).join(" · ")}</p>` : "";
+  const chips = st.weekday_options.length > 1 ? `<p class="hint">Neuer Tag am:</p><div class="chips">${
+    st.weekday_options.map((o) => `<button type="button" class="chip${o.weekday === weekday ? " active" : ""}"
+      data-struct-day="${o.weekday}" title="${o.clash.length ? `Am Nachbartag auch: ${esc(o.clash.join(", "))}` : ""}">${
+      esc(o.label)}${o.clash.length ? " ⚠︎" : ""}</button>`).join("")}</div>` : "";
+  return `<div class="card">
+    <p class="eyebrow">${icon("spark")} Struktur</p>
+    <p class="row-title">${esc(st.title)}</p>
+    <p>${esc(st.text)}</p>
+    <ul class="plain">${st.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
+    <details class="field-more"><summary>Vorschau</summary>${days}${volume}<p class="hint">${esc(st.note)}</p></details>
+    ${chips}
+    <div class="btn-row"><button type="button" class="btn tonal" data-struct-apply>Übernehmen</button></div>
+  </div>`;
+}
+
 async function improvePlan() {
   let data;
   const wait = openSheet({ title: "Plan verbessern", body: skeleton(5), wide: true });
@@ -529,10 +560,13 @@ async function improvePlan() {
   if (!data.split) { closeSheet(); return toast("Es gibt noch keinen Plan zum Verbessern.", { error: true }); }
   const sheet = openSheet({ title: "Plan verbessern", body: "", wide: true });
   const body = $(".sheet-body", sheet);
+  let structDay = null;   // gewählter Wochentag für einen neuen Tag
 
   function paint() {
+    structDay = data.structure?.weekday_options?.[0]?.weekday ?? null;
     body.innerHTML = `<p class="hint">${esc(data.split.name)} · ${data.sessions} Einheiten pro Woche</p>
-      ${adviceCard(data)}
+      ${structureCard(data, structDay)}
+      ${data.structure ? "" : adviceCard(data)}
       <h3 class="form-section">Vorschläge</h3>
       <div class="list">${suggestionRows(data)}</div>
       <h3 class="form-section">Volumen</h3>
@@ -544,6 +578,33 @@ async function improvePlan() {
   paint();
 
   sheet.addEventListener("click", async (ev) => {
+    const dayChip = ev.target.closest("[data-struct-day]");
+    if (dayChip) {
+      structDay = Number(dayChip.dataset.structDay);
+      sheet.querySelectorAll("[data-struct-day]").forEach((c) => c.classList.toggle("active", c === dayChip));
+      return;
+    }
+    const structBtn = ev.target.closest("[data-struct-apply]");
+    if (structBtn) {
+      const action = data.structure.action;
+      const ops = action.ops.map((op) => (op.op === "add_day" && structDay != null && data.structure.type === "add_day"
+        ? { ...op, weekdays: [structDay] } : op));
+      return busy(structBtn, async () => {
+        try {
+          const res = await api("plan/apply", { method: "POST", body: { action: { ...action, ops } } });
+          data = { ...res, ai_available: data.ai_available };
+          toast("Plan umgebaut");
+          changed();
+          paint();
+        } catch (e) { toast(e.message, { error: true }); }
+      });
+    }
+    const openDay = ev.target.closest("[data-open-day]");
+    if (openDay) {
+      const day = detail?.days.find((d) => d.id === Number(openDay.dataset.openDay));
+      closeSheet();
+      return day && editDay(day, detail.id);
+    }
     const applyBtn = ev.target.closest("[data-apply]");
     if (applyBtn) {
       const suggestion = data.suggestions[Number(applyBtn.dataset.apply)];
