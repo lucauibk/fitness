@@ -6,7 +6,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import activity, ai, body, db
+from .. import activity, ai, body
 from ..common import FIELD_NAMES, current_profile, owned
 from .daily import _day
 
@@ -70,7 +70,7 @@ def add_measurement(data: MeasurementIn):
 @router.delete("/measurements/{mid}")
 def delete_measurement(mid: int, profile_id: int = Depends(current_profile)):
     owned("body_measurements", mid, profile_id, "Diese Messung")
-    db.delete_row("body_measurements", mid)
+    body.delete(profile_id, mid)
     return {"ok": True}
 
 
