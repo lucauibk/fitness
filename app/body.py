@@ -86,6 +86,32 @@ def save(profile_id, data):
     return saved, True
 
 
+def delete(profile_id, mid):
+    """Messung loeschen. Hat sie das Koerpergewicht ihres Tages gesetzt, wird das
+    zurueckgenommen: auf das Gewicht einer anderen Messung desselben Tages, sonst ganz
+    entfernt. Ein Gewicht, das inzwischen anders gesetzt wurde, bleibt unangetastet."""
+    row = db.get_row("body_measurements", mid)
+    if not row:
+        return
+    with db.connect() as c:
+        c.execute("DELETE FROM body_measurements WHERE id=?", (mid,))
+        if row.get("weight_kg") is None:
+            return
+        bw = c.execute("SELECT kg FROM bodyweight WHERE profile_id=? AND date=?",
+                       (profile_id, row["date"])).fetchone()
+        if not bw or bw[0] != row["weight_kg"]:
+            return
+        other = c.execute("SELECT weight_kg FROM body_measurements WHERE profile_id=? AND date=?"
+                          " AND weight_kg IS NOT NULL ORDER BY id DESC LIMIT 1",
+                          (profile_id, row["date"])).fetchone()
+        if other:
+            c.execute("UPDATE bodyweight SET kg=? WHERE profile_id=? AND date=?",
+                      (other[0], profile_id, row["date"]))
+        else:
+            c.execute("DELETE FROM bodyweight WHERE profile_id=? AND date=?",
+                      (profile_id, row["date"]))
+
+
 def history(profile_id):
     rows = db.rows("SELECT * FROM body_measurements WHERE profile_id=? ORDER BY date, id",
                    (profile_id,))
