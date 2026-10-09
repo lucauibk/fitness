@@ -54,6 +54,13 @@ def _local_date(iso):
     return dt.date()
 
 
+def _since_bound(start):
+    """Untergrenze fuer die SQL-Abfrage ab einem oertlichen Datum. Gespeichert wird in UTC –
+    eine Einheit am Montag 00:30 in Wien steht dort noch mit Sonntag. Ein Tag Puffer reicht
+    fuer jede Zeitzone; was davor liegt, faellt danach ueber `_local_date` heraus."""
+    return (start - timedelta(days=1)).isoformat()
+
+
 def _sets(profile_id, since=None):
     # Aufwaermsaetze zaehlen nicht in Volumen, Bestleistungen oder Progression.
     sql = ("SELECT s.*, e.name AS exercise, e.muscle_group, e.unit,"
@@ -120,9 +127,9 @@ def weekly_volume(profile_id, weeks=12):
     """Sätze und bewegte Kilogramm je Muskelgruppe und Woche."""
     start = _monday(today()) - timedelta(weeks=weeks - 1)
     by_week = {}
-    for s in _sets(profile_id, since=start.isoformat()):
+    for s in _sets(profile_id, since=_since_bound(start)):
         day = _local_date(s["at"])
-        if not day:
+        if not day or day < start:
             continue
         week = _monday(day).isoformat()
         group = s["muscle_group"] or "sonstige"
@@ -152,8 +159,9 @@ def frequency(profile_id, weeks=12):
     workouts = db.rows(
         "SELECT COALESCE(started_at, finished_at) AS at FROM workouts"
         " WHERE profile_id=? AND COALESCE(started_at, finished_at) >= ?",
-        (profile_id, start.isoformat()))
-    days = sorted({_local_date(w["at"]).isoformat() for w in workouts if _local_date(w["at"])})
+        (profile_id, _since_bound(start)))
+    days = sorted({d.isoformat() for d in (_local_date(w["at"]) for w in workouts)
+                   if d and d >= start})
     per_week = {}
     for d in days:
         per_week[_monday(date.fromisoformat(d)).isoformat()] = per_week.get(
