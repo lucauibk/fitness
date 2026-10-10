@@ -640,18 +640,36 @@ def get_workout(workout_id):
 
 
 def list_workouts(profile_id, limit=30):
-    out = rows("SELECT w.*, d.label AS day_label FROM workouts w"
-               " LEFT JOIN split_days d ON d.id = w.split_day_id"
-               " WHERE w.profile_id=?"
-               " ORDER BY COALESCE(w.started_at, w.finished_at) DESC, w.id DESC"
-               " LIMIT ?", (profile_id, limit))
+    """Letzte Einheiten samt Saetzen. Die Saetze kommen in einer Abfrage fuer alle
+    Einheiten statt einer je Einheit (frueher bis zu 201 Abfragen bei limit=200)."""
+    with connect() as c:
+        out = [dict(r) for r in c.execute(
+            "SELECT w.*, d.label AS day_label FROM workouts w"
+            " LEFT JOIN split_days d ON d.id = w.split_day_id"
+            " WHERE w.profile_id=?"
+            " ORDER BY COALESCE(w.started_at, w.finished_at) DESC, w.id DESC"
+            " LIMIT ?", (profile_id, limit))]
+        sets = _grouped(c, "SELECT s.*, e.name AS exercise, e.unit FROM sets s"
+                           " JOIN exercises e ON e.id = s.exercise_id"
+                           " WHERE s.workout_id IN ({ids}) ORDER BY s.id",
+                        "workout_id", [w["id"] for w in out])
     for w in out:
-        w["sets"] = rows("SELECT s.*, e.name AS exercise, e.unit FROM sets s"
-                         " JOIN exercises e ON e.id = s.exercise_id"
-                         " WHERE s.workout_id=? ORDER BY s.id", (w["id"],))
+        w["sets"] = sets.get(w["id"], [])
         if not w["day_label"]:
             w["day_label"] = w.get("title")
     return out
+
+
+def _grouped(c, sql, key, ids):
+    """Zeilen fuer viele Eltern-IDs in einer Abfrage, nach `key` gruppiert. Die
+    Reihenfolge aus `ORDER BY` bleibt je Gruppe erhalten. `{ids}` im SQL wird durch
+    die Platzhalter ersetzt."""
+    groups = {}
+    if not ids:
+        return groups
+    for r in c.execute(sql.format(ids=",".join("?" * len(ids))), ids):
+        groups.setdefault(r[key], []).append(dict(r))
+    return groups
 
 
 def set_bodyweight(profile_id, date, kg):
@@ -664,15 +682,21 @@ def set_bodyweight(profile_id, date, kg):
 
 # ------------------------------------------------------------- Splits
 def split_detail(split_id):
-    split = get_row("splits", split_id)
-    if not split:
-        return None
-    split["days"] = [day_out(d) for d in list_rows_where("split_days", "split_id", split_id, "position, id")]
+    """Split mit Tagen und Uebungen – drei Abfragen auf einer Verbindung, egal wie viele Tage."""
+    with connect() as c:
+        split = c.execute("SELECT * FROM splits WHERE id=?", (split_id,)).fetchone()
+        if not split:
+            return None
+        split = dict(split)
+        split["days"] = [day_out(d) for d in c.execute(
+            "SELECT * FROM split_days WHERE split_id=? ORDER BY position, id", (split_id,))]
+        exercises = _grouped(
+            c, "SELECT se.*, e.name, e.muscle_group, e.unit, e.kind, e.pattern FROM split_exercises se"
+               " JOIN exercises e ON e.id = se.exercise_id"
+               " WHERE se.split_day_id IN ({ids}) ORDER BY se.position, se.id",
+            "split_day_id", [d["id"] for d in split["days"]])
     for day in split["days"]:
-        day["exercises"] = rows(
-            "SELECT se.*, e.name, e.muscle_group, e.unit, e.kind, e.pattern FROM split_exercises se"
-            " JOIN exercises e ON e.id = se.exercise_id"
-            " WHERE se.split_day_id=? ORDER BY se.position, se.id", (day["id"],))
+        day["exercises"] = exercises.get(day["id"], [])
     return split
 
 
