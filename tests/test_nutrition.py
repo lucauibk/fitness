@@ -161,3 +161,29 @@ def test_fremde_produkte_sind_nicht_aenderbar():
                                    "barcode": str(10**12 + int.from_bytes(os.urandom(3), "big"))})
     with pytest.raises(HTTPException):
         routes.delete_food(food["id"])
+
+
+def test_saved_meal_roundtrip_and_profile_isolation(profile_id):
+    from fastapi import HTTPException
+    from app.routes import nutrition as routes
+
+    food = db.insert_row("foods", {"name": "Haferflocken", "kcal": 370, "protein": 13,
+                                   "carbs": 59, "fat": 7, "source": "eigen"})
+    saved = routes.save_meal(routes.SavedMealIn(
+        profile_id=profile_id, name="Frühstück Standard",
+        items=[routes.MealItem(food_id=food["id"], grams=100)]))
+    assert saved["kcal"] == 370
+    assert [m["name"] for m in routes.list_meals(profile_id)] == ["Frühstück Standard"]
+    other = db.insert_row("profiles", {"name": "Anderes Profil"})["id"]
+    assert routes.list_meals(other) == []
+    with pytest.raises(HTTPException):
+        routes.delete_meal(saved["id"], other)
+    routes.delete_meal(saved["id"], profile_id)
+    assert routes.list_meals(profile_id) == []
+
+
+def test_day_reports_burned_kcal_from_cardio(profile_id):
+    day = date.today().isoformat()
+    db.insert_row("cardio", {"profile_id": profile_id, "date": day, "activity": "Laufen",
+                             "minutes": 30, "kcal": 300})
+    assert nutrition.day(profile_id, day)["burned_kcal"] == 300

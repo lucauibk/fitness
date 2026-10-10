@@ -10,6 +10,7 @@ let detail = null;      // der gerade geöffnete Split
 let openSplitId = null;
 let sortingDay = null;   // Pfeile nur in dem Tag zeigen, den man gerade sortiert
 let exercises = null;
+let blockInfo = null;   // Woche X von Y, Soll/Ist-Volumen, Ereignisse
 let confirmActivate = null;   // { id, timer } – zweiter Tipp auf "Wechseln" bestaetigt
 // Aufgeklappte Trainingstage – eingeklappt ist der Plan eine Uebersicht statt einer langen Liste.
 const openDays = new Set(prefs.get("plan.openDays") || []);
@@ -60,7 +61,7 @@ function dayCard(day) {
       <div>
         <div class="card-title">${esc(day.label)}</div>
         <div class="row-meta"><span>${daysLabel(day.weekdays)}</span>
-          <span>${day.exercises.length} Übungen</span></div>
+          <span>${day.exercises.length} Übungen</span>${day.minutes ? `<span>≈ ${day.minutes} min</span>` : ""}</div>
       </div>
       ${icon("down", "chev")}
     </summary>
@@ -77,6 +78,29 @@ function dayCard(day) {
   </details>`;
 }
 
+/** Block-Kopf: wo im Block stehe ich, was ist diese Woche geplant, was hat sich geaendert. */
+function blockCard() {
+  const b = blockInfo?.block;
+  if (!b) return "";
+  const maxSets = Math.max(1, ...blockInfo.weeks.map((w) => w.sets));
+  const vol = blockInfo.volume;
+  const top = Math.max(10, ...vol.map((v) => Math.max(v.planned, v.done)));
+  return `<div class="card block-card">
+    <p class="eyebrow">${b.deload ? "Entlastungswoche" : "Trainingsblock"}</p>
+    <h3 class="card-title">Woche ${b.week} von ${b.weeks}${b.deload ? " · leichter, Kraft erholt sich" : ` · ${b.rir} Wdh. in Reserve`}</h3>
+    <div class="weekbars" role="img" aria-label="Sätze pro Woche im Block">${blockInfo.weeks.map((w) => `
+      <span class="weekbar ${w.week === b.week ? "now" : ""}"><i style="height:${Math.max(8, (w.sets / maxSets) * 100)}%"></i>
+        <b>${w.sets}</b><small>${w.week === b.weeks ? "Deload" : `W${w.week}`}</small></span>`).join("")}</div>
+    <details class="field-more"><summary>Diese Woche je Muskel</summary>
+      <div class="bars">${vol.map((v) => `<div class="bar-row"><span class="bar-label">${esc(v.label)}</span>
+        <span class="bar"><i style="width:${(v.done / top) * 100}%"></i></span>
+        <span class="bar-value">${v.done}/${v.planned}</span></div>`).join("")}</div></details>
+    ${blockInfo.events.length ? `<details class="field-more"><summary>Was sich geändert hat</summary>
+      <div class="list flush">${blockInfo.events.map((e) => `<div class="row-item"><div class="row-main">
+        <div class="row-title">${esc(e.text)}</div><div class="row-meta"><span>${esc(e.date)}</span></div></div></div>`).join("")}</div></details>` : ""}
+  </div>`;
+}
+
 function render() {
   if (!splits?.length) {
     root.innerHTML = `${empty("Noch kein Split", "Ein Split ist dein Trainingsplan – zum Beispiel Push, "
@@ -88,7 +112,8 @@ function render() {
   const visible = splits.filter((s) => !isPendingDelete(`splits/${s.id}`));
   const open = detail && visible.some((s) => s.id === detail.id) ? detail : null;
 
-  root.innerHTML = `<div class="list">${visible.map((s) => `
+  root.innerHTML = `<div class="btn-row"><button type="button" class="btn primary" data-wizard>${icon("spark")} Neuen Plan erstellen</button></div>
+    ${blockCard()}<div class="list">${visible.map((s) => `
       <div class="row-item">
         <button type="button" class="row-main row-btn" data-open-split="${s.id}" aria-expanded="${open?.id === s.id}">
           <span class="row-title">${esc(s.name)}</span>
@@ -96,6 +121,7 @@ function render() {
             <span>${s.days.map((d) => esc(d.label)).join(" · ") || "noch leer"}</span></span>
         </button>
         ${s.active ? `<span class="pill ok">aktiv</span>` : `<button type="button" class="btn small tonal" data-activate="${s.id}">Wechseln</button>`}
+        <button type="button" class="icon-btn" data-delete-split="${s.id}" aria-label="„${esc(s.name)}“ löschen">${icon("trash")}</button>
       </div>`).join("")}</div>
     ${open ? `<div class="plan-head">
         <h3 class="group-title">${esc(open.name)}</h3>
@@ -109,17 +135,30 @@ function render() {
   if (refocus) { root.querySelector(refocus)?.focus({ preventScroll: true }); refocus = null; }
 }
 
+/** Zustand vergessen (Profilwechsel): sonst fragt load() den Split des vorigen Profils ab. */
+export function reset() {
+  splits = null; detail = null; openSplitId = null; blockInfo = null; sortingDay = null; exercises = null;
+}
+
+// Neu erstellter Plan: gleich diesen zeigen statt des vorher geöffneten.
+window.addEventListener("plan-created", (ev) => {
+  openSplitId = ev.detail?.splitId ?? null;
+  splits = null;
+  detail = null;
+});
+
 export async function load() {
   if (!splits) root.innerHTML = skeleton(4);
   splits = await api("splits");
-  const wanted = openSplitId ?? splits.find((s) => s.active)?.id ?? splits[0]?.id;
-  if (wanted) {
-    openSplitId = wanted;
-    try {
-      detail = await api(`splits/${wanted}`);
-    } catch { detail = null; openSplitId = null; }
-  } else {
-    detail = null;
+  blockInfo = await api("planner/block").catch(() => null);
+  // Wunsch: der zuletzt geöffnete Plan, sonst der aktive, sonst irgendeiner – fällt einer weg (gelöscht,
+  // anderes Profil), geht es mit dem nächsten weiter statt mit leerer Ansicht.
+  const order = [openSplitId, splits.find((s) => s.active)?.id, splits[0]?.id]
+    .filter((id, i, all) => id && all.indexOf(id) === i && splits.some((s) => s.id === id));
+  detail = null;
+  openSplitId = null;
+  for (const id of order) {
+    try { detail = await api(`splits/${id}`); openSplitId = id; break; } catch { /* nächster Kandidat */ }
   }
   render();
 }
@@ -160,13 +199,38 @@ function editSplit(split) {
   if (!isNew) {
     armDelete($("[data-delete]", sheet), () => {
       closeSheet();
-      if (openSplitId === split.id) { openSplitId = null; detail = null; }
-      deleteLater(`splits/${split.id}`, `„${split.name}“ gelöscht`, {
-        onDone: () => { splits = null; },
-      });
-      splits = null;
+      removePlan(split);
     }, "Löschen", "Split mit allen Tagen löschen? Absolvierte Einheiten bleiben erhalten.");
   }
+}
+
+/** Plan löschen (mit Rückgängig); der aktive Plan wird durch den nächsten ersetzt. */
+function removePlan(split) {
+  if (openSplitId === split.id) { openSplitId = null; detail = null; }
+  deleteLater(`splits/${split.id}`, `„${split.name}“ gelöscht`, {
+    onDone: () => { splits = null; blockInfo = null; changed(); },
+  });
+  splits = null;
+  render();
+}
+
+/** Zweiter Tipp bestätigt – ein versehentliches Löschen soll nicht gehen. */
+let confirmDelete = null;
+function askDeletePlan(split, btn) {
+  if (confirmDelete?.id === split.id) {
+    clearTimeout(confirmDelete.timer);
+    confirmDelete = null;
+    return removePlan(split);
+  }
+  clearTimeout(confirmDelete?.timer);
+  btn.classList.add("armed");
+  btn.setAttribute("aria-label", `„${split.name}“ wirklich löschen – nochmal tippen`);
+  confirmDelete = { id: split.id, timer: setTimeout(() => {
+    confirmDelete = null;
+    btn.classList.remove("armed");
+    btn.setAttribute("aria-label", `„${split.name}“ löschen`);
+  }, 3500) };
+  toast(`Nochmal tippen, um „${split.name}“ zu löschen`);
 }
 
 function editDay(day, splitId) {
@@ -421,8 +485,8 @@ function volumeRows(data) {
       <span class="bar-value">${v.actual}${v.actual === v.target ? "" : ` / ${v.target}`}
         <small>${v.frequency}×</small></span>
     </div>`).join("")}</div>
-  <p class="hint">Sätze pro Woche (Ist / Richtwert) und wie oft die Gruppe drankommt.
-    Richtwerte kommen aus deinem Ziel, deiner Erfahrung, dem Fokus und deiner Zeit.</p>`;
+  <p class="hint">Sätze pro Woche in Woche 1 (Ist / Richtwert) und wie oft die Gruppe drankommt. Bis zum
+    Blockende steigert die App die Sätze automatisch. Richtwerte kommen aus Ziel, Erfahrung und Fokus.</p>`;
 }
 
 function suggestionRows(data) {
@@ -440,6 +504,8 @@ function suggestionRows(data) {
       </div>
       ${s.action?.type === "open_exercise"
         ? `<button type="button" class="btn small ghost" data-open-ex="${s.action.exercise_id}">Öffnen</button>`
+        : s.action?.type === "open_day"
+        ? `<button type="button" class="btn small ghost" data-open-day="${s.action.day_id}">Ändern</button>`
         : s.action ? `<button type="button" class="btn small tonal" data-apply="${i}">Übernehmen</button>` : ""}
     </div>`).join("");
 }
@@ -455,6 +521,35 @@ function adviceCard(data) {
   </div>`;
 }
 
+/** Struktur-Vorschlag (Tag ergänzen, A/B-Varianten): höchstens einer, mit Vorschau vor dem Übernehmen. */
+function structureCard(data, weekday) {
+  const st = data.structure;
+  if (!st) return "";
+  const days = st.days.map((d) => {
+    const wd = d.new && weekday != null ? [weekday] : d.weekdays;
+    return `<div class="struct-day">
+      <p class="row-title">${esc(d.label)} <small>${esc(daysLabel(wd))}</small>${d.new ? ` <span class="pill">neu</span>` : ""}</p>
+      <ul class="plain">${d.exercises.map((e) => `<li>${esc(e.name)} · ${e.sets} × ${esc(e.reps)}${
+        e.before != null && e.before !== e.sets ? ` <small>(vorher ${e.before})</small>` : ""}${
+        e.moved ? " <small>(umgezogen)</small>" : ""}</li>`).join("")}</ul></div>`;
+  }).join("");
+  const volume = st.volume.length ? `<p class="hint">Sätze pro Woche: ${st.volume.map((v) =>
+    `${esc(v.label)} ${v.before} → ${v.after}`).join(" · ")}</p>` : "";
+  const chips = st.weekday_options.length > 1 ? `<p class="hint">Neuer Tag am:</p><div class="chips">${
+    st.weekday_options.map((o) => `<button type="button" class="chip${o.weekday === weekday ? " active" : ""}"
+      data-struct-day="${o.weekday}" title="${o.clash.length ? `Am Nachbartag auch: ${esc(o.clash.join(", "))}` : ""}">${
+      esc(o.label)}${o.clash.length ? " ⚠︎" : ""}</button>`).join("")}</div>` : "";
+  return `<div class="card">
+    <p class="eyebrow">${icon("spark")} Struktur</p>
+    <p class="row-title">${esc(st.title)}</p>
+    <p>${esc(st.text)}</p>
+    <ul class="plain">${st.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
+    <details class="field-more"><summary>Vorschau</summary>${days}${volume}<p class="hint">${esc(st.note)}</p></details>
+    ${chips}
+    <div class="btn-row"><button type="button" class="btn tonal" data-struct-apply>Übernehmen</button></div>
+  </div>`;
+}
+
 async function improvePlan() {
   let data;
   const wait = openSheet({ title: "Plan verbessern", body: skeleton(5), wide: true });
@@ -465,10 +560,13 @@ async function improvePlan() {
   if (!data.split) { closeSheet(); return toast("Es gibt noch keinen Plan zum Verbessern.", { error: true }); }
   const sheet = openSheet({ title: "Plan verbessern", body: "", wide: true });
   const body = $(".sheet-body", sheet);
+  let structDay = null;   // gewählter Wochentag für einen neuen Tag
 
   function paint() {
+    structDay = data.structure?.weekday_options?.[0]?.weekday ?? null;
     body.innerHTML = `<p class="hint">${esc(data.split.name)} · ${data.sessions} Einheiten pro Woche</p>
-      ${adviceCard(data)}
+      ${structureCard(data, structDay)}
+      ${data.structure ? "" : adviceCard(data)}
       <h3 class="form-section">Vorschläge</h3>
       <div class="list">${suggestionRows(data)}</div>
       <h3 class="form-section">Volumen</h3>
@@ -480,6 +578,33 @@ async function improvePlan() {
   paint();
 
   sheet.addEventListener("click", async (ev) => {
+    const dayChip = ev.target.closest("[data-struct-day]");
+    if (dayChip) {
+      structDay = Number(dayChip.dataset.structDay);
+      sheet.querySelectorAll("[data-struct-day]").forEach((c) => c.classList.toggle("active", c === dayChip));
+      return;
+    }
+    const structBtn = ev.target.closest("[data-struct-apply]");
+    if (structBtn) {
+      const action = data.structure.action;
+      const ops = action.ops.map((op) => (op.op === "add_day" && structDay != null && data.structure.type === "add_day"
+        ? { ...op, weekdays: [structDay] } : op));
+      return busy(structBtn, async () => {
+        try {
+          const res = await api("plan/apply", { method: "POST", body: { action: { ...action, ops } } });
+          data = { ...res, ai_available: data.ai_available };
+          toast("Plan umgebaut");
+          changed();
+          paint();
+        } catch (e) { toast(e.message, { error: true }); }
+      });
+    }
+    const openDay = ev.target.closest("[data-open-day]");
+    if (openDay) {
+      const day = detail?.days.find((d) => d.id === Number(openDay.dataset.openDay));
+      closeSheet();
+      return day && editDay(day, detail.id);
+    }
     const applyBtn = ev.target.closest("[data-apply]");
     if (applyBtn) {
       const suggestion = data.suggestions[Number(applyBtn.dataset.apply)];
@@ -529,6 +654,11 @@ function openPlanMenu() {
   const open = detail && splits?.some((s) => s.id === detail.id) ? detail : null;
   actionMenu(open ? esc(open.name) : "Plan", [
     open?.days.length && { label: "Plan verbessern", icon: "spark", run: improvePlan },
+    blockInfo?.block && { label: "Neuen Block starten", icon: "refresh", run: async () => {
+      try { await api("planner/new-block", { method: "POST" }); toast("Neuer Block gestartet"); changed(); await load(); }
+      catch (e) { toast(e.message, { error: true }); }
+    } },
+    open && { label: "Plan löschen", icon: "trash", run: () => removePlan(splits.find((x) => x.id === open.id) || open) },
     open && { label: "Split umbenennen", icon: "edit", run: () => editSplit(splits.find((s) => s.id === open.id)) },
     { label: "Neuen Plan mit Assistent", icon: "spark", run: async () => {
       const profile = await api(`profiles/${getProfile()}`).catch(() => null);
@@ -597,6 +727,8 @@ export async function mount(el) {
     if (t("[data-add-split]")) return editSplit(null);
     const editS = t("[data-edit-split]");
     if (editS) return editSplit(splits.find((s) => s.id === Number(editS.dataset.editSplit)));
+    const delS = t("[data-delete-split]");
+    if (delS) return askDeletePlan(splits.find((x) => x.id === Number(delS.dataset.deleteSplit)), delS);
     const openS = t("[data-open-split]");
     if (openS) {
       try {

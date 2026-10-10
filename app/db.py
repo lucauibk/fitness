@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS split_exercises (
     target_reps_max INTEGER DEFAULT 12,  -- oben angekommen -> Gewicht erhoehen
     target_weight REAL,
     rest_seconds INTEGER,              -- empfohlene Satzpause
-    notes TEXT
+    notes TEXT,
+    generated INTEGER                  -- 1 = vom Plan-Ersteller gewaehlt (darf am Blockende wechseln)
 );
 CREATE TABLE IF NOT EXISTS workouts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -150,6 +151,50 @@ CREATE TABLE IF NOT EXISTS body_measurements (
     notes TEXT,
     client_id TEXT UNIQUE
 );
+CREATE TABLE IF NOT EXISTS blocks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    split_id INTEGER NOT NULL,
+    start_date TEXT NOT NULL,            -- Montag der ersten Blockwoche
+    weeks INTEGER NOT NULL,              -- inklusive Deload-Woche am Ende
+    goal TEXT, experience TEXT,
+    params TEXT,                         -- JSON: Wochenvolumen je Gruppe, Reviews
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS plan_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    split_id INTEGER,
+    exercise_id INTEGER,
+    date TEXT NOT NULL,
+    kind TEXT NOT NULL,                  -- weight_up | sets_up | sets_down | deload | swap | hold | info
+    text TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_blocks_profile ON blocks(profile_id, active);
+CREATE INDEX IF NOT EXISTS idx_events_profile ON plan_events(profile_id, date);
+CREATE TABLE IF NOT EXISTS saved_meals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    items TEXT NOT NULL,                 -- JSON: [{"food_id": 1, "grams": 150}, ...]
+    created_at TEXT DEFAULT (datetime('now'))
+);
+-- Hinweise des taeglichen Coach-Laufs (scripts/coach_daily.py). Nur Text: Der Lauf
+-- aendert nie den Plan, die App zeigt die Hinweise an und laesst sie wegklicken.
+CREATE TABLE IF NOT EXISTS coach_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    category TEXT NOT NULL,              -- plan | progress
+    title TEXT NOT NULL,
+    text TEXT NOT NULL,
+    exercise_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'open', -- open | dismissed
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_coach_notes_profile ON coach_notes(profile_id, status);
 CREATE INDEX IF NOT EXISTS idx_food_log_day ON food_log(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_water_log_day ON water_log(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_cardio_day ON cardio(profile_id, date);
@@ -175,16 +220,27 @@ MIGRATIONS = {
                  # Ernaehrung: Ziele (nutrition_auto=1 -> berechnet)
                  "activity_level": "TEXT", "kcal_goal": "INTEGER", "protein_goal": "INTEGER",
                  "carbs_goal": "INTEGER", "fat_goal": "INTEGER",
-                 "nutrition_auto": "INTEGER DEFAULT 1", "water_goal_ml": "INTEGER"},
+                 "nutrition_auto": "INTEGER DEFAULT 1", "water_goal_ml": "INTEGER",
+                 # 1 = Erfahrung wurde von der App aus den Einheiten abgeleitet (darf sich weiter aendern)
+                 "experience_auto": "INTEGER",
+                 # freie Wochentage ("2,3,4,5,6"); train_weekdays sind die tatsaechlich geplanten
+                 "available_weekdays": "TEXT"},
     # Empfohlene Satzpause je Uebung
-    "split_exercises": {"rest_seconds": "INTEGER"},
+    "split_exercises": {"rest_seconds": "INTEGER", "base_sets": "INTEGER",
+                        # Obergrenze der Blockwochen (Zeitbudget der Einheit); NULL = keine
+                        "peak_sets": "INTEGER",
+                        # 1 = vom Plan-Ersteller gewaehlt; selbst eingetragene Uebungen wechselt die App nie
+                        "generated": "INTEGER"},
     # Aufwaermsatz: zaehlt nicht in Volumen, Bestleistungen und Progression
     "sets": {"warmup": "INTEGER DEFAULT 0"},
     # Bewegungsmuster: danach waehlt der Assistent Uebungen aus
     "exercises": {"pattern": "TEXT", "kind": "TEXT",
                   # Uebungsbibliothek
                   "instructions": "TEXT", "mistakes": "TEXT", "muscles_primary": "TEXT",
-                  "muscles_secondary": "TEXT", "equipment": "TEXT", "video_query": "TEXT"},
+                  "muscles_secondary": "TEXT", "equipment": "TEXT", "video_query": "TEXT",
+                  # Auswahl-Eigenschaften fuer den Plan-Ersteller (app/planner/catalog_data.py)
+                  "equipment_type": "TEXT", "difficulty": "INTEGER", "sfr": "INTEGER",
+                  "contraindications": "TEXT", "lengthened": "INTEGER"},
     # Portion mit Beschriftung und Packungsgroesse fuer die Mengeneingabe
     "foods": {"serving_label": "TEXT", "pack_g": "REAL"},
 }
@@ -254,6 +310,7 @@ def profile_out(row):
         return None
     row = dict(row)
     row["train_weekdays"] = parse_weekdays(row.get("train_weekdays"))
+    row["available_weekdays"] = parse_weekdays(row.get("available_weekdays"))
     row["focus"] = parse_focus(row.get("focus"))
     return row
 
@@ -411,6 +468,8 @@ def init():
         _catalog_v2(c)
         from .exercise_info import apply as _exercise_info
         _exercise_info(c)
+        from .planner.catalog import apply as _planner_catalog
+        _planner_catalog(c)
     with sqlite3.connect(DB_PATH, timeout=30) as c:
         # WAL: Lesen blockiert nicht, waehrend geschrieben wird – wichtig, wenn zwei
         # Leute gleichzeitig eine Einheit hochladen.
@@ -453,7 +512,7 @@ def backup(tag=None):
 # Whitelist je Tabelle: nur diese Spalten duerfen ueber die API geschrieben werden,
 # damit Spaltennamen nie ungeprueft aus dem Request in SQL landen.
 WRITABLE = {
-    "profiles": ("name", "color", "birth_year", "sex", "height_cm", "goal", "experience",
+    "profiles": ("name", "color", "birth_year", "sex", "height_cm", "goal", "experience", "experience_auto", "available_weekdays",
                  "days_per_week", "session_minutes", "limitations", "train_weekdays", "focus",
                  "activity_level", "kcal_goal", "protein_goal", "carbs_goal", "fat_goal",
                  "nutrition_auto", "water_goal_ml"),
@@ -470,6 +529,9 @@ WRITABLE = {
     "food_log": ("profile_id", "date", "meal", "food_id", "name", "grams", "kcal", "protein",
                  "carbs", "fat", "client_id"),
     "water_log": ("profile_id", "date", "ml", "client_id"),
+    "saved_meals": ("profile_id", "name", "items"),
+    "blocks": ("profile_id", "split_id", "start_date", "weeks", "goal", "experience", "params", "active"),
+    "plan_events": ("profile_id", "split_id", "exercise_id", "date", "kind", "text"),
     "body_measurements": ("profile_id", "date", "source", "weight_kg", "body_fat_pct",
                           "body_fat_estimated", "muscle_mass_kg", "water_pct", "visceral_fat",
                           "bmr_kcal", "bio_age", "waist_cm", "hip_cm", "chest_cm", "arm_cm",
@@ -478,7 +540,7 @@ WRITABLE = {
     "split_days": ("split_id", "position", "label", "weekdays"),
     "split_exercises": ("split_day_id", "exercise_id", "position", "target_sets",
                         "target_reps_min", "target_reps_max", "target_weight",
-                        "rest_seconds", "notes"),
+                        "rest_seconds", "notes", "base_sets", "peak_sets", "generated"),
     "workouts": ("profile_id", "split_day_id", "title", "started_at", "finished_at", "notes"),
     "bodyweight": ("profile_id", "date", "kg"),
 }
@@ -520,6 +582,8 @@ def delete_row(table, row_id):
                 # Absolvierte Einheiten bleiben erhalten, verlieren nur die Zuordnung
                 c.execute("UPDATE workouts SET split_day_id=NULL WHERE split_day_id=?", (day,))
             c.execute("DELETE FROM split_days WHERE split_id=?", (row_id,))
+            c.execute("DELETE FROM blocks WHERE split_id=?", (row_id,))
+            c.execute("DELETE FROM plan_events WHERE split_id=?", (row_id,))
         elif table == "split_days":
             c.execute("DELETE FROM split_exercises WHERE split_day_id=?", (row_id,))
             c.execute("UPDATE workouts SET split_day_id=NULL WHERE split_day_id=?", (row_id,))

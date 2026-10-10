@@ -35,6 +35,7 @@ export function startDraft(day) {
     profile_id: getProfile(),
     split_day_id: day.id,
     title: day.label,
+    block: day.block ? { week: day.block.week, weeks: day.block.weeks, rir: day.block.rir, deload: day.block.deload } : null,
     started_at: new Date().toISOString(),
     exercises: day.exercises.map((e) => ({
       exercise_id: e.exercise_id,
@@ -44,6 +45,7 @@ export function startDraft(day) {
       pattern: e.pattern,
       rest: e.rest_seconds || null,
       adjusted: e.adjusted || null,
+      estimate: Boolean(e.suggest?.estimate),   // erstes Mal: Startgewicht ist geschätzt, Tasten kalibrieren
       reps_min: e.target_reps_min,
       reps_max: e.target_reps_max,
       last: e.last,
@@ -108,6 +110,17 @@ const lastWorkSet = (ex) => [...ex.sets].reverse().find((x) => x.done && !x.warm
 
 /** RPE einmal pro Uebung statt als Spalte in jeder Zeile: erscheint, sobald die Uebung
  *  fertig ist, auch in der zugeklappten Karte – optional, ein Tipp. */
+/** Erstes Mal an dieser Übung: nach dem ersten Satz sagt man, wie es war – die übrigen Sätze passen sich an. */
+function calibRow(ex, index) {
+  return `<div class="rpe-row calib" role="group" aria-label="Wie war der Satz bei ${esc(ex.name)}?">
+    <span class="hint">Startgewicht war geschätzt – wie war der Satz?</span>
+    <div class="rpe-chips">
+      <button type="button" class="chip-btn" data-calib="${index}" data-level="easy">leicht</button>
+      <button type="button" class="chip-btn" data-calib="${index}" data-level="ok">passt</button>
+      <button type="button" class="chip-btn" data-calib="${index}" data-level="hard">zu schwer</button>
+    </div></div>`;
+}
+
 function rpeRow(ex, index) {
   const s = lastWorkSet(ex);
   if (!s) return "";
@@ -154,6 +167,7 @@ function exerciseCard(ex, index, open) {
       <span class="grow"></span>
       <button type="button" class="btn small ghost" data-ex-menu="${index}" aria-label="Weitere Aktionen für ${esc(ex.name)}">⋯ Mehr</button>
     </div>` : ""}
+    ${ex.estimate && !ex.calibrated && done >= 1 && !complete ? calibRow(ex, index) : ""}
     ${complete ? rpeRow(ex, index) : ""}
   </div>`;
 }
@@ -174,6 +188,7 @@ function openExerciseMenu(index) {
       ${ex.sets.length > 1 ? item("data-m-drop-set", "x", `Letzten Satz entfernen${last.done ? " (abgehakt)" : ""}`) : ""}
       ${ex.unit === "kg" ? item("data-m-plates", "weight", "Scheiben ausrechnen") : ""}
       ${ex.pattern ? item("data-m-swap", "swap", "Übung tauschen") : ""}
+      ${ex.pattern ? item("data-m-pain", "warn", "Schmerz bei dieser Übung") : ""}
       ${item("data-m-drop-ex", "trash", "Übung entfernen", "danger")}
     </div>`,
   });
@@ -195,6 +210,7 @@ function openExerciseMenu(index) {
   }
   sheet.querySelector("[data-m-plates]")?.addEventListener("click", after(() => openPlates(index)));
   sheet.querySelector("[data-m-swap]")?.addEventListener("click", after(() => openSwap(index)));
+  sheet.querySelector("[data-m-pain]")?.addEventListener("click", after(() => reportPain(index)));
   armDelete(sheet.querySelector("[data-m-drop-ex]"), after(() => update((d) => {
     d.exercises.splice(index, 1);
     if (Number.isInteger(d.focus) && d.focus >= index) d.focus = null;
@@ -249,6 +265,8 @@ function renderDraft(draft) {
   const total = totalCount(draft);
   root.innerHTML = `<div class="page-head">
       <h2 class="page-title">${esc(draft.title || "Einheit")}</h2>
+      ${draft.block ? `<p class="hint">Woche ${draft.block.week} von ${draft.block.weeks} · ${draft.block.deload
+        ? "Entlastung: leichter, nichts bis ans Limit" : `Ziel: ${draft.block.rir} Wiederholungen in Reserve`}</p>` : ""}
       <p class="page-sub"><span data-elapsed>${elapsed(draft)}</span> · ${done}/${total} Sätze</p>
     </div>
     <div class="progress lg"><i style="width:${total ? (done / total) * 100 : 0}%"></i></div>
@@ -431,6 +449,30 @@ const exOption = (e) => `<div class="row-item" role="button" tabindex="0" data-p
 // ------------------------------------------------------------- Tauschen
 /** Geraet besetzt, Muskel schon wund: passende Alternative aus dem Katalog statt die
  *  Uebung ersatzlos zu streichen. Nur zur Planungszeit gab es das bisher. */
+const PAIN_AREAS = [["knee", "Knie"], ["lower_back", "Rücken"], ["shoulder", "Schulter"], ["elbow", "Ellbogen"],
+  ["wrist", "Handgelenk"], ["hip", "Hüfte"]];
+
+/** Schmerz melden: Bereich ins Profil, belastende Übungen im Plan ersetzen, dann gleich hier tauschen. */
+function reportPain(exIndex) {
+  const sheet = openSheet({
+    title: "Wo tut es weh?",
+    body: `<p class="hint">Belastende Übungen werden im Plan ersetzt und künftig nicht mehr vorgeschlagen.
+        Bei anhaltenden Schmerzen bitte ärztlich abklären lassen.</p>
+      <div class="chips">${PAIN_AREAS.map(([k, l]) => `<button type="button" class="chip" data-area="${k}">${l}</button>`).join("")}</div>`,
+  });
+  sheet.addEventListener("click", async (ev) => {
+    const t = ev.target.closest("[data-area]");
+    if (!t) return;
+    try {
+      await api("planner/pain", { method: "POST", body: { area: t.dataset.area } });
+      closeSheet();
+      toast("Gemerkt – belastende Übungen werden im Plan ersetzt");
+      window.dispatchEvent(new CustomEvent("data-changed"));
+      openSwap(exIndex);
+    } catch (e) { toast(e.offline ? "Dafür ist eine Verbindung nötig." : e.message, { error: true }); }
+  });
+}
+
 async function openSwap(exIndex) {
   const draft = getDraft();
   const ex = draft?.exercises[exIndex];
@@ -718,6 +760,25 @@ export async function mount(el) {
     if (focus) {
       const i = Number(focus.dataset.focus);
       return update((d) => { d.focus = focusIndex(d) === i ? -1 : i; });
+    }
+    const calib = t("[data-calib]");
+    if (calib) {
+      const i = Number(calib.dataset.calib);
+      const factor = { easy: 1.1, ok: 1, hard: 0.9 }[calib.dataset.level];
+      return update((d) => {
+        const ex = d.exercises[i];
+        const last = [...ex.sets].reverse().find((x) => x.done && !x.warmup);
+        if (last) last.rpe = { easy: 6, ok: 8, hard: 10 }[calib.dataset.level];
+        // 0 kg (Körpergewicht) bleibt 0; „leicht“/„zu schwer“ ändert mindestens um einen Schritt
+        ex.sets.filter((x) => !x.done && x.weight > 0).forEach((x) => {
+          const step = x.weight < 20 ? 1 : 2.5;
+          let w = Math.round((x.weight * factor) / step) * step;
+          if (factor > 1) w = Math.max(w, x.weight + step);
+          if (factor < 1) w = Math.min(w, x.weight - step);
+          x.weight = Math.max(step, w);
+        });
+        ex.calibrated = true;
+      });
     }
     const rpe = t("[data-rpe]");
     if (rpe) {

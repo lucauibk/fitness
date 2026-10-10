@@ -33,6 +33,33 @@ export function ring(value, goal, { size = 132, label = "kcal" } = {}) {
   </svg>`;
 }
 
+/** Naehrwerte als Donut: Anteil an den kcal aus Eiweiss, Kohlenhydraten und Fett. */
+function donutCard(t, g) {
+  const parts = [["Proteine", t.protein, 4, "var(--c-protein)", g.protein], ["Carbs", t.carbs, 4, "var(--c-carbs)", g.carbs],
+    ["Fette", t.fat, 9, "var(--c-fat)", g.fat]];
+  const total = parts.reduce((n, [, v, k]) => n + (v || 0) * k, 0) || 1;
+  const r = 44, c = 2 * Math.PI * r;
+  let offset = 0;
+  const arcs = parts.map(([, v, k, color]) => {
+    const len = ((v || 0) * k / total) * c;
+    const el = len > 0 ? `<circle cx="60" cy="60" r="${r}" fill="none" stroke="${color}" stroke-width="12"
+      stroke-dasharray="${Math.max(0, len - 3).toFixed(1)} ${c.toFixed(1)}" stroke-dashoffset="${(-offset).toFixed(1)}"
+      transform="rotate(-90 60 60)"/>` : "";
+    offset += len;
+    return el;
+  }).join("");
+  return `<div class="card donut-card"><p class="eyebrow">Nährwerte</p>
+    <div class="donut-row">
+      <svg viewBox="0 0 120 120" width="132" height="132" role="img" aria-label="${num(t.kcal)} kcal, Eiweiß ${num(t.protein)} g, Kohlenhydrate ${num(t.carbs)} g, Fett ${num(t.fat)} g">
+        <circle cx="60" cy="60" r="${r}" fill="none" stroke="var(--surface-3)" stroke-width="12"/>${arcs}
+        <text x="60" y="58" text-anchor="middle" class="ring-value">${num(t.kcal)}</text>
+        <text x="60" y="76" text-anchor="middle" class="ring-label">kcal</text>
+      </svg>
+      <ul class="donut-legend">${parts.map(([label, v, , color, goal]) => `<li><i style="background:${color}"></i>
+        <span>${label}</span><b>${num(v)} g</b>${goal ? `<small>von ${num(goal)}</small>` : ""}</li>`).join("")}</ul>
+    </div></div>`;
+}
+
 function macro(label, value, goal) {
   const pct = goal ? Math.min(100, (value / goal) * 100) : 0;
   return `<div class="macro"><span>${label}</span>
@@ -89,14 +116,11 @@ function render() {
       <button type="button" class="icon-btn" data-day="1" aria-label="Nächster Tag" ${isToday ? "disabled" : ""}>${icon("right")}</button>
     </div>
     <div class="card nutri-head">
-      ${ring(t.kcal + pendKcal, g.kcal)}
-      <div class="nutri-side">
-        <p class="eyebrow">${num(t.kcal + pendKcal)} ${g.kcal ? `von ${num(g.kcal)} ` : ""}kcal</p>
-        ${macro("Eiweiß", t.protein, g.protein)}
-        ${macro("Kohlenhydrate", t.carbs, g.carbs)}
-        ${macro("Fett", t.fat, g.fat)}
-      </div>
+      <div class="nutri-stat"><b>${num(t.kcal + pendKcal)}</b><span>Gegessen</span></div>
+      ${ring(t.kcal + pendKcal, g.kcal ? g.kcal + (data.burned_kcal || 0) : g.kcal)}
+      <div class="nutri-stat"><b>${num(data.burned_kcal || 0)}</b><span>Verbrannt</span></div>
     </div>
+    ${t.kcal ? donutCard(t, g) : ""}
     ${!g.kcal ? `<p class="callout">${icon("warn")} Für ein Kalorienziel fehlen noch: ${esc((data.goals.missing || []).join(", "))}.
       <a href="#profil">Im Profil ergänzen</a></p>` : ""}
     ${waterCard(data.water_ml + pendingWater() + waterExtra, data.water_goal)}
@@ -119,7 +143,9 @@ function render() {
             <div class="row-title">${esc(e.preview?.name || "Eintrag")}</div>
             <div class="row-meta"><span>${num(e.grams)} g</span><span class="pill">wartet</span></div></div>
             <span class="row-aside">${num(e.preview?.kcal)} kcal</span></div>`).join("")}
-        </div>` : `<button type="button" class="link-btn copy-meal" data-copy-meal="${key}">${icon("refresh")} Wie am Vortag</button>`}
+        </div><button type="button" class="link-btn copy-meal" data-save-meal="${key}">${icon("download")} Als Mahlzeit speichern</button>`
+        : `<div class="btn-row"><button type="button" class="link-btn copy-meal" data-copy-meal="${key}">${icon("refresh")} Wie am Vortag</button>
+          <button type="button" class="link-btn copy-meal" data-saved-meal="${key}">${icon("food")} Gespeicherte Mahlzeit</button></div>`}
       </div>`;
     }).join("")}`;
 }
@@ -149,6 +175,64 @@ async function copyMeal(meal, btn) {
     } catch (e) { return toast(e.message, { error: true }); }
     toast(queued ? `${entries.length} Einträge übernommen – werden gesendet, sobald wieder Verbindung da ist`
       : `${MEALS[meal]} vom Vortag übernommen (${entries.length} ${entries.length === 1 ? "Eintrag" : "Einträge"})`);
+    window.dispatchEvent(new CustomEvent("data-changed"));
+  });
+}
+
+/** Alle Eintraege einer Mahlzeit unter einem Namen merken – naechstes Mal ein Tipp. */
+function saveMeal(meal) {
+  const items = data.meals[meal].entries.filter((e) => e.food_id && !isPendingDelete(`food-log/${e.id}`))
+    .map((e) => ({ food_id: e.food_id, grams: e.grams }));
+  if (!items.length) return toast("Diese Mahlzeit hat noch keine speicherbaren Einträge.", { error: true });
+  const sheet = openSheet({ title: "Mahlzeit speichern", body: `<form id="mealForm" class="form">
+      <label class="field">Name<input name="name" required maxlength="60" value="${esc(MEALS[meal])}" autocomplete="off"></label>
+      <p class="hint">${items.length} ${items.length === 1 ? "Lebensmittel" : "Lebensmittel"} mit den heutigen Mengen.</p>
+      <button class="btn primary" type="submit">${icon("check")} Speichern</button></form>` });
+  $("input", sheet).select();
+  const form = $("#mealForm", sheet);
+  submitOnce(form, async (ev) => {
+    try {
+      await api("meals", { method: "POST", body: { profile_id: getProfile(),
+        name: new FormData(ev.target).get("name"), items } });
+      closeSheet();
+      toast("Mahlzeit gespeichert");
+    } catch (e) { formError(form, e.offline ? new Error("Zum Speichern ist eine Verbindung nötig.") : e); }
+  });
+}
+
+/** Gespeicherte Mahlzeit in die Mahlzeit des Tages eintragen (jeder Eintrag einzeln durch den Ausgang). */
+async function openSavedMeals(meal) {
+  const sheet = openSheet({ title: "Gespeicherte Mahlzeiten", body: skeleton(3) });
+  let list;
+  try { list = await api("meals"); } catch (e) { closeSheet(); return toast(e.offline ? "Gespeicherte Mahlzeiten sind offline nicht geladen." : e.message, { error: true }); }
+  if (!sheet.isConnected) return;
+  $(".sheet-body", sheet).innerHTML = list.length ? `<div class="list">${list.map((m) => `
+    <div class="row-item" role="button" tabindex="0" data-use="${m.id}">
+      <div class="row-main"><div class="row-title">${esc(m.name)}</div>
+        <div class="row-meta"><span>${m.items.length} ${m.items.length === 1 ? "Lebensmittel" : "Lebensmittel"}</span>
+          <span>${num(m.kcal)} kcal</span></div></div>
+      <button type="button" class="icon-btn" data-del-meal="${m.id}" aria-label="${esc(m.name)} löschen">${icon("trash")}</button></div>`).join("")}</div>`
+    : `<p class="hint pad">Noch nichts gespeichert. Bei einer Mahlzeit mit Einträgen „Als Mahlzeit speichern“ antippen.</p>`;
+  sheet.addEventListener("click", async (ev) => {
+    const del = ev.target.closest("[data-del-meal]");
+    if (del) {
+      try { await api(`meals/${del.dataset.delMeal}`, { method: "DELETE" }); del.closest(".row-item").remove(); }
+      catch (e) { toast(e.message, { error: true }); }
+      return;
+    }
+    const use = ev.target.closest("[data-use]");
+    if (!use) return;
+    const m = list.find((x) => x.id === Number(use.dataset.use));
+    closeSheet();
+    let queued = 0;
+    try {
+      for (const it of m.items) {
+        const res = await outbox.send({ path: "food-log", body: { profile_id: getProfile(), food_id: it.food_id,
+          grams: it.grams, meal, date: data.date, client_id: outbox.uuid(), preview: { name: it.name, kcal: Math.round(it.kcal || 0) } } });
+        if (res.queued) queued += 1;
+      }
+    } catch (e) { return toast(e.message, { error: true }); }
+    toast(queued ? `${m.name} übernommen – wird gesendet, sobald wieder Verbindung da ist` : `${m.name} eingetragen`);
     window.dispatchEvent(new CustomEvent("data-changed"));
   });
 }
@@ -574,6 +658,10 @@ export async function mount(el) {
     if (add) return openAdd(add.dataset.add);
     const copy = ev.target.closest("[data-copy-meal]");
     if (copy) return copyMeal(copy.dataset.copyMeal, copy);
+    const sv = ev.target.closest("[data-save-meal]");
+    if (sv) return saveMeal(sv.dataset.saveMeal);
+    const sm = ev.target.closest("[data-saved-meal]");
+    if (sm) return openSavedMeals(sm.dataset.savedMeal);
     const entry = ev.target.closest("[data-entry]");
     if (entry) openEntry(Number(entry.dataset.entry));
     const water = ev.target.closest("[data-water]");

@@ -2,7 +2,7 @@
 Mobility-Vorschlag, Wochen-Streak und Kalorienbilanz."""
 import logging
 
-from . import activity, db, mobility, nutrition, readiness, session_feedback, stats
+from . import activity, coach, db, mobility, nutrition, readiness, session_feedback, stats
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +32,12 @@ def today_workout(profile_id, last):
 
 
 def build(profile_id):
+    block_info = None
+    try:   # Wochen-Check: laeuft nur einmal pro Woche wirklich, sonst kaum Aufwand
+        from .planner import autoregulate
+        block_info = autoregulate.review(profile_id)
+    except Exception:   # noqa: BLE001 – die Startseite darf daran nicht haengen
+        log.exception("Wochen-Check fehlgeschlagen")
     base = stats.today_view(profile_id)
     day_iso = stats.today().isoformat()
     checkin = readiness.get(profile_id, day_iso)
@@ -68,6 +74,9 @@ def build(profile_id):
     return {
         **base,
         "date": day_iso,
+        "block": block_info["block"] if block_info else None,
+        "plan_events": block_info["events"][:3] if block_info else [],
+        "coach_notes": coach.open_notes(profile_id),
         "today_workout": today_workout(profile_id, base.get("last_workout")),
         "checkin": checkin,
         "sore_today": sore,
@@ -79,5 +88,6 @@ def build(profile_id):
         # Was fuer Kalorien-/Trinkziel noch fehlt – Heute zeigt dann "Profil vervollstaendigen".
         "profile_missing": goal_info["missing"],
         "nutrition": {"totals": kcal_day, "goals": goals,
-                     "water_ml": day_nutrition["water_ml"], "water_goal": water_goal},
+                     "water_ml": day_nutrition["water_ml"], "water_goal": water_goal,
+                      "burned_kcal": day_nutrition["burned_kcal"]},
     }

@@ -54,6 +54,33 @@ function cardioRow(c) {
   </div>`;
 }
 
+let calMonth = null;   // "YYYY-MM"; null = aktueller Monat
+
+/** Monatskalender: Tage mit Krafttraining gefuellt, nur Cardio als Ring. */
+function calendarHtml() {
+  const now = new Date();
+  const key = calMonth || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const [y, m] = key.split("-").map(Number);
+  const strength = new Set((workouts || []).map((w) => String(w.started_at || w.finished_at || "").slice(0, 10)));
+  const cardioDays = new Set((cardio || []).map((c) => String(c.date || "").slice(0, 10)));
+  const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+  const days = new Date(y, m, 0).getDate();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const cells = [...Array(lead).fill(`<i></i>`), ...Array.from({ length: days }, (_, i) => {
+    const iso = `${key}-${String(i + 1).padStart(2, "0")}`;
+    const cls = strength.has(iso) ? "lift" : cardioDays.has(iso) ? "cardio" : "";
+    return `<b class="${cls} ${iso === today ? "today" : ""}">${i + 1}</b>`;
+  })];
+  return `<div class="card cal">
+    <div class="cal-head">
+      <button type="button" class="icon-btn" data-cal="-1" aria-label="Vorheriger Monat">${icon("left")}</button>
+      <span class="card-title">${parseYmd(`${key}-01`).toLocaleDateString("de-AT", { month: "long", year: "numeric" })}</span>
+      <button type="button" class="icon-btn" data-cal="1" aria-label="Nächster Monat">${icon("right")}</button>
+    </div>
+    <div class="cal-grid" aria-hidden="true">${["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((d) => `<small>${d}</small>`).join("")}${cells.join("")}</div>
+  </div>`;
+}
+
 function render() {
   const items = [
     ...outbox.pendingWorkouts().map((w) => ({ at: w.started_at || w.finished_at, html: workoutRow(w) })),
@@ -74,11 +101,11 @@ function render() {
   }
   const monthLabel = (key) => (key.length === 7
     ? parseYmd(`${key}-01`).toLocaleDateString("de-AT", { month: "long", year: "numeric" }) : "");
-  root.innerHTML = items.length
+  root.innerHTML = calendarHtml() + (items.length
     ? `${months.map((m) => `<h3 class="group-title">${esc(monthLabel(m.key))}</h3>
       <div class="list">${m.items.map((i) => i.html).join("")}</div>`).join("")}
       ${more ? `<div class="btn-row"><button type="button" class="btn ghost" data-more>Ältere laden</button></div>` : ""}`
-    : empty("Noch nichts trainiert", "Gespeicherte Einheiten und Cardio erscheinen hier.");
+    : empty("Noch nichts trainiert", "Gespeicherte Einheiten und Cardio erscheinen hier."));
 }
 
 export async function load() {
@@ -197,6 +224,14 @@ function openCardio(id) {
 export async function mount(el) {
   root = el;
   el.addEventListener("click", (ev) => {
+    const cal = ev.target.closest("[data-cal]");
+    if (cal) {
+      const now = new Date();
+      const [y, m] = (calMonth || `${now.getFullYear()}-${now.getMonth() + 1}`).split("-").map(Number);
+      const d = new Date(y, m - 1 + Number(cal.dataset.cal), 1);
+      calMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      return render();
+    }
     const more = ev.target.closest("[data-more]");
     if (more) return loadMore(more);
     const w = ev.target.closest("[data-workout]");

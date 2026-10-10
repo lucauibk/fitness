@@ -68,6 +68,34 @@ function readinessCard(c) {
   </div>`;
 }
 
+// ---------------------------------------------------------- Coach-Hinweise
+/** Vorschlaege des taeglichen Coach-Laufs. Nur Hinweise: umgesetzt wird von Hand. */
+function coachCard() {
+  const notes = data.coach_notes || [];
+  if (!notes.length) return "";
+  return `<div class="card coach-notes"><p class="eyebrow">${icon("spark")} Coach-Hinweise</p>
+    ${notes.map((n) => `<div class="coach-note" data-note="${n.id}">
+      <div class="grow"><p class="coach-note-title">${esc(n.title)}${n.exercise ? ` <small>· ${esc(n.exercise)}</small>` : ""}</p>
+        <p class="hint">${esc(n.text)}</p></div>
+      <button type="button" class="icon-btn" data-dismiss-note="${n.id}" aria-label="Hinweis ausblenden">${icon("x")}</button>
+    </div>`).join("")}</div>`;
+}
+
+async function dismissNote(btn) {
+  const id = Number(btn.dataset.dismissNote);
+  btn.disabled = true;
+  try {
+    await api(`coach-notes/${id}/dismiss`, { method: "POST" });
+  } catch (e) {
+    btn.disabled = false;
+    return toast(e.message, { error: true });
+  }
+  data.coach_notes = data.coach_notes.filter((n) => n.id !== id);
+  const card = btn.closest(".coach-notes");
+  if (data.coach_notes.length) btn.closest(".coach-note").remove();
+  else card.remove();
+}
+
 // --------------------------------------------------------------- Karten
 function exerciseRow(e) {
   const s = e.suggest;
@@ -113,12 +141,16 @@ function workoutCard() {
     </div>`;
   }
   return `<div class="card hero">
-      <p class="eyebrow">${d.fixed ? `${esc(weekday)} · Training` : "Als Nächstes dran"}</p>
+      <p class="eyebrow">${d.fixed ? `${esc(weekday)} · Training`
+        : d.note === "nachgeholt" ? "Nachholen · verschoben" : "Als Nächstes dran"}</p>
       <h3 class="hero-title">${esc(day.label)}</h3>
       <p class="hint">${day.exercises.length} Übungen · ${day.exercises.reduce((n, e) => n + e.target_sets, 0)} Sätze
-        ${d.position ? ` · Tag ${d.position} von ${d.day_count}` : ""}</p>
+        ${d.position ? ` · Tag ${d.position} von ${d.day_count}` : ""}
+        ${d.block ? ` · Woche ${d.block.week}/${d.block.weeks}${d.block.deload ? " (Entlastung)" : ` · ${d.block.rir} in Reserve`}` : ""}</p>
+      ${d.block?.deload ? `<p class="callout">${icon("warn")} Entlastungswoche: leichter trainieren, nichts bis ans Limit – so erholen sich Muskeln und Gelenke.</p>` : ""}
       ${d.sore_today?.length ? `<p class="callout">${icon("warn")} Muskelkater in ${esc(d.sore_today.map((g) => GROUPS[g]).join(", "))} –
         die Sätze sind reduziert.${d.alternative ? ` Alternativ heute <button type="button" class="link-btn" data-start="${d.alternative.id}">${esc(d.alternative.label)} trainieren</button>.` : ""}</p>` : ""}
+      ${d.note === "erholung" ? `<p class="callout">${icon("warn")} Gestern waren dieselben Muskeln dran – lass sie heute ruhen oder wähle „Anderer Tag“.</p>` : ""}
       <div class="btn-row">
         ${running
           ? `<a class="btn primary" href="#training/einheit">${icon("play")} Einheit fortsetzen</a>`
@@ -150,10 +182,10 @@ function nutritionCard() {
   const eaten = n.totals.kcal + pend;
   return `<div class="card nutri-mini">
     <a class="mini-card" href="#ernaehrung">
-      ${ring(eaten, n.goals.kcal, { size: 72 })}
+      ${ring(eaten, n.goals.kcal ? n.goals.kcal + (n.burned_kcal || 0) : n.goals.kcal, { size: 72 })}
       <div class="grow"><p class="eyebrow">Ernährung</p>
         <div class="card-title">${Math.round(eaten)} ${n.goals.kcal ? `von ${n.goals.kcal} ` : ""}kcal</div>
-        <p class="hint">Eiweiß ${Math.round(n.totals.protein)}${n.goals.protein ? ` / ${n.goals.protein}` : ""} g</p></div>
+        <p class="hint">Eiweiß ${Math.round(n.totals.protein)}${n.goals.protein ? ` / ${n.goals.protein}` : ""} g${n.burned_kcal ? ` · ${n.burned_kcal} kcal verbrannt` : ""}</p></div>
       ${icon("right", "chev")}
     </a>
     ${waterLine()}
@@ -190,7 +222,10 @@ function render() {
       <div class="grow"><p class="eyebrow">Profil vervollständigen</p>
         <p class="hint">Für Kalorien- und Trinkziel fehlen noch: ${esc(d.profile_missing.join(", "))}.</p></div>
       ${icon("right", "chev")}</a>` : ""}
+    ${coachCard()}
     ${workoutCard()}
+    ${(d.plan_events || []).length ? `<div class="card quiet-events"><p class="eyebrow">${icon("spark")} Dein Plan passt sich an</p>
+      ${d.plan_events.map((e) => `<p class="hint">${esc(e.text)}</p>`).join("")}</div>` : ""}
     ${showForm ? checkinForm(d.checkin) : readinessCard(d.checkin)}
     ${mobilityCard()}
     ${nutritionCard()}`;
@@ -415,6 +450,8 @@ export async function mount(el) {
     if (save) return saveCheckin(save);
     if (t("[data-edit-checkin]")) { editingCheckin = true; return render(); }
     if (t("[data-cancel-checkin]")) { editingCheckin = false; return render(); }
+    const note = t("[data-dismiss-note]");
+    if (note) return dismissNote(note);
     const start = t("[data-start]");
     if (start) return begin(Number(start.dataset.start));
     if (t("[data-pick]")) return pickDay();

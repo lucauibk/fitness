@@ -1,8 +1,10 @@
 /** Fortschritt: fällige Steigerungen, Volumen und Häufigkeit, Bestleistungen, Körpergewicht. */
+import { ring } from "./ernaehrung.js";
 import { api, empty, esc, fmtWeight, icon, openSheet, setsSummary, skeleton, toast } from "./util.js";
 
 let root;
 let data = null;
+let extra = { today: null, workouts: [], curves: [] };
 
 const nf = (n) => Number(n).toLocaleString("de-AT");
 const dm = (iso) => new Date(iso).toLocaleDateString("de-AT", { day: "numeric", month: "short" });
@@ -88,7 +90,9 @@ function bestRow(b) {
       <div class="row-meta"><span>${esc(setsSummary([b], b.unit))}</span>
         <span>${dm(b.date)}</span></div>
     </div>
-    ${b.one_rm ? `<span class="row-aside">1RM ≈ <b>${String(b.one_rm).replace(".", ",")}</b></span>` : ""}
+    ${b.one_rm_now ? `<span class="row-aside" title="Schätzung aus den letzten Einheiten">1RM ≈ <b>${
+      String(b.one_rm_now).replace(".", ",")}</b> ±${b.one_rm_spread} %</span>`
+      : b.one_rm ? `<span class="row-aside">1RM ≈ <b>${String(b.one_rm).replace(".", ",")}</b></span>` : ""}
     ${icon("right", "chev")}
   </div>`;
 }
@@ -126,10 +130,58 @@ function bodyweightSection() {
   </a>`;
 }
 
+// ----------------------------------------------- Kachelraster (MCI-Stil)
+const pad = (n) => String(n).padStart(2, "0");
+const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+function tile(href, title, sub, body, foot) {
+  return `<a class="tile" href="${href}"><div><p class="tile-title">${title}</p><p class="tile-sub">${sub}</p></div>
+    <div class="tile-body">${body}</div><div class="tile-foot">${foot}${icon("right", "chev")}</div></a>`;
+}
+
+function dotGrid() {
+  const trained = new Set((extra.workouts || []).map((w) => String(w.started_at || w.finished_at || "").slice(0, 10)));
+  const days = [];
+  for (let i = 29; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); days.push(iso(d)); }
+  return `<div class="dotgrid" aria-hidden="true">${days.map((d) => `<i class="${trained.has(d) ? "on" : ""}"></i>`).join("")}</div>`;
+}
+
+function bar(value, goal, color) {
+  const pct = goal ? Math.min(100, (value / goal) * 100) : 0;
+  return `<span class="tbar"><i style="width:${pct}%;background:${color}"></i></span>`;
+}
+
+function tilesSection() {
+  const n = extra.today?.nutrition;
+  const kcal = Math.round(n?.totals.kcal || 0);
+  const bw = data.bodyweight || [];
+  const lastBw = bw[bw.length - 1];
+  const f = data.frequency;
+  const tiles = [];
+  if (n) tiles.push(tile("#ernaehrung", "Kalorien", "Heute", ring(kcal, n.goals.kcal, { size: 96 }),
+    `<b>${kcal}</b>${n.goals.kcal ? ` / ${n.goals.kcal}` : ""}`));
+  tiles.push(tile("#fortschritt/verlauf", "Trainings", "Letzte 30 Tage", dotGrid(), `<b>${f.this_week}</b> diese Woche`));
+  if (lastBw) tiles.push(`<div class="tile wide">${tile("#fortschritt/koerper", "Körpergewicht", "Letzte Einträge",
+    sparkline(bw.slice(-7).map((b) => ({ value: b.kg })), { height: 56 }),
+    `<b>${String(lastBw.kg).replace(".", ",")}</b> kg`).replace('<a class="tile"', '<a class="tile-in"')}</div>`);
+  if (n) {
+    const p = Math.round(n.totals.protein || 0);
+    const c = Math.round(n.totals.carbs || 0);
+    tiles.push(tile("#ernaehrung", "Protein", "Heute", bar(p, n.goals.protein, "var(--c-protein)"), `<b>${p}</b> g`));
+    tiles.push(tile("#ernaehrung", "Carbs", "Heute", bar(c, n.goals.carbs, "var(--c-carbs)"), `<b>${c}</b> g`));
+  }
+  for (const cv of extra.curves) {
+    tiles.push(tile("#fortschritt", esc(cv.name), "Letzte Einheiten",
+      sparkline(cv.points, { height: 56 }), `<b>${String(cv.last).replace(".", ",")}</b> ${cv.unit}`));
+  }
+  return `<div class="tiles">${tiles.join("")}</div>`;
+}
+
 function render() {
   const nothing = !data.best.length && !data.bodyweight.length && !data.frequency.total;
   root.innerHTML = `${nothing ? empty("Noch keine Daten",
       "Nach der ersten gespeicherten Einheit siehst du hier deine Entwicklung.") : ""}
+    ${nothing ? "" : tilesSection()}
     ${readySection()}
     ${data.frequency.total ? frequencySection() : ""}
     ${nothing ? "" : bestSection()}
@@ -139,6 +191,21 @@ function render() {
 export async function load() {
   if (!data) root.innerHTML = skeleton(5);
   data = await api("progress");
+  render();
+  loadExtra();
+}
+
+/** Kacheldaten still nachladen; fehlt etwas, bleibt die Kachel einfach weg. */
+async function loadExtra() {
+  const top = [...(data.best || [])].sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 2);
+  const [today, workouts, ...hist] = await Promise.all([
+    api("today").catch(() => null), api("workouts?limit=60").catch(() => []),
+    ...top.map((b) => api(`history/${b.exercise_id}`).catch(() => [])),
+  ]);
+  extra = { today, workouts, curves: top.map((b, i) => {
+    const pts = (hist[i] || []).slice(-7).map((p) => ({ value: p.value }));
+    return pts.length > 1 ? { name: b.exercise, points: pts, last: pts[pts.length - 1].value, unit: b.unit === "reps" ? "Whd." : "kg" } : null;
+  }).filter(Boolean) };
   render();
 }
 

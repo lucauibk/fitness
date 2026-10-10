@@ -151,6 +151,7 @@ function applyProfile(id) {
 /** Alle Ansichten frisch einhängen. Ersetzt die Elemente, damit mount() keine
  *  zweiten Klick-Listener an dieselben Knoten hängt (sonst löst jeder Knopf doppelt aus). */
 function resetViews() {
+  plan.reset?.();
   mounted.clear();
   $$(".view").forEach((el) => el.replaceWith(el.cloneNode(false)));
 }

@@ -13,7 +13,7 @@ const API = "api-v1"; // Daten ueberleben App-Updates
 const NETWORK_TIMEOUT_MS = 6000;
 const OFF_PATHS = /^\/api\/foods\/(search$|portion\/|barcode\/)/;
 // Ohne Netz ohnehin nutzlos (Assistent speichert auf dem Pi) – nicht abfangen, nicht cachen.
-const NO_CACHE = /^\/api\/(wizard|export)\//;
+const NO_CACHE = /^\/api\/(wizard|export|planner\/(suggest|create|pain|new-block))\b/;
 const KEEP_DAYS = 14;   // so weit zurueck bleiben Tagesansichten (nutrition/day?date=) im Cache
 
 self.addEventListener("install", (event) => {

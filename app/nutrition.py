@@ -97,7 +97,10 @@ def day(profile_id, day_iso):
              for k, v in MEALS.items()}
     water = db.one("SELECT COALESCE(SUM(ml), 0) AS ml FROM water_log WHERE profile_id=? AND date=?",
                    (profile_id, day_iso))["ml"]
-    return {"date": day_iso, "meals": meals, "totals": totals, "water_ml": max(0, water)}
+    burned = db.one("SELECT COALESCE(SUM(kcal), 0) AS kcal FROM cardio WHERE profile_id=? AND date=?",
+                    (profile_id, day_iso))["kcal"]
+    return {"date": day_iso, "meals": meals, "totals": totals, "water_ml": max(0, water),
+            "burned_kcal": round(burned or 0)}
 
 
 # --------------------------------------------------------------- Wasser

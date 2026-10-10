@@ -90,8 +90,13 @@ def best_per_exercise(profile_id):
                 "date": _local_date(s["at"]).isoformat() if _local_date(s["at"]) else None,
             }
     out = sorted(best.values(), key=lambda b: (b["muscle_group"] or "", b["exercise"]))
+    from .planner import progression
     for b in out:
         b.pop("score", None)
+        # aktuelle Schaetzung (Kalman ueber die letzten Einheiten) statt nur des besten Einzelsatzes
+        est = progression.estimate(progression.sessions(profile_id, b["exercise_id"], limit=12))
+        b["one_rm_now"] = round(est[0], 1) if est else None
+        b["one_rm_spread"] = round(100 * est[1] / est[0]) if est else None
     return out
 
 
@@ -200,50 +205,12 @@ def last_sets(profile_id, exercise_id):
                    " ORDER BY set_no, id", (last["id"], exercise_id))
 
 
-def suggest(profile_id, exercise, target_sets=None, reps_min=None, reps_max=None):
-    """Doppelte Steigerung ("double progression"): innerhalb des Wiederholungs-Bereichs
-    arbeiten, und erst wenn in allen Sätzen das obere Ende erreicht ist, das Gewicht
-    erhöhen und wieder unten einsteigen. Der Vorschlag ist immer nur ein Vorschlag."""
+def suggest(profile_id, exercise, target_sets=None, reps_min=None, reps_max=None, rir=2, deload=False):
+    """Vorschlag fuer die naechste Einheit – Rechenlogik in planner.progression."""
+    from .planner import progression
     lo = reps_min or 8
-    hi = max(reps_max or lo, lo)
-    previous = last_sets(profile_id, exercise["id"])
-    if not previous:
-        return {"reps": lo, "weight": None, "raise_weight": False,
-                "reason": "erstes Mal", "last": [], "range": [lo, hi]}
-    weights = [p["weight"] for p in previous if p["weight"] is not None]
-    top = max(weights) if weights else None
-    done_sets = len(previous)
-    # Oberes Ende in allen geplanten Sätzen erreicht?
-    at_top = (all((p["reps"] or 0) >= hi for p in previous)
-              and done_sets >= (target_sets or 1))
-    if at_top:
-        # RPE als Autoregulation: Wiederholungsziel erreicht, aber nahe am Muskelversagen
-        # (⌀ RPE ≥ 9,5) heisst noch keine echte Reserve – dann lieber halten statt steigern.
-        rpes = [p["rpe"] for p in previous if p.get("rpe") is not None]
-        avg_rpe = sum(rpes) / len(rpes) if rpes else None
-        if avg_rpe is not None and avg_rpe >= 9.5:
-            return {"reps": hi, "weight": top, "raise_weight": False,
-                    "reason": f"{hi} Wiederholungen erreicht, aber nah am Muskelversagen (⌀ RPE {avg_rpe:g}) "
-                              "– noch einmal bei gleichem Gewicht, dann steigern",
-                    "last": previous, "range": [lo, hi]}
-        step = INCREMENT.get(exercise.get("muscle_group"), 2.5)
-        if top:
-            return {"reps": lo, "weight": round(top + step, 2), "raise_weight": True,
-                    "reason": f"{hi} Wiederholungen in allen Sätzen – Gewicht erhöhen",
-                    "last": previous, "range": [lo, hi]}
-        # Ohne Zusatzgewicht (Klimmzüge, Liegestütze): mehr Wiederholungen
-        return {"reps": hi + 1, "weight": None, "raise_weight": False,
-                "reason": "Bereich ausgereizt – eine Wiederholung mehr",
-                "last": previous, "range": [lo, hi]}
-    best_reps = max((p["reps"] or 0) for p in previous)
-    weakest = min((p["reps"] or 0) for p in previous)
-    if weakest < lo:
-        return {"reps": lo, "weight": top, "raise_weight": False,
-                "reason": f"unteres Ende ({lo}) erst noch in allen Sätzen schaffen",
-                "last": previous, "range": [lo, hi]}
-    return {"reps": min(best_reps + 1, hi), "weight": top, "raise_weight": False,
-            "reason": "gleiches Gewicht, eine Wiederholung mehr",
-            "last": previous, "range": [lo, hi]}
+    return progression.for_exercise(profile_id, exercise["id"], lo, max(reps_max or lo, lo),
+                                    target_sets, rir, deload)
 
 
 def ready_to_raise(profile_id):
@@ -266,35 +233,55 @@ def ready_to_raise(profile_id):
     return out
 
 
-def next_targets(profile_id, limit=8):
-    """Die Zielwerte für den nächsten geplanten Trainingstag – für den Fortschritt-Tab."""
-    split = db.active_split(profile_id)
-    if not split or not split["days"]:
-        return []
-    # Heute kein fester Tag -> der naechste in der Reihe (wie auf "Heute")
-    day = pick_day(split, today()) or rotation_day(profile_id, split)
-    if not day:
-        return []
-    out = []
-    for item in day["exercises"][:limit]:
-        ex = {"id": item["exercise_id"], "muscle_group": item["muscle_group"]}
-        s = suggest(profile_id, ex, item["target_sets"],
-                    item["target_reps_min"], item["target_reps_max"])
-        out.append({"exercise": item["name"], "unit": item["unit"],
-                    "sets": item["target_sets"], **s})
-    return [{"day": day["label"], "items": out}] if out else []
+RECOVERY_GROUPS = {"beine", "po", "brust", "ruecken"}   # wie splits.RECOVERY
 
 
-def pick_day(split, on_date):
-    """Welcher Split-Teil ist heute dran? Fester Wochentag gewinnt; sonst der Teil,
-    der am längsten nicht trainiert wurde (Rotation)."""
-    days = split["days"]
-    if not days:
-        return None
-    fixed = [d for d in days if on_date.weekday() in (d.get("weekdays") or [])]
-    if fixed:
-        return fixed[0]
-    return None
+def _big_groups(day):
+    return {e.get("muscle_group") for e in day.get("exercises", [])} & RECOVERY_GROUPS
+
+
+def schedule_day(profile_id, split, on_date):
+    """Adaptiver Wochenplan. Die Wochentage der Split-Tage sind nur der Soll-Plan; was in dieser
+    Woche tatsaechlich trainiert wurde, hakt den passenden Tag ab – egal an welchem Wochentag.
+    Offen bleibt, was noch fehlt: Wer am Unterkoerper-Tag Oberkoerper trainiert, bekommt als
+    Naechstes den Unterkoerper. Ein ausgelassener Tag rutscht auf den naechsten Tag (auch ohne
+    Praeferenz), sofern die Muskeln von gestern erholt sind.
+    Rueckgabe: (Tag, fest, Hinweis) – fest = der Tag ist wie geplant dran; Hinweis "nachgeholt"
+    oder "erholung" (ausstehender Tag belastet dieselben Muskeln wie gestern)."""
+    slots = sorted(((wd, d) for d in split["days"] for wd in (d.get("weekdays") or [])),
+                   key=lambda s: s[0])
+    if not slots:
+        return rotation_day(profile_id, split), False, None
+    monday = on_date - timedelta(days=on_date.weekday())
+    yesterday = on_date - timedelta(days=1)
+    done, yesterday_ids = {}, set()
+    for r in db.rows("SELECT w.split_day_id, COALESCE(w.started_at, w.finished_at) AS at,"
+                     " (SELECT COUNT(*) FROM sets s WHERE s.workout_id = w.id AND s.warmup=0) AS n_sets"
+                     " FROM workouts w WHERE w.profile_id=? AND w.split_day_id IS NOT NULL"
+                     " ORDER BY at DESC LIMIT 60", (profile_id,)):
+        d = _local_date(r["at"])
+        if d and monday <= d <= on_date:
+            done[r["split_day_id"]] = done.get(r["split_day_id"], 0) + 1
+            # Erholungs-Sperre: gestern immer, vorgestern nach einer langen Einheit (>= 15 Saetze) – ~48 h
+            if d == yesterday or (d == on_date - timedelta(days=2) and (r["n_sets"] or 0) >= 15):
+                yesterday_ids.add(r["split_day_id"])
+    remaining = []
+    for wd, d in slots:
+        if done.get(d["id"], 0) > 0:
+            done[d["id"]] -= 1
+        else:
+            remaining.append((wd, d))
+    tired = set()
+    for d in split["days"]:
+        if d["id"] in yesterday_ids:
+            tired |= _big_groups(d)
+    due = [(wd, d) for wd, d in remaining if wd <= on_date.weekday()]
+    for wd, d in due:
+        # Der heute geplante Tag gilt immer; nachgeholte nur, wenn die Muskeln erholt sind.
+        if wd == on_date.weekday() or not (_big_groups(d) & tired):
+            return d, wd == on_date.weekday(), ("nachgeholt" if wd < on_date.weekday() else None)
+    nxt = remaining[0][1] if remaining else rotation_day(profile_id, split)
+    return nxt, False, ("erholung" if due else None)
 
 
 def rotation_day(profile_id, split):
@@ -313,12 +300,18 @@ def rotation_day(profile_id, split):
 
 
 def day_plan(profile_id, day):
-    """Ein Trainingstag mit letzten Werten und Vorschlägen je Übung."""
+    """Ein Trainingstag mit letzten Werten und Vorschlägen je Übung – nach Blockwoche."""
+    from .planner import blocks
+    block = blocks.ensure(profile_id)
+    st = blocks.state(block) if block else None
     items = []
     for item in day["exercises"]:
         ex = {"id": item["exercise_id"], "muscle_group": item["muscle_group"]}
+        if st:
+            item = {**item, "target_sets": blocks.sets_for(block, item)}
         s = suggest(profile_id, ex, item["target_sets"],
-                    item["target_reps_min"], item["target_reps_max"])
+                    item["target_reps_min"], item["target_reps_max"],
+                    rir=st["rir"] if st else 2, deload=bool(st and st["deload"]))
         items.append({
             "split_exercise_id": item["id"], "exercise_id": item["exercise_id"],
             "name": item["name"], "unit": item["unit"], "muscle_group": item["muscle_group"],
@@ -329,10 +322,11 @@ def day_plan(profile_id, day):
             "rest_seconds": item.get("rest_seconds"),
             "last": s["last"], "suggest": {"reps": s["reps"], "weight": s["weight"],
                                            "reason": s["reason"],
-                                           "raise_weight": s["raise_weight"]},
+                                           "raise_weight": s["raise_weight"], "status": s.get("status"),
+                                           "estimate": bool(s.get("estimate"))},
         })
     return {"id": day["id"], "label": day["label"], "weekdays": day.get("weekdays") or [],
-            "exercises": items}
+            "exercises": items, "block": st}
 
 
 def today_view(profile_id):
@@ -340,10 +334,7 @@ def today_view(profile_id):
     if not split:
         return {"split": None, "day": None, "fixed": False, "days": [],
                 "last_workout": None}
-    day = pick_day(split, today())
-    fixed = day is not None
-    if not day:
-        day = rotation_day(profile_id, split)
+    day, fixed, note = schedule_day(profile_id, split, today())
     last = db.rows("SELECT w.id, w.split_day_id, COALESCE(w.started_at, w.finished_at) AS at,"
                    " d.label AS day_label FROM workouts w"
                    " LEFT JOIN split_days d ON d.id = w.split_day_id"
@@ -352,6 +343,7 @@ def today_view(profile_id):
         "split": {"id": split["id"], "name": split["name"]},
         "day": day_plan(profile_id, day) if day else None,
         "fixed": fixed,
+        "note": note,
         "position": next((i + 1 for i, d in enumerate(split["days"]) if day and d["id"] == day["id"]), None),
         "day_count": len(split["days"]),
         "days": [{"id": d["id"], "label": d["label"], "weekdays": d.get("weekdays") or []}
@@ -366,7 +358,6 @@ def progress(profile_id):
         "volume": weekly_volume(profile_id),
         "frequency": frequency(profile_id),
         "bodyweight": bodyweight(profile_id),
-        "next": next_targets(profile_id),
         "ready": ready_to_raise(profile_id),
         "groups": GROUP_LABEL,
     }

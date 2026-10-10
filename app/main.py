@@ -21,9 +21,11 @@ from pydantic import BaseModel, Field
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-from . import (activity, ai, analysis, checker, daily_view, db, export, generator,  # noqa: E402
+from . import (activity, ai, analysis, checker, coach, daily_view, db, export,  # noqa: E402
                readiness, session_feedback, stats)
-from .common import FIELD_NAMES, NOT_NULL, _data, _found, current_profile  # noqa: E402,F401
+from .common import FIELD_NAMES, NOT_NULL, _data, _found, current_profile, owned  # noqa: E402,F401
+from .planner import generate  # noqa: E402
+from .planner.profile_model import injuries_from  # noqa: E402
 
 STATIC = Path(__file__).parent.parent / "static"
 log = logging.getLogger("fitness")
@@ -55,9 +57,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Fitness", lifespan=lifespan)
 
-from .routes import body as body_routes, daily, library, nutrition as nutrition_routes  # noqa: E402
+from .routes import body as body_routes, daily, library, nutrition as nutrition_routes, planner as planner_routes  # noqa: E402
 
-for _router in (daily.router, library.router, nutrition_routes.router, body_routes.router):
+for _router in (daily.router, library.router, nutrition_routes.router, body_routes.router,
+                planner_routes.router):
     app.include_router(_router)
 
 # ------------------------------------------------------- Host-Pruefung
@@ -286,7 +289,10 @@ def api_profile(profile_id: int):
 @app.patch("/api/profiles/{profile_id}")
 def api_update_profile(profile_id: int, body: ProfileIn):
     _found(db.get_row("profiles", profile_id))
-    return db.profile_out(_found(db.update_row("profiles", profile_id, _profile_in(_data(body)))))
+    data = _profile_in(_data(body))
+    if "experience" in data and data["experience"] != db.get_row("profiles", profile_id).get("experience"):
+        data["experience_auto"] = None      # von Hand geaendert: die App stuft nicht mehr selbst um
+    return db.profile_out(_found(db.update_row("profiles", profile_id, data)))
 
 
 @app.get("/api/export/{kind}.csv")
@@ -348,7 +354,20 @@ def api_splits(profile_id: int = Depends(current_profile)):
 @app.get("/api/splits/{split_id}")
 def api_split(split_id: int, profile_id: int = Depends(current_profile)):
     _owns_split(split_id, profile_id)
-    return _found(db.split_detail(split_id))
+    split = _found(db.split_detail(split_id))
+    _with_minutes(split, profile_id)
+    return split
+
+
+def _with_minutes(split, profile_id):
+    """Geschaetzte Dauer je Tag aus den Saetzen der aktuellen Blockwoche – die Dauer wird nicht abgefragt,
+    sie ergibt sich aus dem Volumen."""
+    from .planner import blocks, volume_plan as vp
+    block = blocks.for_split(split["id"])
+    goal = (block or {}).get("goal") or (db.get_row("profiles", profile_id) or {}).get("goal") or "aufbau"
+    for day in split["days"]:
+        sets = sum(blocks.sets_for(block, e) if block else e["target_sets"] for e in day["exercises"])
+        day["minutes"] = vp.session_minutes(sets, goal) if sets else None
 
 
 @app.post("/api/splits")
@@ -387,7 +406,7 @@ def api_delete_split(split_id: int, profile_id: int = Depends(current_profile)):
     db.delete_row("splits", split_id)
     rest = db.list_rows_where("splits", "profile_id", profile_id)
     if was_active and rest:
-        db.activate_split(rest[0]["id"], profile_id)
+        db.activate_split(rest[-1]["id"], profile_id)       # der zuletzt angelegte Plan rueckt nach
     return {"ok": True}
 
 
@@ -432,6 +451,7 @@ def api_add_split_exercise(body: SplitExerciseIn, profile_id: int = Depends(curr
     data.setdefault("target_reps_min", 8)
     data.setdefault("target_reps_max", 12)
     _check_range(data)
+    data["base_sets"] = data["target_sets"]
     return db.insert_row("split_exercises", data)
 
 
@@ -443,6 +463,10 @@ def api_update_split_exercise(item_id: int, body: SplitExerciseIn,
     data = _data(body)
     data.pop("split_day_id", None)
     _check_range(data, item)
+    if data.get("target_sets"):
+        data["base_sets"] = data["target_sets"]     # eine Aenderung im Plan ist die neue Woche 1
+    if data.get("exercise_id") and data["exercise_id"] != item["exercise_id"]:
+        data["generated"] = None                    # selbst gewaehlt: die App wechselt sie nicht mehr
     return _found(db.update_row("split_exercises", item_id, data))
 
 
@@ -458,6 +482,18 @@ def api_delete_split_exercise(item_id: int, profile_id: int = Depends(current_pr
 @app.get("/api/today")
 def api_today(profile_id: int = Depends(current_profile)):
     return daily_view.build(profile_id)
+
+
+@app.get("/api/coach-notes")
+def api_coach_notes(profile_id: int = Depends(current_profile)):
+    return coach.open_notes(profile_id)
+
+
+@app.post("/api/coach-notes/{note_id}/dismiss")
+def api_coach_dismiss(note_id: int, profile_id: int = Depends(current_profile)):
+    owned("coach_notes", note_id, profile_id, "Dieser Hinweis")
+    coach.dismiss(note_id)
+    return {"ok": True}
 
 
 @app.get("/api/day/{day_id}")
@@ -508,7 +544,14 @@ def api_add_workout(body: WorkoutIn):
         raise HTTPException(400, "Die Übungen dieser Einheit gibt es nicht mehr.")
     before = activity.reached_keys(body.profile_id)
     workout, created = db.save_workout(payload)
-    return {"workout": workout, "created": created,
+    changes = []
+    if created:
+        try:
+            from .planner import explain
+            changes = explain.after_workout(body.profile_id, workout)
+        except Exception:   # noqa: BLE001 – die Erklaerung ist Beiwerk, die Einheit ist gespeichert
+            log.exception("Plan-Hinweise nach der Einheit fehlgeschlagen")
+    return {"workout": workout, "created": created, "plan_changes": changes,
             "milestones": activity.new_milestones(before, body.profile_id) if created else [],
             # Beim zweiten Eintreffen derselben client_id nicht noch einmal urteilen.
             "feedback": session_feedback.evaluate(body.profile_id, workout) if created else None}
@@ -657,8 +700,19 @@ def _profile(profile_id):
     return db.profile_out(_found(db.get_row("profiles", profile_id)))
 
 
-def _with_check(preview):
-    return {"preview": preview, "check": checker.analyze_split(preview)}
+def _check(plan, profile_id=None):
+    from .planner import validate
+    profile = db.get_row("profiles", profile_id) if profile_id else None
+    injuries = injuries_from((profile or {}).get("limitations"))
+    profile = profile or {}
+    return validate.analyze(plan, injuries, None,
+                            plan.get("goal") or profile.get("goal") or "aufbau", bool(plan.get("rotate")),
+                            plan.get("experience") or profile.get("experience") or "fortgeschritten",
+                            plan.get("focus") or db.parse_focus(profile.get("focus")))
+
+
+def _with_check(preview, profile_id=None):
+    return {"preview": preview, "check": _check(preview, profile_id)}
 
 
 @app.get("/api/wizard/options")
@@ -676,23 +730,25 @@ def api_wizard_options(profile_id: int = Depends(current_profile),
     overrides = {"experience": experience, "goal": goal, "minutes": minutes,
                  "weekdays": wd or None, "days": days,
                  "focus": db.parse_focus(focus) if focus else None}
-    return {"options": generator.split_options(p, overrides), "ai_available": ai.available()}
+    return {"options": generate.split_options(p, overrides), "ai_available": ai.available()}
 
 
 @app.post("/api/wizard/preview")
 def api_wizard_preview(body: WizardIn, profile_id: int = Depends(current_profile)):
     try:
-        preview = generator.generate(_profile(profile_id), body.option,
-                                     body.model_dump(exclude={"option"}))
+        preview = generate.generate(_profile(profile_id), body.option,
+                                    body.model_dump(exclude={"option"}))
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return _with_check(preview)
+    return _with_check(preview, profile_id)
 
 
 @app.get("/api/wizard/alternatives")
-def api_wizard_alternatives(pattern: Pattern, exclude: str = Query("", max_length=200)):
+def api_wizard_alternatives(pattern: Pattern, exclude: str = Query("", max_length=200),
+                            profile_id: int = Depends(current_profile)):
     ids = [int(x) for x in exclude.split(",") if x.strip().isdigit()]
-    return generator.alternatives(pattern, ids)
+    injuries = injuries_from((db.get_row("profiles", profile_id) or {}).get("limitations"))
+    return generate.alternatives(pattern, ids, injuries)
 
 
 def _plan_dict(plan: PlanIn):
@@ -706,8 +762,8 @@ def _plan_dict(plan: PlanIn):
 
 
 @app.post("/api/wizard/check")
-def api_wizard_check(plan: PlanIn):
-    return _with_check(_plan_dict(plan))
+def api_wizard_check(plan: PlanIn, profile_id: int = Depends(current_profile)):
+    return _with_check(_plan_dict(plan), profile_id)
 
 
 def _finding_keys(check):
@@ -720,23 +776,32 @@ def api_wizard_refine(plan: PlanIn, profile_id: int = Depends(current_profile)):
     """KI-Verfeinerung mit Kontrolle: bringt der Vorschlag neue Luecken, gibt es einmal
     Rueckmeldung und einen zweiten Versuch; wird es nicht besser, bleibt der Ausgangsplan."""
     preview = _plan_dict(plan)
-    profile, catalog = _profile(profile_id), generator.catalog()
-    base_keys = _finding_keys(checker.analyze_split(preview))
+    profile, catalog = _profile(profile_id), generate.catalog()
+    base_keys = _finding_keys(_check(preview, profile_id))
     feedback = None
     for _ in range(2):
         res = ai.refine_plan(profile, preview, catalog, feedback)
         if res.get("error"):
-            return {**_with_check(preview), "error": res["error"]}
-        check = checker.analyze_split(res["preview"])
+            return {**_with_check(preview, profile_id), "error": res["error"]}
+        check = _check(res["preview"], profile_id)
         new = [f["text"] for f in check["findings"]
                if (f["level"], f.get("group"), f["text"].split(" ")[0]) not in base_keys]
         # (gleiche Schluesselbildung wie _finding_keys)
         if not new:
             return {"preview": res["preview"], "check": check, "error": None}
         feedback = new
-    return {**_with_check(preview),
+    return {**_with_check(preview, profile_id),
             "error": "Die KI-Vorschläge hätten neue Lücken gebracht ("
                      + "; ".join(feedback) + ") – der bisherige Plan bleibt."}
+
+
+def _start_block(profile_id, split_id, plan):
+    from .planner import blocks
+    profile = _profile(profile_id)
+    age = (date.today().year - int(profile["birth_year"])) if profile.get("birth_year") else None
+    blocks.create(profile_id, split_id, plan.get("goal") or profile.get("goal"),
+                  plan.get("experience") or profile.get("experience"),
+                  plan.get("focus") or db.parse_focus(profile.get("focus")), age)
 
 
 @app.post("/api/wizard/save")
@@ -758,6 +823,7 @@ def api_wizard_save(body: SaveIn, profile_id: int = Depends(current_profile)):
                            ex["target_reps_min"], ex["target_reps_max"], ex.get("rest_seconds")))
     if body.activate:
         db.activate_split(split_id, profile_id)
+        _start_block(profile_id, split_id, plan)
     return db.split_detail(split_id)
 
 

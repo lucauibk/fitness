@@ -33,6 +33,9 @@ cp deploy/fitness.user.service ~/.config/systemd/user/fitness.service
 systemctl --user daemon-reload
 systemctl --user enable fitness >/dev/null 2>&1 || true
 systemctl --user restart fitness
+cp deploy/fitness-coach.service deploy/fitness-coach.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now fitness-coach.timer >/dev/null 2>&1 || true
 for i in \$(seq 1 30); do
   curl -fsS http://127.0.0.1:$PORT/api/status >/dev/null 2>&1 && break
   sleep 1

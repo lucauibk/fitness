@@ -1,4 +1,5 @@
 """Ernaehrung: Tagesbilanz, Ziele, Lebensmittel-Suche, Eintraege."""
+import json
 import re
 from typing import Literal, Optional
 
@@ -243,4 +244,50 @@ def patch_log(entry_id: int, body: LogPatch, profile_id: int = Depends(current_p
 def delete_log(entry_id: int, profile_id: int = Depends(current_profile)):
     owned("food_log", entry_id, profile_id, "Dieser Eintrag")
     db.delete_row("food_log", entry_id)
+    return {"ok": True}
+
+
+# ------------------------------------------------- Gespeicherte Mahlzeiten
+class MealItem(BaseModel):
+    food_id: int
+    grams: float = Field(..., gt=0, le=5000, allow_inf_nan=False)
+
+
+class SavedMealIn(BaseModel):
+    profile_id: int
+    name: str = Field(..., min_length=1, max_length=60)
+    items: list[MealItem] = Field(..., min_length=1, max_length=40)
+
+
+def _saved_out(row):
+    items = []
+    for it in json.loads(row["items"]):
+        food = db.get_row("foods", it["food_id"])
+        if food:   # geloeschte Lebensmittel fallen still heraus
+            items.append({**it, "name": food["name"], **nutrition.portion(food, it["grams"])})
+    return {"id": row["id"], "name": row["name"], "items": items,
+            "kcal": round(sum(i["kcal"] or 0 for i in items))}
+
+
+@router.get("/meals")
+def list_meals(profile_id: int = Depends(current_profile)):
+    rows = db.rows("SELECT * FROM saved_meals WHERE profile_id=? ORDER BY name COLLATE NOCASE", (profile_id,))
+    return [m for m in map(_saved_out, rows) if m["items"]]
+
+
+@router.post("/meals")
+def save_meal(body: SavedMealIn):
+    profile_id = current_profile(body.profile_id)
+    for it in body.items:
+        if not db.get_row("foods", it.food_id):
+            raise HTTPException(400, "Ein Lebensmittel gibt es nicht (mehr).")
+    row = db.insert_row("saved_meals", {"profile_id": profile_id, "name": body.name.strip(),
+                                        "items": json.dumps([i.model_dump() for i in body.items])})
+    return _saved_out(row)
+
+
+@router.delete("/meals/{meal_id}")
+def delete_meal(meal_id: int, profile_id: int = Depends(current_profile)):
+    owned("saved_meals", meal_id, profile_id, "Diese Mahlzeit")
+    db.delete_row("saved_meals", meal_id)
     return {"ok": True}

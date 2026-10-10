@@ -17,7 +17,8 @@ Zwei Eigenheiten, die Absicht sind:
 """
 from datetime import datetime, timezone
 
-from . import db, volume
+from . import db
+from .planner import volume_plan as volume
 
 # Gewicht je Kriterium. Summe 100, wenn alle greifen – sonst wird auf die anwendbaren
 # normiert, damit freies Training nicht für fehlende Vorgaben bestraft wird.
@@ -255,14 +256,12 @@ def _check_duration(workout, profile, work_sets):
     dauer = _minutes(workout)
     if dauer is None or not work_sets:
         return None
-    geplant = _num(profile.get("session_minutes")) if profile else None
-    if not geplant:
-        # Die Hochrechnung aus der Satzzahl taugt erst ab einer richtigen Einheit als Massstab –
-        # bei drei geloggten Saetzen wuerde sonst jede normale Trainingsdauer als "zu lang" gelten.
-        if len(work_sets) < 6:
-            return None
-        pro_satz = volume.MINUTES_PER_SET.get((profile or {}).get("goal") or "aufbau", 3.2)
-        geplant = volume.WARMUP_MINUTES + pro_satz * len(work_sets)
+    # Die Dauer wird nicht abgefragt: Massstab ist die Hochrechnung aus der Satzzahl. Sie taugt erst ab einer
+    # richtigen Einheit – bei drei geloggten Saetzen wuerde sonst jede normale Trainingsdauer als "zu lang" gelten.
+    if len(work_sets) < 6:
+        return None
+    pro_satz = volume.MINUTES_PER_SET.get((profile or {}).get("goal") or "aufbau", 3.2)
+    geplant = volume.WARMUP_MINUTES + pro_satz * len(work_sets)
     if dauer < geplant * 0.6:
         # Unter einer Minute liest sich "nur 0 Minuten" wie ein Fehler – es ist aber schlicht
         # eine im Nachhinein eingetippte Einheit.
