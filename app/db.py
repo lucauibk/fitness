@@ -191,7 +191,7 @@ CREATE TABLE IF NOT EXISTS coach_notes (
     title TEXT NOT NULL,
     text TEXT NOT NULL,
     exercise_id INTEGER,
-    status TEXT NOT NULL DEFAULT 'open', -- open | dismissed
+    status TEXT NOT NULL DEFAULT 'open', -- open | dismissed (weggeklickt) | resolved | expired
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_coach_notes_profile ON coach_notes(profile_id, status);

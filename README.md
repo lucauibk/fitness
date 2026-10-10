@@ -57,7 +57,8 @@ man prüft sie im Formular und speichert erst dann. Das Bild wird nicht gespeich
 - An **Anthropic** (nur mit `ANTHROPIC_API_KEY`, nur auf Knopfdruck): Plan-Check, KI-Verfeinerung
   (Plan + Eckdaten ohne Namen) und der ViCoach-Screenshot.
 - An **Anthropic** über Claude Code (nur wenn der Coach-Timer eingerichtet ist, täglich): aktiver Plan,
-  Trainings der letzten vier Wochen und Trainingsziele, ohne Namen und Körperdaten.
+  Block-Stand, Trainings der letzten sechs Wochen, Check-ins (Schlaf, Stress, Muskelkater), Ziele und
+  eingetragene Beschwerden – ohne Namen und Körperdaten.
 - An **Open Food Facts**: nur Suchbegriff bzw. Barcode.
 
 ## Start (lokal)
@@ -91,9 +92,12 @@ Danach `tailscale serve --bg --https=8443 http://127.0.0.1:8001` einmalig einric
 
 ## Täglicher Coach
 
-Jeden Morgen um 6:30 schaut Claude auf dem Pi den aktiven Plan und die Trainings der letzten vier
-Wochen an und legt höchstens drei kurze Vorschläge als **Coach-Hinweise** in „Heute“ ab
-(wegklickbar; offene Hinweise verschwinden nach 14 Tagen). Der Coach **ändert nichts**: Claude läuft
+Jeden Morgen um 6:30 schaut Claude auf dem Pi als persönlicher Coach den aktiven Plan, den Stand im
+Block, die Trainings der letzten sechs Wochen und die Check-ins an und legt höchstens drei kurze
+**Coach-Hinweise** in „Heute“ ab. Er lobt mit Beleg aus den Daten, spricht Probleme offen an, gibt je
+Hinweis eine nächste Handlung und schlägt nichts vor, was die App ohnehin selbst anpasst (Volumen im
+Block, Gewichtssteigerung, Entlastung, Wochen-Check). Was weggeklickt wurde, bringt er nicht wieder;
+überholte Hinweise räumt er selbst ab, offene verschwinden nach 14 Tagen. Der Coach **ändert nichts**: Claude läuft
 ohne Werkzeuge (`--tools ""`) und liefert nur Text, `app/coach.py` schreibt ausschließlich in
 `coach_notes`. An Claude gehen Plan, Sätze und Ziele, aber kein Name und keine Körperdaten.
 
