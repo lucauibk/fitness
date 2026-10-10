@@ -974,5 +974,10 @@ h1, h2, .page-title, .group-title { font-weight: 800; letter-spacing: 0.01em; }
 .block-card { margin-bottom: var(--s3); }
 .block-card .weekbars { margin: var(--s3) 0; }
 .quiet-events .hint { margin: var(--s1) 0 0; }
+.coach-note { display: flex; align-items: flex-start; gap: var(--s2); margin-top: var(--s2); }
+.coach-note + .coach-note { border-top: 1px solid var(--line, rgba(127,127,127,.2)); padding-top: var(--s2); }
+.coach-note-title { margin: 0; font-weight: 600; }
+.coach-note-title small { font-weight: 400; color: var(--muted, inherit); }
+.coach-note .hint { margin: var(--s1) 0 0; }
 .struct-day { margin: var(--s3) 0; }
 .struct-day .row-title small { color: var(--muted, inherit); font-weight: 400; }

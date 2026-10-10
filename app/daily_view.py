@@ -2,7 +2,7 @@
 Mobility-Vorschlag, Wochen-Streak und Kalorienbilanz."""
 import logging
 
-from . import activity, db, mobility, nutrition, readiness, session_feedback, stats
+from . import activity, coach, db, mobility, nutrition, readiness, session_feedback, stats
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +76,7 @@ def build(profile_id):
         "date": day_iso,
         "block": block_info["block"] if block_info else None,
         "plan_events": block_info["events"][:3] if block_info else [],
+        "coach_notes": coach.open_notes(profile_id),
         "today_workout": today_workout(profile_id, base.get("last_workout")),
         "checkin": checkin,
         "sore_today": sore,

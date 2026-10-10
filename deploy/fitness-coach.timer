@@ -1,0 +1,10 @@
+[Unit]
+Description=Fitness-Coach jeden Morgen
+
+[Timer]
+OnCalendar=*-*-* 06:30:00
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

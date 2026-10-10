@@ -181,6 +181,20 @@ CREATE TABLE IF NOT EXISTS saved_meals (
     items TEXT NOT NULL,                 -- JSON: [{"food_id": 1, "grams": 150}, ...]
     created_at TEXT DEFAULT (datetime('now'))
 );
+-- Hinweise des taeglichen Coach-Laufs (scripts/coach_daily.py). Nur Text: Der Lauf
+-- aendert nie den Plan, die App zeigt die Hinweise an und laesst sie wegklicken.
+CREATE TABLE IF NOT EXISTS coach_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    category TEXT NOT NULL,              -- plan | progress
+    title TEXT NOT NULL,
+    text TEXT NOT NULL,
+    exercise_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'open', -- open | dismissed
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_coach_notes_profile ON coach_notes(profile_id, status);
 CREATE INDEX IF NOT EXISTS idx_food_log_day ON food_log(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_water_log_day ON water_log(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_cardio_day ON cardio(profile_id, date);

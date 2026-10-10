@@ -1,0 +1,13 @@
+[Unit]
+Description=Fitness-Coach (taegliche Hinweise, aendert keine Plaene)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/fitness
+EnvironmentFile=%h/fitness/.env
+Environment=PYTHONPATH=%h/fitness
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/fitness/.venv/bin/python scripts/coach_daily.py
+TimeoutStartSec=1800
+Nice=10

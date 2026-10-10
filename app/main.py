@@ -21,9 +21,9 @@ from pydantic import BaseModel, Field
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-from . import (activity, ai, analysis, checker, daily_view, db, export,  # noqa: E402
+from . import (activity, ai, analysis, checker, coach, daily_view, db, export,  # noqa: E402
                readiness, session_feedback, stats)
-from .common import FIELD_NAMES, NOT_NULL, _data, _found, current_profile  # noqa: E402,F401
+from .common import FIELD_NAMES, NOT_NULL, _data, _found, current_profile, owned  # noqa: E402,F401
 from .planner import generate  # noqa: E402
 from .planner.profile_model import injuries_from  # noqa: E402
 
@@ -482,6 +482,18 @@ def api_delete_split_exercise(item_id: int, profile_id: int = Depends(current_pr
 @app.get("/api/today")
 def api_today(profile_id: int = Depends(current_profile)):
     return daily_view.build(profile_id)
+
+
+@app.get("/api/coach-notes")
+def api_coach_notes(profile_id: int = Depends(current_profile)):
+    return coach.open_notes(profile_id)
+
+
+@app.post("/api/coach-notes/{note_id}/dismiss")
+def api_coach_dismiss(note_id: int, profile_id: int = Depends(current_profile)):
+    owned("coach_notes", note_id, profile_id, "Dieser Hinweis")
+    coach.dismiss(note_id)
+    return {"ok": True}
 
 
 @app.get("/api/day/{day_id}")

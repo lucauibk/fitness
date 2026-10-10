@@ -56,6 +56,8 @@ man prüft sie im Formular und speichert erst dann. Das Bild wird nicht gespeich
 - Alle Daten liegen in `fitness.db` auf dem Pi.
 - An **Anthropic** (nur mit `ANTHROPIC_API_KEY`, nur auf Knopfdruck): Plan-Check, KI-Verfeinerung
   (Plan + Eckdaten ohne Namen) und der ViCoach-Screenshot.
+- An **Anthropic** über Claude Code (nur wenn der Coach-Timer eingerichtet ist, täglich): aktiver Plan,
+  Trainings der letzten vier Wochen und Trainingsziele, ohne Namen und Körperdaten.
 - An **Open Food Facts**: nur Suchbegriff bzw. Barcode.
 
 ## Start (lokal)
@@ -86,6 +88,24 @@ Laeuft gegen eine eigene, temporaere SQLite-Datei – `fitness.db` bleibt unange
 Danach `tailscale serve --bg --https=8443 http://127.0.0.1:8001` einmalig einrichten
 (Bestand prüfen mit `tailscale serve status`) → erreichbar unter
 `https://raspberrypi.<dein-tailnet>.ts.net:8443`.
+
+## Täglicher Coach
+
+Jeden Morgen um 6:30 schaut Claude auf dem Pi den aktiven Plan und die Trainings der letzten vier
+Wochen an und legt höchstens drei kurze Vorschläge als **Coach-Hinweise** in „Heute“ ab
+(wegklickbar; offene Hinweise verschwinden nach 14 Tagen). Der Coach **ändert nichts**: Claude läuft
+ohne Werkzeuge (`--tools ""`) und liefert nur Text, `app/coach.py` schreibt ausschließlich in
+`coach_notes`. An Claude gehen Plan, Sätze und Ziele, aber kein Name und keine Körperdaten.
+
+Einrichten (einmalig auf dem Pi): Claude Code installieren
+(`curl -fsSL https://claude.ai/install.sh | bash`), `claude setup-token` ausführen und den Token als
+`CLAUDE_CODE_OAUTH_TOKEN` in `~/fitness/.env` eintragen. `pi-deploy.sh` aktiviert den Timer.
+
+```
+systemctl --user start fitness-coach      # sofort laufen lassen
+journalctl --user -u fitness-coach -n 30  # Log
+PYTHONPATH=. .venv/bin/python scripts/coach_daily.py --dry-run   # nur anzeigen, nichts speichern
+```
 
 ## Auf dem Homeserver eintragen
 
