@@ -9,6 +9,7 @@ Anmeldung: CLAUDE_CODE_OAUTH_TOKEN in .env (einmalig per `claude setup-token`)."
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,7 +18,7 @@ import tempfile
 from app import coach, db
 
 log = logging.getLogger("coach")
-MODEL = os.environ.get("COACH_MODEL", "claude-sonnet-5-5")
+MODEL = os.environ.get("COACH_MODEL", "claude-opus-5-5")
 TIMEOUT = 300
 
 
@@ -26,7 +27,7 @@ def ask_claude(text):
     with tempfile.TemporaryDirectory() as cwd:
         res = subprocess.run(
             [exe, "-p", "--output-format", "json", "--model", MODEL, "--tools", "",
-             "--strict-mcp-config", "--no-session-persistence"],
+             "--system-prompt", coach.SYSTEM, "--strict-mcp-config", "--no-session-persistence"],
             input=text, capture_output=True, text=True, timeout=TIMEOUT, cwd=cwd)
     if res.returncode != 0:
         raise RuntimeError(f"claude Exit {res.returncode}: {res.stderr.strip()[:300]}")
@@ -49,17 +50,22 @@ def main(dry_run=False):
             log.info("Profil %s: kein Plan, übersprungen", pid)
             continue
         try:
-            notes = coach.parse(ask_claude(coach.prompt(ctx)), pid)
+            raw = ask_claude(coach.prompt(ctx))
+            result = coach.parse(raw, pid)
         except (RuntimeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired) as e:
             log.error("Profil %s: %s", pid, e)
             failed += 1
             continue
         if dry_run:
-            print(json.dumps(notes, ensure_ascii=False, indent=2))
+            analyse = re.search(r"<analyse>(.*?)</analyse>", raw, re.S)
+            print(f"--- Profil {pid}\n{analyse.group(1).strip() if analyse else '(keine Analyse)'}")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
             continue
+        coach.resolve(pid, result["resolved"])
         coach.expire(pid)
-        coach.store(pid, notes)
-        log.info("Profil %s: %d Hinweis(e) abgelegt", pid, len(notes))
+        coach.store(pid, result["notes"])
+        log.info("Profil %s: %d Hinweis(e) abgelegt, %d erledigt", pid,
+                 len(result["notes"]), len(result["resolved"]))
     return 1 if failed else 0
 
 
