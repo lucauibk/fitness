@@ -1,8 +1,8 @@
 [Unit]
-Description=Fitness-Coach jeden Morgen
+Description=Fitness-Coach jeden Morgen (Wiener Zeit, der Pi laeuft auf Europe/London)
 
 [Timer]
-OnCalendar=*-*-* 06:30:00
+OnCalendar=*-*-* 06:30:00 Europe/Vienna
 Persistent=true
 RandomizedDelaySec=5min
 
