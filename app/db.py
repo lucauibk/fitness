@@ -194,6 +194,15 @@ CREATE TABLE IF NOT EXISTS coach_notes (
     status TEXT NOT NULL DEFAULT 'open', -- open | dismissed (weggeklickt) | resolved | expired
     created_at TEXT DEFAULT (datetime('now'))
 );
+-- Coach-Text zu einer Einheit (app/workout_review.py). Nur der von Claude geschriebene Text
+-- liegt hier, weil er teuer ist; die Zahlen dahinter rechnet session_review.py jedes Mal neu.
+CREATE TABLE IF NOT EXISTS workout_reviews (
+    workout_id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL,                -- pending | done | error
+    body TEXT,                           -- JSON vom Coach, bei error der Fehlertext
+    model TEXT,
+    updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_coach_notes_profile ON coach_notes(profile_id, status);
 CREATE INDEX IF NOT EXISTS idx_food_log_day ON food_log(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_water_log_day ON water_log(profile_id, date);
@@ -589,6 +598,7 @@ def delete_row(table, row_id):
             c.execute("UPDATE workouts SET split_day_id=NULL WHERE split_day_id=?", (row_id,))
         elif table == "workouts":
             c.execute("DELETE FROM sets WHERE workout_id=?", (row_id,))
+            c.execute("DELETE FROM workout_reviews WHERE workout_id=?", (row_id,))
         elif table == "profiles":
             raise ValueError("Profile werden nicht geloescht")
         c.execute(f"DELETE FROM {table} WHERE id=?", (row_id,))

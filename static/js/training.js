@@ -1,7 +1,7 @@
 /** Laufende Einheit. Alles passiert zuerst im Geraetespeicher – ohne Netz, ohne Warten.
  *  Erst beim Beenden geht die komplette Einheit in einem Stueck an den Pi (bzw. in den
  *  Ausgang, wenn gerade keine Verbindung da ist). */
-import { $, $$, api, armDelete, closeSheet, empty, esc, feedbackHtml, getProfile,
+import { $, $$, api, armDelete, closeSheet, empty, esc, reviewHtml, watchCoach, getProfile,
   icon, openSheet, prefs, setsSummary, skeleton, toast } from "./util.js";
 import * as outbox from "./outbox.js";
 
@@ -585,18 +585,19 @@ async function finish() {
     stopRest();
     clearDraft();
     today = null;
-    const fb = res.data?.feedback;
-    // Mit Bewertung sagt das Sheet schon, dass gespeichert ist – ein Toast daneben verdeckt es nur.
+    const review = res.data?.review;
+    // Mit Auswertung sagt das Sheet schon, dass gespeichert ist – ein Toast daneben verdeckt es nur.
     if (res.queued) toast("Gespeichert – wird gesendet, sobald du wieder Empfang hast");
-    else if (!fb) toast(`Einheit gespeichert · ${sets.length} Sätze`);
+    else if (!review) toast(`Einheit gespeichert · ${sets.length} Sätze`);
     window.dispatchEvent(new CustomEvent("outbox-changed"));
     window.dispatchEvent(new CustomEvent("data-changed"));
-    // Das Urteil kommt mit der Antwort zurueck. Ohne Netz liegt die Einheit im Ausgang –
-    // dann gibt es die Bewertung erst nach dem Nachsenden, im Verlauf.
-    if (fb) {
-      openSheet({ title: "Einheit bewertet", body: feedbackHtml(fb),
+    // Die Zahlen kommen mit der Antwort zurueck, der Coach-Text eine halbe Minute spaeter.
+    // Ohne Netz liegt die Einheit im Ausgang – dann gibt es die Auswertung erst im Verlauf.
+    if (review) {
+      const sheet = openSheet({ title: "Deine Einheit", body: reviewHtml(review),
         footer: `<span class="grow"></span>
           <button type="button" class="btn primary" data-close>Passt</button>` });
+      if (review.coach?.status === "pending") watchCoach(res.data.workout.id, sheet);
     }
   } catch (e) {
     toast(e.message, { error: true });

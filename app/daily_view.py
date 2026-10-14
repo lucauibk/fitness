@@ -2,7 +2,7 @@
 Mobility-Vorschlag, Wochen-Streak und Kalorienbilanz."""
 import logging
 
-from . import activity, coach, db, mobility, nutrition, readiness, session_feedback, stats
+from . import activity, coach, db, mobility, nutrition, readiness, session_review, stats
 
 log = logging.getLogger(__name__)
 
@@ -14,21 +14,20 @@ def adjusted_day(profile_id, day, checkin):
 
 
 def today_workout(profile_id, last):
-    """Die heute schon gespeicherte Einheit fuer die Erledigt-Karte auf "Heute" – mit Punktzahl.
-    Die Bewertung laeuft nur an Tagen, an denen wirklich trainiert wurde."""
+    """Die heute schon gespeicherte Einheit fuer die Erledigt-Karte auf "Heute" – mit Kurzbilanz.
+    Die Auswertung laeuft nur an Tagen, an denen wirklich trainiert wurde."""
     if not last or stats._local_date(last["at"]) != stats.today():
         return None
     w = db.get_workout(last["id"])
     if not w:
         return None
     try:
-        fb = session_feedback.evaluate(profile_id, w)
+        facts = session_review.facts(profile_id, w)
     except Exception:   # noqa: BLE001 – die Karte ist Beiwerk, die Startseite darf daran nicht haengen
-        log.exception("Bewertung fuer die Heute-Karte fehlgeschlagen (Einheit %s)", w["id"])
+        log.exception("Auswertung fuer die Heute-Karte fehlgeschlagen (Einheit %s)", w["id"])
         return None
     return {"id": w["id"], "day_label": w.get("day_label") or "Training",
-            "sets": sum(1 for s in w["sets"] if not s.get("warmup")), "score": fb["score"],
-            "label": fb["label"]}
+            "sets": facts["sets_done"], "headline": facts["headline"]}
 
 
 def build(profile_id):
