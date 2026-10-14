@@ -243,3 +243,17 @@ def test_old_block_params_with_ramp_and_catch_up_are_ignored(profile_id):
            "adjust": {"2": {str(row["id"]): 2}}}
     blocks._save_params(block["id"], old)
     assert blocks.sets_for(blocks.active(profile_id), row, MONDAY + timedelta(weeks=1)) == 3
+
+
+def test_old_set_increase_events_are_removed_on_start(profile_id):
+    explain.log(profile_id, "sets_up", "Latzug: +1 Satz diese Woche – letzte Woche fehlten 7 Sätze Rücken")
+    explain.log(profile_id, "swap", "Butterfly → Kabel-Flys: neuer Block")
+    db.init()
+    kinds = [e["kind"] for e in explain.recent(profile_id)]
+    assert "sets_up" not in kinds and "swap" in kinds
+
+
+def test_today_shows_only_fresh_plan_events():
+    from app import daily_view
+    events = [{"date": "2026-10-13", "text": "neu"}, {"date": "2026-10-08", "text": "alt"}]
+    assert [e["text"] for e in daily_view.recent_events(events, date(2026, 10, 14))] == ["neu"]

@@ -168,7 +168,7 @@ CREATE TABLE IF NOT EXISTS plan_events (
     split_id INTEGER,
     exercise_id INTEGER,
     date TEXT NOT NULL,
-    kind TEXT NOT NULL,                  -- weight_up | sets_up | sets_down | deload | swap | hold | info
+    kind TEXT NOT NULL,                  -- weight_up | deload | swap | hold | plateau | drop | info
     text TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
 );
@@ -282,6 +282,10 @@ def _migrate(c):
     # laeuft also gefahrlos bei jedem Start.
     c.execute("UPDATE split_days SET weekdays = CAST(weekday AS TEXT)"
               " WHERE weekdays IS NULL AND weekday IS NOT NULL")
+    # Die App erhoeht keine Saetze mehr (planner/blocks.py). Alte "+1 Satz"-Meldungen aus dem
+    # Nachholen stimmen nicht mehr und wuerden auf "Heute", im Plan und beim Coach weiter auftauchen.
+    # Nichts erzeugt sie noch, das Loeschen ist also nach dem ersten Start ein Leerlauf.
+    c.execute("DELETE FROM plan_events WHERE kind='sets_up'")
 
 
 def parse_weekdays(value):
