@@ -1,6 +1,6 @@
 /** Heute: Wochen-Streak, Check-in mit Readiness, heutiges (angepasstes) Training,
  *  Mobility-Routine und Kalorienbilanz – alles auf einen Blick. */
-import { $, api, closeSheet, empty, esc, feedbackHtml, fmtWeight, getProfile, GROUPS, icon, openSheet,
+import { $, api, closeSheet, empty, esc, reviewHtml, watchCoach, fmtWeight, getProfile, GROUPS, icon, openSheet,
   setsSummary, sheetClosed, skeleton, toast, WEEKDAYS_LONG, busy } from "./util.js";
 import { startDraft, hasDraft, getDraft } from "./training.js";
 import { weekStrip } from "./erfolge.js";
@@ -133,7 +133,7 @@ function workoutCard() {
     return `<div class="card hero is-done">
       <p class="eyebrow">${icon("check")} Heute erledigt</p>
       <h3 class="hero-title">${esc(tw.day_label)}</h3>
-      <p class="hint">${tw.sets} ${tw.sets === 1 ? "Satz" : "Sätze"} · ${tw.score} Punkte · ${esc(tw.label)}</p>
+      <p class="hint">${esc(tw.headline)}</p>
       <div class="btn-row">
         <button type="button" class="btn tonal" data-show-workout="${tw.id}">Ansehen</button>
         <button type="button" class="btn ghost" data-pick>Nochmal trainieren</button>
@@ -314,8 +314,9 @@ async function showWorkout(id) {
           <div class="row-title">${esc(name)}</div>
           <div class="row-meta"><span>${esc(setsSummary(sets, sets[0].unit))}</span></div>
         </div></div>`).join("")}</div>
-      ${feedbackHtml(w.feedback)}
+      ${reviewHtml(w.review)}
       <p class="hint pad"><a href="#fortschritt/verlauf" data-close>Im Verlauf bearbeiten</a></p>`;
+    if (w.review?.coach?.status === "pending") watchCoach(id, sheet);
   } catch (e) {
     closeSheet();
     toast(e.message, { error: true });

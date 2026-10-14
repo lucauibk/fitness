@@ -485,8 +485,9 @@ function volumeRows(data) {
       <span class="bar-value">${v.actual}${v.actual === v.target ? "" : ` / ${v.target}`}
         <small>${v.frequency}×</small></span>
     </div>`).join("")}</div>
-  <p class="hint">Sätze pro Woche in Woche 1 (Ist / Richtwert) und wie oft die Gruppe drankommt. Bis zum
-    Blockende steigert die App die Sätze automatisch. Richtwerte kommen aus Ziel, Erfahrung und Fokus.</p>`;
+  <p class="hint">Sätze pro Woche (Ist / Richtwert) und wie oft die Gruppe drankommt. Die Sätze bleiben
+    im ganzen Block gleich, automatisch steigen nur Gewicht und Wiederholungen. Richtwerte kommen aus Ziel,
+    Erfahrung und Fokus.</p>`;
 }
 
 function suggestionRows(data) {

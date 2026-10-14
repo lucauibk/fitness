@@ -1,8 +1,13 @@
-"""Trainingsbloecke: Woche X von Y, Saetze je Woche, Deload.
+"""Trainingsbloecke: Woche X von Y, Anstrengung (RIR) je Woche, Deload.
 
-Der Plan (split_exercises.target_sets) ist Woche 1. Alle weiteren Wochen werden aus dem
-Wochenverlauf des Blocks berechnet (`ratios` je Muskelgruppe) – der Plan selbst bleibt unveraendert
-und reproduzierbar. Anpassungen aus dem Wochen-Check stehen in params["adjust"].
+Die Satzzahl ist in jeder Trainingswoche genau der Plan (split_exercises.target_sets), nur die
+Entlastungswoche halbiert sie. Automatisch steigen im Block Gewicht und Wiederholungen
+(planner/progression.py), nie die Saetze – ausdruecklich so gewuenscht (2026-10-14): von allen
+Uebungen fuenf Saetze ist im Alltag nicht machbar. Mehr Saetze gibt es nur, wenn man den Plan
+selbst aendert (Vorschlaege dazu kommen aus analysis.py, angewendet wird nichts automatisch).
+
+Aeltere Bloecke tragen noch params["ratios"]/["adjust"] aus der Zeit mit Satz-Steigerung;
+beides wird nicht mehr gelesen.
 """
 import json
 import math
@@ -11,7 +16,6 @@ from datetime import date, timedelta
 
 from .. import db, stats
 from . import volume_plan as vp
-from .generate import FOCUS_GROUPS
 from .muscles import PATTERN_GROUP
 
 MAX_EXERCISE_SETS = 6
@@ -30,10 +34,15 @@ def _save_params(block_id, params, **fields):
     db.update_row("blocks", block_id, {"params": json.dumps(params), **fields})
 
 
+DELOAD_RATIO = 0.5
+
+
 def ratios_for(goal, experience, focus=(), age=None, weeks=None):
-    groups = {g for f in focus for g in FOCUS_GROUPS.get(f, [])}
-    t = vp.block_targets(experience, goal, groups, age, weeks)
-    return {g: [(x / v[0]) if v[0] else 1.0 for x in v] for g, v in t.items()}
+    """Saetze je Blockwoche relativ zum Plan, je Muskelgruppe: in allen Trainingswochen 1, in der
+    Entlastung die Haelfte. Dieselbe Form wie frueher, damit Plan-Check und -Vorschlaege
+    (analysis.py, validate.py) unveraendert rechnen koennen."""
+    n = weeks or vp.BLOCK_WEEKS.get(experience, 5)
+    return {g: [1.0] * (n - 1) + [DELOAD_RATIO] for g in PATTERN_GROUP.values()}
 
 
 def create(profile_id, split_id, goal=None, experience=None, focus=(), age=None, variation=0, start=None, cycle=1.0):
@@ -50,8 +59,7 @@ def _create(profile_id, split_id, goal, experience, focus, age, variation, start
         c.execute("UPDATE blocks SET active=0 WHERE profile_id=?", (profile_id,))
         c.execute("UPDATE split_exercises SET base_sets = target_sets WHERE split_day_id IN"
                   " (SELECT id FROM split_days WHERE split_id=?)", (split_id,))
-    params = {"rir": vp.rir_by_week(weeks), "ratios": ratios_for(goal, experience, focus, age, weeks),
-              "adjust": {}, "reviewed": 0, "variation": variation, "cycle": cycle}
+    params = {"rir": vp.rir_by_week(weeks), "reviewed": 0, "variation": variation, "cycle": cycle}
     return db.insert_row("blocks", {
         "profile_id": profile_id, "split_id": split_id, "start_date": (start or monday(stats.today())).isoformat(),
         "weeks": weeks, "goal": goal, "experience": experience, "params": json.dumps(params), "active": 1})
@@ -108,18 +116,9 @@ def state(block, on_date=None):
 
 
 def sets_for(block, exercise_row, on_date=None):
-    """Satzzahl dieser Uebung in der aktuellen Blockwoche (Plan = Woche 1)."""
-    st = state(block, on_date)
+    """Satzzahl dieser Uebung in der Blockwoche: der Plan, in der Entlastung die Haelfte."""
     base = exercise_row.get("base_sets") or exercise_row["target_sets"]
-    if not st:
-        return base
-    if st["deload"]:
+    st = state(block, on_date)
+    if st and st["deload"]:
         return max(1, math.ceil(base / 2))
-    p = _params(block)
-    group = PATTERN_GROUP.get(exercise_row.get("pattern"))
-    ratio = (p.get("ratios", {}).get(group) or [1.0])
-    ratio = ratio[min(st["week"], len(ratio)) - 1]
-    cap = exercise_row.get("peak_sets") or MAX_EXERCISE_SETS      # Zeitbudget der Einheit
-    sets = max(2, min(MAX_EXERCISE_SETS, round(base * ratio), base + 3, max(cap, base)))
-    extra = p.get("adjust", {}).get(str(st["week"]), {}).get(str(exercise_row["id"]), 0)
-    return min(MAX_EXERCISE_SETS, sets + extra) if base >= 2 else base
+    return base

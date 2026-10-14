@@ -1,4 +1,4 @@
-"""Blockwochen, Wochen-Check und Nachholen verpasster Saetze."""
+"""Blockwochen und Wochen-Check. Die Satzzahl bleibt dabei immer der Plan."""
 from datetime import date, datetime, timedelta
 
 from app import db
@@ -29,33 +29,15 @@ def _log(profile_id, day_id, ex_id, on, sets=3, reps=10, weight=50, rpe=None):
                       (w["id"], ex_id, n + 1, reps, weight, rpe))
 
 
-def test_block_weeks_ramp_and_deload(profile_id):
+def test_block_keeps_planned_sets_and_halves_them_in_deload(profile_id):
     sp, day, ids = _setup(profile_id)
     block = blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
-    row = db.active_split(profile_id)["days"][0]["exercises"][0]          # Bankdrücken, Woche 1 = 3 Sätze
+    row = db.active_split(profile_id)["days"][0]["exercises"][0]          # Bankdrücken: 3 Sätze im Plan
     sets = [blocks.sets_for(block, row, MONDAY + timedelta(weeks=w)) for w in range(block["weeks"])]
-    assert sets[0] == 3 and sets == sorted(sets[:-1]) + [sets[-1]]
-    assert sets[-1] < sets[0] and max(sets[:-1]) <= 6                   # Deload leichter
+    assert sets == [3] * (block["weeks"] - 1) + [2]                      # nie mehr als der Plan
     st = blocks.state(block, MONDAY + timedelta(weeks=block["weeks"] - 1))
     assert st["deload"] and st["rir"] == 4
     assert blocks.state(block, MONDAY + timedelta(weeks=block["weeks"]))["finished"]
-
-
-def test_missed_sets_are_made_up_next_week(profile_id):
-    sp, day, ids = _setup(profile_id)
-    block = blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
-    # Woche 1: nur Brust trainiert, Rücken (Latzug) komplett ausgelassen
-    _log(profile_id, day["id"], ids["Bankdrücken"][1], MONDAY)
-    res = autoregulate.review(profile_id, MONDAY + timedelta(weeks=1))
-    texts = [e["text"] for e in res["events"]]
-    assert any("Latzug" in t and "+1 Satz" in t for t in texts), texts
-    st = blocks.state(blocks.active(profile_id), MONDAY + timedelta(weeks=1))
-    row = next(e for e in db.active_split(profile_id)["days"][0]["exercises"] if e["name"] == "Latzug")
-    plain = blocks.sets_for({**blocks.active(profile_id), "params": '{"ratios": {}}'}, row, MONDAY + timedelta(weeks=1))
-    assert blocks.sets_for(blocks.active(profile_id), row, MONDAY + timedelta(weeks=1)) > plain - 1
-    # zweiter Aufruf in derselben Woche aendert nichts mehr
-    again = autoregulate.review(profile_id, MONDAY + timedelta(weeks=1))
-    assert len(again["events"]) == len(res["events"])
 
 
 def test_rpe_drift_pulls_deload_forward(profile_id):
@@ -133,18 +115,6 @@ def test_fatigue_signals_trigger_deload_at_block_end(profile_id):
     assert blocks.active(profile_id)["weeks"] <= block["weeks"]
 
 
-def test_catch_up_is_capped_to_twenty_percent_and_mrv(profile_id):
-    sp, day, ids = _setup(profile_id)
-    blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
-    # Woche 1 nur ein Satz -> fast alles fehlt, Nachholen darf trotzdem nur ein Fuenftel der Woche sein
-    _log(profile_id, day["id"], ids["Bankdrücken"][1], MONDAY, sets=1)
-    autoregulate.review(profile_id, MONDAY + timedelta(weeks=1))
-    block = blocks.active(profile_id)
-    adj = blocks._params(block)["adjust"].get("2", {})
-    this_week = autoregulate.planned_sets(block, db.active_split(profile_id), 2)
-    assert 0 < sum(adj.values()) <= max(1, round(0.2 * (sum(this_week.values()) - sum(adj.values()))) + 1)
-
-
 def test_pain_report_replaces_loading_exercises_and_remembers_the_area(profile_id):
     sp, day, ids = _setup(profile_id)
     blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
@@ -194,14 +164,6 @@ def test_switching_back_to_a_plan_resumes_its_block_instead_of_restarting(profil
     assert db.one("SELECT COUNT(*) AS n FROM blocks WHERE profile_id=? AND active=1", (profile_id,))["n"] == 1
     db.activate_split(other["id"], profile_id)
     assert blocks.ensure(profile_id)["id"] == second["id"]
-
-
-def test_no_catch_up_after_an_empty_week(profile_id):
-    """Urlaub oder krank: nichts trainiert -> nichts nachholen, sonst stapelt sich die Arbeit."""
-    sp, day, ids = _setup(profile_id)
-    blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
-    autoregulate.review(profile_id, MONDAY + timedelta(weeks=1))
-    assert not blocks._params(blocks.active(profile_id))["adjust"].get("2")
 
 
 def test_early_deload_survives_a_second_review_in_the_same_week(profile_id, monkeypatch):
@@ -257,3 +219,41 @@ def test_fatigue_stays_quiet_after_a_break_and_during_a_planned_ramp(profile_id)
     for k in (0, 2, 4):
         _bulk(profile_id, bench, back + timedelta(days=k), 18)
     assert autoregulate.fatigue(profile_id, back + timedelta(days=6)) is None
+
+
+def test_weekly_check_never_adds_sets(profile_id):
+    """Ausgelassene Muskeln und sehr leichte Wochen: früher kamen Sätze dazu, jetzt bleibt der Plan."""
+    sp, day, ids = _setup(profile_id)
+    blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    # Woche 1: Latzug ausgelassen, Bankdrücken überall leicht (RPE 5)
+    for d in (0, 3):
+        _log(profile_id, day["id"], ids["Bankdrücken"][1], MONDAY + timedelta(days=d), sets=4, rpe=5)
+    res = autoregulate.review(profile_id, MONDAY + timedelta(weeks=1))
+    assert not [e for e in res["events"] if e["kind"] == "sets_up"]
+    block, rows = blocks.active(profile_id), db.active_split(profile_id)["days"][0]["exercises"]
+    assert [blocks.sets_for(block, r, MONDAY + timedelta(weeks=1)) for r in rows] == [3, 3, 3, 3]
+
+
+def test_old_block_params_with_ramp_and_catch_up_are_ignored(profile_id):
+    """Bloecke aus der Zeit mit Satz-Steigerung tragen ratios/adjust noch in params."""
+    sp, day, ids = _setup(profile_id)
+    block = blocks.create(profile_id, sp["id"], "aufbau", "fortgeschritten", start=MONDAY)
+    row = db.active_split(profile_id)["days"][0]["exercises"][0]
+    old = {**blocks._params(block), "ratios": {"brust": [1.0, 1.5, 2.0, 2.0, 0.5]},
+           "adjust": {"2": {str(row["id"]): 2}}}
+    blocks._save_params(block["id"], old)
+    assert blocks.sets_for(blocks.active(profile_id), row, MONDAY + timedelta(weeks=1)) == 3
+
+
+def test_old_set_increase_events_are_removed_on_start(profile_id):
+    explain.log(profile_id, "sets_up", "Latzug: +1 Satz diese Woche – letzte Woche fehlten 7 Sätze Rücken")
+    explain.log(profile_id, "swap", "Butterfly → Kabel-Flys: neuer Block")
+    db.init()
+    kinds = [e["kind"] for e in explain.recent(profile_id)]
+    assert "sets_up" not in kinds and "swap" in kinds
+
+
+def test_today_shows_only_fresh_plan_events():
+    from app import daily_view
+    events = [{"date": "2026-10-13", "text": "neu"}, {"date": "2026-10-08", "text": "alt"}]
+    assert [e["text"] for e in daily_view.recent_events(events, date(2026, 10, 14))] == ["neu"]

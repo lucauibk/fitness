@@ -118,7 +118,7 @@ START_SPREAD = 0.10       # erste Einheit: ±10 %
 DRIFT_PER_WEEK = 0.015    # so viel darf sich die wahre Kraft je Woche unbemerkt veraendern
 
 
-def _session_e1rm(sess):
+def session_e1rm(sess):
     """Bester e1RM einer Einheit; mit gemeldeter Anstrengung zaehlen die Wiederholungen in Reserve mit."""
     best = None
     for s in sess["sets"]:
@@ -136,7 +136,7 @@ def estimate(history, novice=False):
     Glaettet Ausreisser-Tage; die Unsicherheit waechst mit Pausen. -> (e1RM, sigma) | None"""
     m = sigma = last = None
     for sess in reversed(history):
-        obs = _session_e1rm(sess)
+        obs = session_e1rm(sess)
         if not obs:
             continue
         try:

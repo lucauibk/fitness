@@ -1,5 +1,5 @@
 /** Verlauf: Krafteinheiten und Cardio gemischt nach Datum. */
-import { $, $$, api, armDelete, closeSheet, deleteLater, empty, esc, feedbackHtml, icon,
+import { $, $$, api, armDelete, closeSheet, deleteLater, empty, esc, reviewHtml, watchCoach, icon,
   isPendingDelete, openSheet, parseYmd, setsSummary, skeleton, toast } from "./util.js";
 import * as outbox from "./outbox.js";
 
@@ -144,7 +144,7 @@ function openWorkout(id) {
           <div class="row-meta"><span>${esc(setsSummary(sets, sets[0].unit))}</span></div>
         </div></div>`).join("")}</div>
       ${w.notes ? `<p class="hint pad">${esc(w.notes)}</p>` : ""}
-      ${w.feedback ? feedbackHtml(w.feedback) : (fbGeladen ? "" : skeleton(2))}`;
+      ${w.review ? reviewHtml(w.review) : (fbGeladen ? "" : skeleton(2))}`;
   }
 
   /** Vergessene oder falsch getippte Werte korrigieren, statt die ganze Einheit loeschen
@@ -175,16 +175,23 @@ function openWorkout(id) {
         editing = false;
         $("[data-edit-toggle]", sheet).textContent = "Bearbeiten";
         paintView();
+        follow();
       } catch (e) { toast(e.message, { error: true }); }
     });
   }
 
   paintView();
-  // Das Urteil steckt nur in der Detailantwort – die Liste rechnet es aus Kostengruenden
-  // nicht je Zeile mit.
+  // Die Auswertung steckt nur in der Detailantwort – die Liste rechnet sie aus Kostengruenden
+  // nicht je Zeile mit. Der Coach-Text kommt bei frischen oder korrigierten Einheiten nach.
+  const follow = () => {
+    if (w.review?.coach?.status === "pending") {
+      watchCoach(id, sheet, (review) => { w = { ...w, review }; if (!editing) paintView(); });
+    }
+  };
   api(`workouts/${id}`).then((full) => { w = { ...w, ...full }; }).catch(() => {}).then(() => {
     fbGeladen = true;
     if (!editing) paintView();
+    follow();
   });
 
   sheet.addEventListener("click", (ev) => {

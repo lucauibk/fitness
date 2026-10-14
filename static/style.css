@@ -874,12 +874,18 @@ body.training-fullscreen.resting .content { padding-bottom: calc(var(--rest-h) +
 
 /* Urteil ueber eine fertige Einheit (Sheet nach dem Beenden und im Verlauf) */
 .feedback { margin-top: var(--s4); border-top: 1px solid var(--line); padding-top: var(--s4); }
-.feedback-score { display: flex; align-items: baseline; gap: var(--s2); margin-bottom: var(--s3); }
-.feedback-score span:last-child { color: var(--muted); font-size: var(--fs-sm); }
-.feedback-score b { color: var(--text); }
-.tone-gut .big-number { color: var(--ok); }
-.tone-mittel .big-number { color: var(--soon); }
-.tone-schwach .big-number { color: var(--urgent); }
+.review-headline { font-weight: 650; line-height: 1.4; margin: 0 0 var(--s3); }
+.coach-verdict { font-size: var(--fs-lg); font-weight: 650; line-height: 1.35; margin: 0 0 var(--s2); }
+.coach-wait { display: flex; align-items: center; gap: var(--s2); animation: pulse 1.6s ease-in-out infinite; }
+.coach-wait .icon { width: 18px; height: 18px; color: var(--accent); }
+@keyframes pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .coach-wait { animation: none; } }
+.review-list li > div { min-width: 0; }
+.review-list .pill { margin-left: var(--s1); vertical-align: 1px; }
+.review-ex .icon { color: var(--muted); }
+.review-ex.v-up .icon, .review-ex.v-pr .icon { color: var(--ok); }
+.review-ex.v-down .icon { color: var(--soon); }
+.review-ex.v-new .icon { color: var(--accent); }
 .feedback-lead {
   font-size: var(--fs-sm); font-weight: 650; color: var(--muted);
   margin: var(--s3) 0 var(--s2);

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Annotated, Dict, List, Literal, Optional
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -22,7 +22,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 from . import (activity, ai, analysis, checker, coach, daily_view, db, export,  # noqa: E402
-               readiness, session_feedback, stats)
+               readiness, stats, workout_review)
 from .common import FIELD_NAMES, NOT_NULL, _data, _found, current_profile, owned  # noqa: E402,F401
 from .planner import generate  # noqa: E402
 from .planner.profile_model import injuries_from  # noqa: E402
@@ -511,16 +511,29 @@ def api_workouts(profile_id: int = Depends(current_profile), limit: int = Query(
     return db.list_workouts(profile_id, limit)
 
 
-@app.get("/api/workouts/{workout_id}")
-def api_workout(workout_id: int, profile_id: int = Depends(current_profile)):
+def _own_workout(workout_id, profile_id):
     w = _found(db.get_workout(workout_id))
     if w["profile_id"] != profile_id:
         raise HTTPException(403, "Diese Einheit gehört zu einem anderen Profil.")
-    return session_feedback.for_workout(profile_id, w)
+    return w
+
+
+@app.get("/api/workouts/{workout_id}")
+def api_workout(workout_id: int, background: BackgroundTasks,
+                profile_id: int = Depends(current_profile)):
+    w = _own_workout(workout_id, profile_id)
+    return {**w, "review": workout_review.for_api(profile_id, w, background)}
+
+
+@app.get("/api/workouts/{workout_id}/review")
+def api_workout_review(workout_id: int, background: BackgroundTasks,
+                       profile_id: int = Depends(current_profile)):
+    """Zum Nachfragen, bis der Coach-Text da ist."""
+    return workout_review.for_api(profile_id, _own_workout(workout_id, profile_id), background)
 
 
 @app.post("/api/workouts")
-def api_add_workout(body: WorkoutIn):
+def api_add_workout(body: WorkoutIn, background: BackgroundTasks = None):
     if not db.exists("profiles", body.profile_id):
         raise HTTPException(400, "Dieses Profil gibt es nicht (mehr).")
     payload = body.model_dump()
@@ -551,10 +564,11 @@ def api_add_workout(body: WorkoutIn):
             changes = explain.after_workout(body.profile_id, workout)
         except Exception:   # noqa: BLE001 – die Erklaerung ist Beiwerk, die Einheit ist gespeichert
             log.exception("Plan-Hinweise nach der Einheit fehlgeschlagen")
+        workout_review.schedule(body.profile_id, workout["id"], background)
     return {"workout": workout, "created": created, "plan_changes": changes,
             "milestones": activity.new_milestones(before, body.profile_id) if created else [],
-            # Beim zweiten Eintreffen derselben client_id nicht noch einmal urteilen.
-            "feedback": session_feedback.evaluate(body.profile_id, workout) if created else None}
+            # Beim zweiten Eintreffen derselben client_id nicht noch einmal auswerten.
+            "review": workout_review.for_api(body.profile_id, workout) if created else None}
 
 
 class SetPatch(BaseModel):
@@ -569,7 +583,8 @@ class WorkoutPatch(BaseModel):
 
 
 @app.patch("/api/workouts/{workout_id}")
-def api_patch_workout(workout_id: int, body: WorkoutPatch, profile_id: int = Depends(current_profile)):
+def api_patch_workout(workout_id: int, body: WorkoutPatch, background: BackgroundTasks,
+                      profile_id: int = Depends(current_profile)):
     """Eine vergessene oder falsch getippte Einheit korrigieren, statt sie loeschen und
     neu anlegen zu muessen. Aendert nur Werte bestehender Saetze, keine Struktur."""
     w = _found(db.get_row("workouts", workout_id))
@@ -583,7 +598,11 @@ def api_patch_workout(workout_id: int, body: WorkoutPatch, profile_id: int = Dep
             if not row or row[0] != workout_id:
                 raise HTTPException(400, "Dieser Satz gehört nicht zu dieser Einheit.")
             c.execute("UPDATE sets SET reps=?, weight=? WHERE id=?", (s.reps, s.weight, s.id))
-    return session_feedback.for_workout(profile_id, db.get_workout(workout_id))
+    # Andere Zahlen, anderer Text: die Rückmeldung neu schreiben lassen
+    if body.sets:
+        workout_review.schedule(profile_id, workout_id, background)
+    w = db.get_workout(workout_id)
+    return {**w, "review": workout_review.for_api(profile_id, w, background)}
 
 
 @app.delete("/api/workouts/{workout_id}")

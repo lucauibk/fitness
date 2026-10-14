@@ -2,9 +2,9 @@
 rechnet Wochensaetze und Haeufigkeit je Muskelgruppe aus und macht daraus konkrete,
 anwendbare Vorschlaege – Saetze anpassen, Uebung ergaenzen oder streichen, Struktur aendern.
 
-Gerechnet wird wie im Block: Der Plan ist Woche 1 und wird mit Woche 1 der Block-Ziele verglichen
-(planner/volume_plan.block_targets). Fuer die Laenge der Einheiten und die Erholungsgrenze (MRV) zaehlt
-dagegen die Spitzenwoche, denn bis dahin steigert der Block die Saetze (blocks.sets_for).
+Gerechnet wird wie im Block: Der Plan wird mit Woche 1 der Block-Ziele verglichen
+(planner/volume_plan.block_targets). Die Satzzahl bleibt im Block konstant (blocks.sets_for), die
+"Spitzenwoche" fuer Einheitslaenge und Erholungsgrenze (MRV) ist also der Plan selbst.
 Struktur-Vorschlaege (zusaetzlicher Tag, A/B-Varianten) kommen aus plan_structure.py.
 """
 import hashlib
@@ -59,7 +59,8 @@ def context(profile, split):
     age = (date.today().year - int(profile["birth_year"])) if profile.get("birth_year") else None
     block = blocks.for_split(split["id"]) if split.get("id") else None
     params = blocks._params(block)
-    ratios = params.get("ratios") or blocks.ratios_for(goal, experience, focus, age)
+    # Nicht params["ratios"]: alte Bloecke tragen dort noch die frueher steigende Satzzahl
+    ratios = blocks.ratios_for(goal, experience, focus, age)
     cycle = params.get("cycle") or 1.0
     sessions = max(1, round(sum(per_week(d) for d in split["days"]) / cycle))
     weeks, note = _weeks(experience, goal, focus_groups, age, sessions)

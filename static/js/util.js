@@ -132,31 +132,87 @@ export function setsSummary(sets, unit) {
   return `${label} @ ${fmtWeight(w, unit)}`;
 }
 
-/** Urteil ueber eine fertige Einheit, wie es der Server rechnet: Punktzahl, was gestimmt
- *  hat und was zum perfekten Training gefehlt hat. Eingetippt wird davon nichts – die
- *  Bewertung kommt aus den geloggten Saetzen, dem Trainingstag und der letzten Einheit. */
-export function feedbackHtml(fb) {
-  if (!fb) return "";
-  const tone = fb.score >= 85 ? "gut" : fb.score >= 50 ? "mittel" : "schwach";
-  const li = (t, name) => `<li>${icon(name === "bad" ? "warn" : "check")}<span>${esc(t)}</span></li>`;
-  // Erst was gestimmt hat, dann hoechstens drei Hinweise (die wichtigsten, der Server
-  // sortiert nach Gewicht) – eine lange Maengelliste nach einer guten Einheit liest sich
-  // wie ein Tadel.
-  const bad = (fb.missing || []).map((m) => m.text);
-  const [top, rest] = [bad.slice(0, 3), bad.slice(3)];
-  return `<div class="feedback tone-${tone}">
-    <div class="feedback-score">
-      <span class="big-number">${fb.score}</span>
-      <span>von 100 · <b>${esc(fb.label)}</b></span>
-    </div>
-    ${fb.good?.length ? `<p class="feedback-lead">Das hat gestimmt</p>
-      <ul class="feedback-list good">${fb.good.map((t) => li(t, "good")).join("")}</ul>` : ""}
-    ${top.length ? `<p class="feedback-lead">Darauf achten</p>
-      <ul class="feedback-list bad">${top.map((t) => li(t, "bad")).join("")}</ul>
-      ${rest.length ? `<details class="field-more feedback-more"><summary>+ ${rest.length} weitere</summary>
-        <ul class="feedback-list bad">${rest.map((t) => li(t, "bad")).join("")}</ul></details>` : ""}`
-      : `<p class="feedback-lead">${icon("trophy")} Nichts auszusetzen.</p>`}
+/** Auswertung einer fertigen Einheit: oben der Text des Coaches (Claude, kommt nach), darunter
+ *  die Zahlen, die der Server rechnet – Muskelbilanz gegen den Plan und jede Uebung gegen das
+ *  letzte Mal, mit Ersatzuebung und Position in der Einheit. */
+export function reviewHtml(review) {
+  if (!review?.facts) return "";
+  const f = review.facts;
+  const li = (t, name) => `<li>${icon(name)}<span>${esc(t)}</span></li>`;
+  const muscles = f.muscles.map((m) => {
+    const pct = m.planned ? Math.min(100, Math.round(100 * m.done / m.planned)) : 100;
+    return `<div class="bar-row"><span class="bar-label">${esc(m.label)}</span>
+      <span class="bar${m.planned && m.done < m.planned ? " low" : ""}"><i style="width:${pct}%"></i></span>
+      <span class="bar-value">${m.planned ? `${m.done}/${m.planned}` : m.done}</span></div>`;
+  }).join("");
+  const exercises = f.exercises.map((e) => {
+    const c = e.compare;
+    const mark = e.pr ? "trophy" : !c ? "spark" : c.verdict === "up" ? "up" : c.verdict === "down" ? "down" : "minus";
+    let vs = "erstes Mal – Referenz gesetzt";
+    if (c) {
+      const delta = c.delta_pct == null ? "" : `, ${c.delta_pct > 0 ? "+" : ""}${String(c.delta_pct).replace(".", ",")} %`;
+      const moved = c.slot && c.slot !== "gleich" ? ` · damals ${c.position}., heute ${e.position}. Übung` : "";
+      vs = `${shortDate(c.date)}: ${c.best}${delta}${moved}${c.order_note ? " – durch die Reihenfolge erklärt" : ""}`;
+    }
+    return `<li class="review-ex v-${e.pr ? "pr" : c ? c.verdict : "new"}">${icon(mark)}<div>
+      <div><b>${esc(e.name)}</b>${e.substitute_for ? ` <span class="pill">statt ${esc(e.substitute_for)}</span>` : ""}
+        ${e.planned ? "" : ' <span class="pill">ungeplant</span>'}</div>
+      <div class="row-meta">${esc(e.sets.join(" · "))}</div>
+      <div class="row-meta">${esc(vs)}</div></div></li>`;
+  }).join("");
+  const done = review.coach?.status === "done";
+  return `<div class="feedback review">
+    <p class="review-headline">${esc(f.headline)}</p>
+    <div data-coach>${coachHtml(review.coach)}</div>
+    ${done ? "" : `${f.good.length ? `<p class="feedback-lead">Das hat gestimmt</p>
+      <ul class="feedback-list good">${f.good.map((t) => li(t, "check")).join("")}</ul>` : ""}
+      ${f.hints.length ? `<p class="feedback-lead">Darauf achten</p>
+      <ul class="feedback-list bad">${f.hints.map((h) => li(h.text, "warn")).join("")}</ul>` : ""}`}
+    ${muscles ? `<p class="feedback-lead">Sätze je Muskel${f.planned ? " (gemacht/geplant)" : ""}</p>
+      <div class="bars">${muscles}</div>` : ""}
+    ${exercises ? `<p class="feedback-lead">Übung für Übung</p><ul class="feedback-list review-list">${exercises}</ul>` : ""}
   </div>`;
+}
+
+const shortDate = (iso) => (iso ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.` : "");
+
+function coachHtml(coach) {
+  if (!coach || coach.status === "pending") {
+    return `<p class="hint coach-wait">${icon("spark")} Dein Coach schaut sich die Einheit an …</p>`;
+  }
+  if (coach.status === "error") {
+    return `<p class="hint">Der Coach-Text ist gerade nicht verfügbar – die Zahlen unten stimmen trotzdem.</p>`;
+  }
+  const b = coach.body || {};
+  const list = (title, items, name) => (items?.length ? `<p class="feedback-lead">${title}</p>
+    <ul class="feedback-list ${name === "warn" ? "bad" : "good"}">${items.map((t) =>
+      `<li>${icon(name)}<span>${esc(t)}</span></li>`).join("")}</ul>` : "");
+  return `<div class="coach-text">
+    ${b.kurzurteil ? `<p class="coach-verdict">${esc(b.kurzurteil)}</p>` : ""}
+    ${list("Stark", b.stark, "check")}
+    ${list("Im Vergleich", b.vergleiche, "right")}
+    ${list("Nächstes Mal", b.naechstes_mal, "warn")}
+  </div>`;
+}
+
+/** Fragt nach dem Coach-Text, bis er da ist (alle 5 s, hoechstens 2 min) und tauscht ihn ein,
+ *  solange `root` noch im Dokument haengt. onDone bekommt die fertige Auswertung. */
+export function watchCoach(workoutId, root, onDone) {
+  let tries = 0;
+  const tick = async () => {
+    if (!root.isConnected || tries++ >= 24) return;
+    try {
+      const review = await api(`workouts/${workoutId}/review`);
+      if (review.coach && review.coach.status !== "pending") {
+        const slot = root.querySelector(".review");
+        if (slot) slot.outerHTML = reviewHtml(review);
+        onDone?.(review);
+        return;
+      }
+    } catch { /* kein Netz: weiter versuchen, bis die Zeit um ist */ }
+    setTimeout(tick, 5000);
+  };
+  setTimeout(tick, 5000);
 }
 
 /** Das gewaehlte Profil haengt an jeder Anfrage; gefiltert wird auf dem Server. */

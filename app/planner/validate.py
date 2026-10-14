@@ -17,9 +17,8 @@ def _catalog():
 
 
 def peak_sets(item, pattern, ratios):
-    """Saetze der Spitzenwoche: aus dem Plan (peak_sets), bei alten Plaenen aus Woche 1 hochgerechnet."""
-    if item.get("peak_sets"):
-        return item["peak_sets"]
+    """Saetze der staerksten Blockwoche. Die Satzzahl steigt im Block nicht mehr (blocks.sets_for),
+    die Spitzenwoche ist also der Plan; peak_sets aus aelteren Plaenen zaehlt nicht mehr."""
     peak = max((ratios.get(PATTERN_GROUP.get(pattern)) or [1.0])[:-1])
     return min(vp_max, round((item.get("target_sets") or 0) * peak))
 
@@ -46,7 +45,7 @@ def push_pull(items):
 
 def analyze(plan, injuries=(), minutes=None, goal="aufbau", rotate=False, experience="fortgeschritten", focus=()):
     cat = _catalog()
-    # Der Plan ist Woche 1; geprueft wird die Spitzenwoche des Blocks (dort zaehlt das Volumen).
+    # Geprueft wird die staerkste Blockwoche – bei konstanter Satzzahl der Plan selbst.
     ratios = blocks.ratios_for(goal, experience, focus)
     pattern_of = lambda item: (cat.get(item["exercise_id"]) or {}).get("pattern")     # noqa: E731
     weekly = vp.weekly_volume(plan["days"], lambda item: (pattern_of(item), peak_sets(item, pattern_of(item), ratios)),
