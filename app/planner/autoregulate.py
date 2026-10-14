@@ -1,23 +1,19 @@
-"""Wochen-Check: gleicht Ist und Soll ab und passt den Block an.
+"""Wochen-Check: schaut auf die letzte Woche und passt den Block an.
 
 Passiert automatisch (einmal pro Woche, beim Oeffnen von „Heute“) und wird begruendet:
-- verpasste Saetze einer Muskelgruppe werden in der Folgewoche nachgeholt (statt zu verfallen),
 - steigt bei gleichem Gewicht die Anstrengung (RPE-Drift), wird die laufende Woche zum Deload,
-- war eine Gruppe ueberall sehr leicht (⌀ RPE ≤ 6,5), kommt ein Satz dazu,
+- bei wiederholtem Stillstand wird die Uebung gegen eine Variante desselben Musters getauscht,
 - am Blockende startet ein neuer Block mit frischen Isolationsuebungen.
+
+Die Satzzahl fasst der Wochen-Check nie an – weder Nachholen verpasster Saetze noch Zuschlaege
+bei leichten Wochen. Sie bleibt, wie sie im Plan steht (siehe planner/blocks.py).
 """
 import json
 from datetime import date, timedelta
 
 from .. import db, stats
 from . import blocks, cold_start, explain, generate, progression, volume_plan as vp
-from .muscles import GROUPS, LABEL, PATTERN_GROUP, landmark
-
-MISSED_MIN = 2          # so viele Saetze muessen fehlen, damit nachgeholt wird
-EASY_RPE = 6.5
-EASY_MIN_SETS = 6
-MAX_ADJUST_PER_GROUP = 2
-
+from .muscles import GROUPS, PATTERN_GROUP
 
 def _split_rows(split):
     rows = []
@@ -61,31 +57,6 @@ def planned_sets(block, split, week):
             if g:
                 out[g] += blocks.sets_for(block, e, day) * times
     return {g: round(v / cycle) for g, v in out.items()}
-
-
-def _bump(block, params, week, split, group, why, budget=None, planned=None):
-    """+1 Satz bei den Uebungen der Gruppe mit der besten SFR (hoechstens 2 Uebungen).
-    budget: [Rest] – Nachholen insgesamt hoechstens +20 % der Wochensaetze; nie ueber MRV."""
-    rows = [e for e in _split_rows(split) if PATTERN_GROUP.get(e.get("pattern")) == group]
-    day = date.fromisoformat(block["start_date"]) + timedelta(weeks=week - 1)
-    rows = [e for e in rows if blocks.sets_for(block, e, day) < blocks.MAX_EXERCISE_SETS]
-    rows.sort(key=lambda e: -(db.one("SELECT sfr FROM exercises WHERE id=?", (e["exercise_id"],)) or {}).get("sfr", 0))
-    adj = params.setdefault("adjust", {}).setdefault(str(week), {})
-    done = 0
-    for e in rows[:MAX_ADJUST_PER_GROUP]:
-        if budget is not None and budget[0] <= 0:
-            break
-        if planned is not None and planned.get(group, 0) + 1 > landmark(group, "mrv"):
-            break
-        if budget is not None:
-            budget[0] -= 1
-        if planned is not None:
-            planned[group] = planned.get(group, 0) + 1
-        adj[str(e["id"])] = adj.get(str(e["id"]), 0) + 1
-        explain.log(block["profile_id"], "sets_up",
-                    f"{e['name']}: +1 Satz diese Woche – {why}", e["exercise_id"], split["id"])
-        done += 1
-    return done
 
 
 MAX_BLOCK_WEEKS = 8
@@ -152,10 +123,8 @@ def deload_signals(profile_id, split, on_date=None):
 
 
 def extend_block(block, params):
-    """Eine weitere Trainingswoche vor die Entlastung schieben (Volumen bleibt auf dem Gipfel)."""
-    ratios = {g: v[:-1] + [v[-2] if len(v) >= 2 else v[-1], v[-1]] for g, v in params["ratios"].items()}
+    """Eine weitere Trainingswoche vor die Entlastung schieben (Anstrengung bleibt auf dem Gipfel)."""
     rir = params.get("rir") or []
-    params["ratios"] = ratios
     params["rir"] = (rir[:-1] + [rir[-2] if len(rir) >= 2 else 1, rir[-1]]) if rir else rir
     blocks._save_params(block["id"], params, weeks=block["weeks"] + 1)
 
@@ -196,13 +165,6 @@ def _review(profile_id, on_date=None):
         blocks._save_params(block["id"], params)
         return {"block": st, "events": explain.recent(profile_id, 10)}
 
-    prev = week - 1
-    prev_start = date.fromisoformat(block["start_date"]) + timedelta(weeks=prev - 1)
-    prev_end = prev_start + timedelta(days=6)
-    was_deload = prev == block["weeks"]
-    actual, rpes = actual_sets(profile_id, prev_start, prev_end)
-    plan = planned_sets(block, split, prev)
-
     # 1. Entlastung nur bei Bedarf: zwei Signale -> jetzt; sonst am Blockende eine Woche weiter (bis 8 Wochen)
     signals = deload_signals(profile_id, split, on_date)
     if not st["deload"] and week >= 3 and len(signals) >= 2:
@@ -224,37 +186,11 @@ def _review(profile_id, on_date=None):
         block = blocks.active(profile_id)
         return {"block": blocks.state(block, on_date), "events": explain.recent(profile_id, 10)}
 
-    if not st["deload"] and not was_deload and _full_week(profile_id, block, split, prev, prev_start, prev_end):
-        this_week = planned_sets(block, split, week)
-        budget = [max(1, round(0.2 * sum(this_week.values())))]      # Nachholen: hoechstens +20 %
-        for g in GROUPS:
-            missed = plan[g] - actual[g]
-            if plan[g] >= 3 and missed >= MISSED_MIN:
-                if _bump(block, params, week, split, g, f"letzte Woche fehlten {missed} Sätze {LABEL[g]}",
-                         budget, this_week):
-                    continue
-            elif len(rpes[g]) >= EASY_MIN_SETS and sum(rpes[g]) / len(rpes[g]) <= EASY_RPE \
-                    and plan[g] < landmark(g, "mav"):
-                _bump(block, params, week, split, g, f"{LABEL[g]} war letzte Woche überall leicht (⌀ RPE "
-                      f"{sum(rpes[g]) / len(rpes[g]):.1f})", budget, this_week)
+    if not st["deload"]:
         swap_plateaus(profile_id, split)
     params["reviewed"] = week
     blocks._save_params(block["id"], params)
     return {"block": st, "events": explain.recent(profile_id, 10)}
-
-
-def _full_week(profile_id, block, split, prev, start, end):
-    """Nachholen nur nach einer echten Trainingswoche: nicht nach einer angebrochenen ersten Blockwoche (Plan erst
-    ab Mittwoch) und nicht, wenn fast nichts trainiert wurde (Urlaub, krank) – dann wuerde sich nur Arbeit stapeln."""
-    created = stats._local_date((block.get("created_at") or "").replace(" ", "T") + "+00:00") \
-        if block.get("created_at") else None
-    if prev == 1 and created and start + timedelta(days=1) < created <= end:
-        return False
-    done = sum(1 for w in db.rows("SELECT COALESCE(started_at, finished_at) AS at FROM workouts WHERE profile_id=?",
-                                  (profile_id,)) if (d := stats._local_date(w["at"])) and start <= d <= end)
-    sessions = sum(max(1, len(d.get("weekdays") or [])) for d in split["days"])
-    sessions = round(sessions / (blocks._params(block).get("cycle") or 1.0))
-    return done * 3 >= sessions
 
 
 def _swap_exercise(profile_id, split, item, injuries, why):

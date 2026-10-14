@@ -301,11 +301,12 @@ def generate(profile, option_key, overrides=None, variation=0):
     weeks_t = vp.block_targets(exp, goal, focus_groups, age)
     weeks_t, cut_note = vp.fit_to_capacity(weeks_t, total)
     n_weeks = len(next(iter(weeks_t.values())))
-    peak = {g: max(v[: n_weeks - 1]) for g, v in weeks_t.items()}
+    # Die Satzzahl bleibt im ganzen Block gleich (blocks.sets_for) – geplant wird deshalb auf das Ziel der
+    # ersten Blockwoche, nicht auf den frueheren Gipfel. Der Name `peak` heisst hier: staerkste Woche = jede Woche.
+    peak = {g: v[0] for g, v in weeks_t.items()}
 
-    basis = [f"Block von {n_weeks} Wochen: das Volumen steigt von Woche zu Woche, die letzte Woche "
-             f"ist eine Entlastungswoche (Deload). Einstieg nahe der kleinsten wirksamen Menge, "
-             f"Ziel ist der optimale Bereich je Muskel."]
+    basis = [f"Block von {n_weeks} Wochen: die Sätze bleiben jede Woche gleich, automatisch steigen nur "
+             f"Gewicht und Wiederholungen. Die letzte Woche ist eine Entlastungswoche (Deload) mit halben Sätzen."]
     if cut_note:
         basis.append(cut_note)
     if focus_groups:
@@ -370,8 +371,8 @@ def generate(profile, option_key, overrides=None, variation=0):
     durations = [vp.session_minutes(sum(e["week_sets"][w] for e in d["exercises"]), goal)
                  for d in days for w in range(n_weeks - 1)]
     lo, hi = min(durations), max(durations)
-    basis.append(f"Dauer: etwa {lo}–{hi} Minuten pro Einheit inklusive Aufwärmen – sie wächst mit den Sätzen "
-                 "über den Block." if hi > lo else f"Dauer: etwa {hi} Minuten pro Einheit inklusive Aufwärmen.")
+    basis.append(f"Dauer: etwa {lo}–{hi} Minuten pro Einheit inklusive Aufwärmen." if hi > lo
+                 else f"Dauer: etwa {hi} Minuten pro Einheit inklusive Aufwärmen.")
 
     planned_by_week = [vp.weekly_volume(days, lambda e, w=w: (e["pattern"], e["week_sets"][w]), cycle)
                        for w in range(n_weeks)]
@@ -473,13 +474,9 @@ def _balance_push_pull(days, by_pattern, per_session, goal, age, focus_groups, w
 
 
 def _week_sets(pattern, peak_sets, weeks_t, peak):
-    """Saetze je Blockwoche einer Uebung aus dem Wochenverlauf ihrer Muskelgruppe."""
-    g = group_of(pattern)
-    ratios = [(w / peak[g]) if peak.get(g) else 1 for w in weeks_t[g]]
-    week_sets = [max(MIN_SETS if i < len(ratios) - 1 else 1, min(peak_sets, round(peak_sets * r)))
-                 for i, r in enumerate(ratios)]
-    week_sets[-1] = max(1, math.ceil(week_sets[0] / 2))          # Deload: halbe Saetze
-    return week_sets
+    """Saetze je Blockwoche einer Uebung: jede Trainingswoche gleich, der Deload halb (wie blocks.sets_for)."""
+    n = len(weeks_t[group_of(pattern)])
+    return [peak_sets] * (n - 1) + [max(1, math.ceil(peak_sets / 2))]
 
 
 def _entry(ex, pattern, peak_sets, goal, age, focus_groups, weeks_t, peak):

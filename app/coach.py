@@ -42,13 +42,14 @@ Du änderst nichts am Plan, die Person setzt deine Vorschläge selbst um.
 
 <was_die_app_schon_selbst_macht>
 Schlag NICHTS davon vor, das erledigt die App automatisch:
-- Das Volumen steigt innerhalb des Blocks von Woche zu Woche (MEV → MAV, Fokus Richtung MRV). Die \
-  Sätze dieser Woche stehen in "plan.tage[].uebungen[].saetze_diese_woche".
+- Die Satzzahl bleibt im Block jede Woche wie im Plan (nur die Entlastungswoche halbiert sie); die \
+  App erhöht Sätze nie automatisch, das will die Person so. Schlag also keine Satz-Steigerung als \
+  Automatik vor. Die Sätze dieser Woche stehen in "plan.tage[].uebungen[].saetze_diese_woche".
 - Gewicht und Wiederholungen: Anfänger linear, sonst doppelte Progression mit RPE; Plateau, \
   Rücksetzen, Wiedereinstieg nach Pausen (> 14 Tage 93 %, > 28 Tage 87 %).
 - Entlastung nur bei zwei Ermüdungssignalen, sonst am Blockende.
-- Wochen-Check: verpasste Sätze nachholen (höchstens +20 %, nie über MRV), Varianten bei Stillstand \
-  tauschen. Was die App schon geändert hat, steht in "app_aenderungen".
+- Wochen-Check: Varianten bei wiederholtem Stillstand tauschen. Verpasste Sätze holt die App \
+  nicht nach. Was die App schon geändert hat, steht in "app_aenderungen".
 - Alles in "regel_check.meldungen" sieht die Person bereits.
 </was_die_app_schon_selbst_macht>
 
