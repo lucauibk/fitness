@@ -29,12 +29,12 @@ def after_workout(profile_id, workout):
         return []
     items = {i["exercise_id"]: i for d in split["days"] for i in d["exercises"]}
     out = []
-    for ex_id in {s["exercise_id"] for s in workout.get("sets", []) if not s.get("warmup")}:
-        item = items.get(ex_id)
-        if not item:
-            continue
+    done = [e for e in {s["exercise_id"] for s in workout.get("sets", []) if not s.get("warmup")} if e in items]
+    ctx = progression.context(profile_id, done)
+    for ex_id in done:
+        item = items[ex_id]
         rec = progression.for_exercise(profile_id, ex_id, item["target_reps_min"], item["target_reps_max"],
-                                       item["target_sets"])
+                                       item["target_sets"], ctx=ctx)
         name = item["name"]
         if rec["raise_weight"] and rec["weight"]:
             text = f"{name}: {item['target_reps_max']} Wiederholungen geschafft → nächstes Mal {kg(rec['weight'])}"
