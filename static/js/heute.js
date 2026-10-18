@@ -1,6 +1,6 @@
 /** Heute: Wochen-Streak, Check-in mit Readiness, heutiges (angepasstes) Training,
  *  Mobility-Routine und Kalorienbilanz – alles auf einen Blick. */
-import { $, api, closeSheet, empty, esc, reviewHtml, watchCoach, fmtWeight, getProfile, GROUPS, icon, openSheet,
+import { $, api, closeSheet, empty, entryDay, esc, reviewHtml, watchCoach, fmtWeight, getProfile, GROUPS, icon, openSheet,
   setsSummary, sheetClosed, skeleton, toast, WEEKDAYS_LONG, busy } from "./util.js";
 import { startDraft, hasDraft, getDraft } from "./training.js";
 import { weekStrip } from "./erfolge.js";
@@ -333,7 +333,7 @@ async function saveCheckin(btn) {
   });
   // Datum mitschicken: offline gespeichert und erst morgen gesendet, gehoert der Check-in
   // trotzdem zu heute – sonst ueberschreibt er den von morgen.
-  const body = { profile_id: getProfile(), date: data?.date, sleep: value("sleep"), energy: value("energy"),
+  const body = { profile_id: getProfile(), date: entryDay(data?.date), sleep: value("sleep"), energy: value("energy"),
     stress: value("stress"), soreness, client_id: outbox.uuid() };
   await busy(btn, async () => {
     try {
@@ -399,7 +399,7 @@ async function openMobility(key) {
     if (i < r.moves.length - 1) { i += 1; return paint(); }
     try {
       const res = await outbox.send({ path: "mobility/log",
-        body: { profile_id: getProfile(), routine: key, date: data?.date, client_id: outbox.uuid() } });
+        body: { profile_id: getProfile(), routine: key, date: entryDay(data?.date), client_id: outbox.uuid() } });
       closeSheet();
       toast(res.queued ? "Erledigt – wird gesendet, sobald wieder Verbindung da ist" : "Mobility erledigt 💪");
       window.dispatchEvent(new CustomEvent("data-changed"));
@@ -476,7 +476,7 @@ function paintWater() {
 }
 
 async function addWater(ml) {
-  const body = { profile_id: getProfile(), ml, date: data.date, client_id: outbox.uuid() };
+  const body = { profile_id: getProfile(), ml, date: entryDay(data?.date), client_id: outbox.uuid() };
   waterExtra += ml;   // sofort sichtbar, nicht erst nach der Antwort vom Pi
   paintWater();
   try {

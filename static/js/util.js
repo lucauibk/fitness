@@ -68,6 +68,11 @@ const pad = (n) => String(n).padStart(2, "0");
 export const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 export const hm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 export const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+/** Tag fuer neue Eintraege aus „Heute“: das Datum der /today-Antwort – ausser sie stammt von einem
+ *  frueheren Tag (offline liefert der Service Worker den letzten Stand aus dem Cache, oder die App lag
+ *  ueber Mitternacht offen). Dann gilt der heutige Tag des Geraets; sonst landet der Check-in auf
+ *  gestern und ueberschreibt den dortigen. */
+export const entryDay = (serverDay, now = new Date()) => (serverDay && serverDay > ymd(now) ? serverDay : ymd(now));
 /** "2026-09-21" als lokaler Tag. new Date("2026-09-21") waere UTC-Mitternacht – westlich
  *  von UTC schon der Vortag. Volle Zeitstempel gehen unveraendert durch. */
 export const parseYmd = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s || "")
