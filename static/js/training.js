@@ -710,7 +710,41 @@ if (prefs.get("rest")) { restTick = setInterval(tick, 500); }
 // statt auf den naechsten (verspaeteten) Tick zu warten.
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && prefs.get("rest")) tick();
+  syncWakeLock();
 });
+
+// ------------------------------------------------------ Bildschirm wach
+// Waehrend einer laufenden Einheit bleibt der Bildschirm an – sonst sperrt das Handy in
+// der Pause und man entsperrt vor jedem Haken neu. Gekoppelt an die Klasse
+// training-fullscreen: die setzt nur load() bei offenem Entwurf, beim Beenden/Verwerfen
+// und beim Verlassen des Tabs (main.js) faellt sie weg. Im Hintergrund gibt der Browser
+// die Sperre selbst frei; beim Zurueckkommen wird sie neu angefordert. Ohne Wake-Lock-API
+// oder bei Ablehnung (z. B. Energiesparmodus) bleibt alles wie bisher.
+let wakeLock = null;   // WakeLockSentinel oder das noch laufende request()-Promise
+
+async function syncWakeLock() {
+  if (!navigator.wakeLock) return;
+  const want = document.body.classList.contains("training-fullscreen") && !document.hidden;
+  if (want && !wakeLock) {
+    const req = navigator.wakeLock.request("screen");
+    wakeLock = req;
+    try {
+      const lock = await req;
+      // Inzwischen beendet oder Tab gewechselt: gleich wieder freigeben.
+      if (wakeLock !== req) { lock.release().catch(() => {}); return; }
+      wakeLock = lock;
+      lock.addEventListener("release", () => { if (wakeLock === lock) wakeLock = null; });
+    } catch {
+      if (wakeLock === req) wakeLock = null;
+    }
+  } else if (!want && wakeLock) {
+    const lock = wakeLock;
+    wakeLock = null;
+    lock.release?.().catch(() => {});
+  }
+}
+
+new MutationObserver(syncWakeLock).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
 // ------------------------------------------------------------- Mount
 export async function mount(el) {
