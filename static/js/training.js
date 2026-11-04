@@ -4,6 +4,7 @@
 import { $, $$, api, armDelete, closeSheet, empty, esc, reviewHtml, watchCoach, getProfile,
   icon, openSheet, prefs, setsSummary, skeleton, toast } from "./util.js";
 import * as outbox from "./outbox.js";
+import { openExercise } from "./uebungen.js";
 
 let root;
 let today = null;     // /api/today fuer den Startbildschirm
@@ -184,6 +185,7 @@ function openExerciseMenu(index) {
   const sheet = openSheet({
     title: esc(ex.name),
     body: `<div class="menu-list">
+      ${item("data-m-info", "dumbbell", "Anleitung")}
       ${item("data-m-warmup", "plus", "Aufwärmsatz vorne einfügen")}
       ${ex.sets.length > 1 ? item("data-m-drop-set", "x", `Letzten Satz entfernen${last.done ? " (abgehakt)" : ""}`) : ""}
       ${ex.unit === "kg" ? item("data-m-plates", "weight", "Scheiben ausrechnen") : ""}
@@ -193,6 +195,9 @@ function openExerciseMenu(index) {
     </div>`,
   });
   const after = (fn) => () => { closeSheet(); fn(); };
+  // Ausführung und typische Fehler nachlesen, ohne die Einheit zu verlassen. Für die Übungen
+  // des aktiven Plans liegt die Anleitung schon im Offline-Speicher (main.js, warmOfflineCache).
+  sheet.querySelector("[data-m-info]").addEventListener("click", after(() => openExercise(ex.exercise_id, { session: true })));
   sheet.querySelector("[data-m-warmup]").addEventListener("click", after(() => update((d) => {
     const e = d.exercises[index];
     const first = e.sets.find((x) => !x.warmup) || e.sets[0];
