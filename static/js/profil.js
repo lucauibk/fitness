@@ -20,7 +20,19 @@ function summary(p) {
   return parts.length ? parts.join(" · ") : "Noch nicht festgelegt – der Assistent fragt es ab.";
 }
 
-const ACT = { niedrig: "wenig (Bürojob)", mittel: "mittel (viel auf den Beinen)", hoch: "hoch (körperliche Arbeit)" };
+const ACT = { niedrig: "wenig (Bürojob, sitzend)", mittel: "mittel (viel auf den Beinen)", hoch: "hoch (körperliche Arbeit)" };
+
+const kcalText = (v) => `${v > 0 ? "+" : v < 0 ? "−" : "±"}${Math.abs(v)}`;
+
+/** Rechenweg wie bei Kalorienrechnern: Grundumsatz × Alltag + Sport, dann Ziel. */
+function breakdownHint(c) {
+  const b = c.breakdown;
+  if (!b) return "";
+  return `<p class="hint">Grundumsatz ${b.bmr} kcal (${esc(b.formula)}${b.body_fat ? `, Körperfett ${String(b.body_fat).replace(".", ",")} %` : ""})
+    × Alltag ${String(b.pal).replace(".", ",")} = ${b.daily_kcal} kcal, dazu Krafttraining ${b.training_kcal} kcal/Tag im Schnitt
+    (${b.sessions} Einheiten pro Woche) = Gesamtumsatz ≈ ${c.tdee} kcal. Ziel ${kcalText(b.adjustment)} kcal.
+    Eine Schätzung: Nach 2–3 Wochen am Gewichtsverlauf prüfen und bei Bedarf nachjustieren.</p>`;
+}
 
 function nutritionCard() {
   const n = data.nutrition;
@@ -32,12 +44,11 @@ function nutritionCard() {
     <p class="eyebrow">Ernährungsziel</p>
     ${g.kcal ? `<p><b>${g.kcal} kcal</b> · Eiweiß ${g.protein} g · Kohlenhydrate ${g.carbs} g · Fett ${g.fat} g</p>`
       : `<p class="hint">Für eine Berechnung fehlen: ${esc((n.missing || []).join(", "))}.</p>`}
-    ${c && n.auto ? `<p class="hint">Berechnet aus Gewicht ${String(c.weight).replace(".", ",")} kg, Größe, Alter, Aktivität und Ziel
-      (Gesamtumsatz ≈ ${c.tdee} kcal).</p>` : ""}
+    ${c && n.auto ? breakdownHint(c) : ""}
     <form id="nutriForm" class="form">
       <label class="field">Alltags-Aktivität
         <select name="activity_level">
-          <option value="">aus den Trainingstagen schätzen</option>
+          <option value="">nicht angegeben (leicht aktiv)</option>
           ${Object.entries(ACT).map(([k, l]) => `<option value="${k}"${n.activity_level === k ? " selected" : ""}>${l}</option>`).join("")}
         </select>
       </label>
