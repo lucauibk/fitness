@@ -187,3 +187,117 @@ def test_day_reports_burned_kcal_from_cardio(profile_id):
     db.insert_row("cardio", {"profile_id": profile_id, "date": day, "activity": "Laufen",
                              "minutes": 30, "kcal": 300})
     assert nutrition.day(profile_id, day)["burned_kcal"] == 300
+
+
+# ------------------------------------------------- Kalorien- und Eiweissbedarf
+from datetime import timedelta
+
+
+def _profil(profile_id, **extra):
+    db.update_row("profiles", profile_id, {
+        "birth_year": date.today().year - 34, "sex": "männlich", "height_cm": 180,
+        "goal": "fitness", "activity_level": "niedrig", "session_minutes": 60, **extra})
+    db.set_bodyweight(profile_id, date.today().isoformat(), 80)
+    return db.get_row("profiles", profile_id)
+
+
+def _ziele(profile_id, **extra):
+    calc, missing = nutrition.computed_goals(_profil(profile_id, **extra))
+    assert missing == []
+    return calc
+
+
+def test_mehr_training_gibt_mehr_kalorien_auch_mit_gesetzter_alltagsaktivitaet(profile_id):
+    # Fruehere Formel nahm bei gesetztem Level immer denselben Faktor, egal wie oft trainiert wird.
+    wenig = _ziele(profile_id, train_weekdays="0")
+    viel = _ziele(profile_id, train_weekdays="0,1,2,3,4,5")
+    assert viel["tdee"] > wenig["tdee"] + 200
+    assert viel["breakdown"]["sessions"] == 6 and wenig["breakdown"]["sessions"] == 1
+
+
+def test_laengere_einheiten_und_hoehere_alltagsaktivitaet_zaehlen(profile_id):
+    basis = _ziele(profile_id, train_weekdays="0,2,4")["tdee"]
+    assert _ziele(profile_id, train_weekdays="0,2,4", session_minutes=90)["tdee"] > basis
+    assert _ziele(profile_id, train_weekdays="0,2,4", activity_level="hoch")["tdee"] > basis
+
+
+def test_rechenweg_ist_nachvollziehbar(profile_id):
+    c = _ziele(profile_id, train_weekdays="0,2,4,5")
+    b = c["breakdown"]
+    assert b["formula"] == "Mifflin-St Jeor" and b["body_fat"] is None
+    assert b["bmr"] == 1760                                  # 10*80 + 6.25*180 - 5*34 + 5
+    assert b["daily_kcal"] == round(1760 * 1.3)
+    assert c["tdee"] == b["daily_kcal"] + b["training_kcal"] or abs(c["tdee"] - b["daily_kcal"] - b["training_kcal"]) <= 1
+
+
+def test_abnehmen_defizit_liegt_im_esn_bereich_und_nie_unter_dem_grundumsatz(profile_id):
+    c = _ziele(profile_id, goal="abnehmen", train_weekdays="0,2,4")
+    assert -500 <= c["breakdown"]["adjustment"] <= -300
+    assert c["kcal"] >= c["breakdown"]["bmr"]
+    # Sehr leichte Person mit kleinem Verbrauch: das Defizit darf nicht unter den Grundumsatz druecken
+    db.set_bodyweight(profile_id, date.today().isoformat(), 45)
+    klein, _ = nutrition.computed_goals(db.get_row("profiles", profile_id))
+    assert klein["kcal"] >= klein["breakdown"]["bmr"]
+
+
+def test_aufbau_ueberschuss_liegt_im_esn_bereich(profile_id):
+    c = _ziele(profile_id, goal="aufbau", train_weekdays="0,2,4")
+    assert 200 <= c["breakdown"]["adjustment"] <= 500
+    assert _ziele(profile_id, goal="fitness")["breakdown"]["adjustment"] == 0
+
+
+def test_katch_mcardle_nur_mit_aktuellem_gemessenem_koerperfett(profile_id):
+    from app import body
+    _profil(profile_id)
+    body.save(profile_id, {"date": date.today().isoformat(), "body_fat_pct": 15.0})
+    c, _ = nutrition.computed_goals(db.get_row("profiles", profile_id))
+    assert c["breakdown"]["formula"] == "Katch-McArdle"
+    assert c["breakdown"]["bmr"] == round(370 + 21.6 * 80 * 0.85)
+    # zu alt -> wieder Mifflin
+    with db.connect() as conn:
+        conn.execute("UPDATE body_measurements SET date=? WHERE profile_id=?",
+                     ((date.today() - timedelta(days=200)).isoformat(), profile_id))
+    c, _ = nutrition.computed_goals(db.get_row("profiles", profile_id))
+    assert c["breakdown"]["formula"] == "Mifflin-St Jeor"
+
+
+def test_geschaetztes_koerperfett_aus_der_navy_formel_wird_nicht_verwendet(profile_id):
+    from app import body
+    _profil(profile_id)
+    body.save(profile_id, {"date": date.today().isoformat(), "waist_cm": 85, "neck_cm": 38})
+    row = db.one("SELECT body_fat_pct, body_fat_estimated FROM body_measurements WHERE profile_id=?", (profile_id,))
+    assert row["body_fat_estimated"] == 1 and row["body_fat_pct"] is not None
+    c, _ = nutrition.computed_goals(db.get_row("profiles", profile_id))
+    assert c["breakdown"]["formula"] == "Mifflin-St Jeor"
+
+
+def test_unplausibles_koerperfett_weicht_auf_mifflin_aus(profile_id):
+    from app import body
+    _profil(profile_id)
+    body.save(profile_id, {"date": date.today().isoformat(), "body_fat_pct": 60.0})   # Katch ~ -37 %
+    c, _ = nutrition.computed_goals(db.get_row("profiles", profile_id))
+    assert c["breakdown"]["formula"] == "Mifflin-St Jeor" and c["breakdown"]["body_fat"] is None
+
+
+def test_makros_ergeben_die_kalorien_und_haben_untergrenzen(profile_id):
+    for goal in ("abnehmen", "aufbau", "kraft", "fitness"):
+        c = _ziele(profile_id, goal=goal, train_weekdays="0,2,4")
+        assert c["fat"] >= 64                                  # 0,8 g/kg bei 80 kg
+        assert c["protein"] * 4 <= c["kcal"] * 0.35 + 4
+        assert abs(c["protein"] * 4 + c["carbs"] * 4 + c["fat"] * 9 - c["kcal"]) <= 12
+    assert _ziele(profile_id, goal="abnehmen")["protein"] > _ziele(profile_id, goal="fitness")["protein"]
+
+
+def test_eiweiss_mit_koerperfett_richtet_sich_nach_der_fettfreien_masse(profile_id):
+    from app import body
+    ohne = _ziele(profile_id, goal="aufbau")["protein"]
+    assert ohne == round(80 * 1.9)
+    body.save(profile_id, {"date": date.today().isoformat(), "body_fat_pct": 30.0})
+    c, _ = nutrition.computed_goals(db.get_row("profiles", profile_id))
+    assert c["protein"] == round(80 * 0.7 * 2.2)               # 56 kg fettfreie Masse, nicht 80 kg
+
+
+def test_eiweiss_ist_auf_35_prozent_der_kalorien_begrenzt(profile_id):
+    # Beim Abnehmen (2,2 g/kg = 176 g) wuerde ein kleines Kalorienziel zu viel Eiweiss verlangen
+    c = _ziele(profile_id, goal="abnehmen")
+    assert c["protein"] == round(c["kcal"] * 0.35 / 4) < round(80 * 2.2)

@@ -24,13 +24,35 @@ TIMEOUT = 12   # Open Food Facts ist bei Einzelprodukten manchmal langsam
 
 MEALS = {"fruehstueck": "Frühstück", "mittag": "Mittagessen", "abend": "Abendessen",
          "snack": "Snacks"}
-ACTIVITY = {"niedrig": 1.3, "mittel": 1.45, "hoch": 1.6}
-GOAL_DELTA = {"abnehmen": -400, "aufbau": 250, "kraft": 150, "fitness": 0}
+# Alltags-PAL OHNE Sport (DGE/WHO-Bereiche): sitzend 1,2-1,4, viel auf den Beinen 1,5-1,6,
+# koerperliche Arbeit 1,7+. Sport kommt getrennt dazu (training_kcal), damit 1 oder 6 Einheiten
+# pro Woche nicht denselben Faktor ergeben. Unbekannt: leicht aktiv.
+ACTIVITY = {"niedrig": 1.3, "mittel": 1.5, "hoch": 1.7}
+PAL_DEFAULT = 1.4
+STRENGTH_MET = 5.0          # Krafttraining, kraeftig (Compendium of Physical Activities)
+DEFAULT_SESSION_MIN = 60
+DEFAULT_SESSIONS = 3
+BODY_FAT_MAX_AGE_DAYS = 120  # aeltere Koerperfett-Messungen gelten nicht mehr als aktuell
+KATCH_MAX_DEVIATION = 0.20   # weicht Katch-McArdle >20 % von Mifflin ab: Messung unplausibel
+# Ziel-Anpassung (ESN: Fettabbau -300..-500 kcal, Muskelaufbau +200..+500 kcal)
+CUT_PCT_BW_PER_WEEK = 0.5    # ~0,5 % Koerpergewicht pro Woche
+KCAL_PER_KG_FAT = 7700
+CUT_RANGE = (300, 500)
+BULK_PCT, BULK_RANGE = 0.10, (200, 500)
+GOAL_FIXED = {"kraft": 150, "fitness": 0}
+# Eiweiss in g pro kg Koerpergewicht (ohne Koerperfett) bzw. kg fettfreier Masse (mit).
+# Basis: ISSN 2017, Morton et al. 2018 (Plateau ~1,6 g/kg, im Defizit bis ~2,2), Helms 2014.
+PROTEIN_PER_KG = {"abnehmen": 2.2, "aufbau": 1.9, "kraft": 1.9, "fitness": 1.6}
+PROTEIN_PER_KG_LEAN = {"abnehmen": 2.6, "aufbau": 2.2, "kraft": 2.2, "fitness": 1.8}
+PROTEIN_MAX_KCAL_SHARE = 0.35
+FAT_MIN_G_PER_KG = 0.8
+FAT_KCAL_SHARE = 0.25
 
 
 # ------------------------------------------------------------- Ziele
 def bmr(weight, height, age, sex):
-    """Mifflin-St Jeor. Ohne Geschlecht der Mittelwert beider Formeln."""
+    """Mifflin-St Jeor (genauer als Harris-Benedict, die ueberschaetzt tendenziell).
+    Ohne Geschlecht der Mittelwert beider Formeln."""
     base = 10 * weight + 6.25 * height - 5 * age
     if sex == "männlich":
         return base + 5
@@ -39,16 +61,40 @@ def bmr(weight, height, age, sex):
     return base - 78
 
 
-def activity_factor(level, training_days):
-    f = ACTIVITY.get(level or "", None)
-    if f is None:
-        days = training_days or 3
-        f = 1.35 if days <= 2 else 1.5 if days <= 4 else 1.65
-    return f
+def katch_mcardle(weight, body_fat_pct):
+    """Grundumsatz aus der fettfreien Masse – genauer, wenn der Koerperfettanteil bekannt ist."""
+    return 370 + 21.6 * weight * (1 - body_fat_pct / 100)
+
+
+def _body_fat(profile_id):
+    """Letzter gemessener (nicht per Navy-Formel geschaetzter) Koerperfettanteil, sonst None."""
+    row = db.one("SELECT body_fat_pct, date FROM body_measurements WHERE profile_id=?"
+                 " AND body_fat_pct IS NOT NULL AND body_fat_estimated=0 ORDER BY date DESC, id DESC",
+                 (profile_id,))
+    if not row:
+        return None
+    age_days = (date.today() - date.fromisoformat(row["date"])).days
+    return row["body_fat_pct"] if age_days <= BODY_FAT_MAX_AGE_DAYS else None
+
+
+def training_kcal(weight, sessions, minutes):
+    """Durchschnittlicher Mehrverbrauch pro Tag durch Krafttraining (netto: MET minus
+    Ruhe, denn der Alltags-PAL enthaelt den Grundumsatz schon)."""
+    return (STRENGTH_MET - 1) * weight * (minutes / 60) * sessions / 7
+
+
+def goal_adjustment(goal, tdee, weight):
+    if goal == "abnehmen":
+        cut = CUT_PCT_BW_PER_WEEK / 100 * weight * KCAL_PER_KG_FAT / 7
+        return -round(min(max(cut, CUT_RANGE[0]), CUT_RANGE[1]))
+    if goal == "aufbau":
+        return round(min(max(tdee * BULK_PCT, BULK_RANGE[0]), BULK_RANGE[1]))
+    return GOAL_FIXED.get(goal, 0)
 
 
 def computed_goals(profile):
-    """Berechnete Ziele oder None, wenn Angaben fehlen (was genau, steht in missing)."""
+    """Berechnete Ziele oder None, wenn Angaben fehlen (was genau, steht in missing).
+    Aufbau wie bei ESN: Grundumsatz x Alltags-PAL + Sport, dann Ziel-Zu-/Abschlag."""
     weight = latest_weight(profile["id"])
     missing = []
     if not weight:
@@ -60,16 +106,36 @@ def computed_goals(profile):
     if missing:
         return None, missing
     age = date.today().year - int(profile["birth_year"])
-    days = len(db.parse_weekdays(profile.get("train_weekdays"))) or profile.get("days_per_week")
-    tdee = bmr(weight, profile["height_cm"], age, profile.get("sex")) \
-        * activity_factor(profile.get("activity_level"), days)
+    sex = profile.get("sex")
+    base = bmr(weight, profile["height_cm"], age, sex)
+    formula, body_fat = "Mifflin-St Jeor", _body_fat(profile["id"])
+    if body_fat is not None and 2 <= body_fat <= 60:
+        lean = katch_mcardle(weight, body_fat)
+        if abs(lean / base - 1) <= KATCH_MAX_DEVIATION:
+            base, formula = lean, "Katch-McArdle"
+        else:
+            body_fat = None
+    else:
+        body_fat = None
+    pal = ACTIVITY.get(profile.get("activity_level") or "", PAL_DEFAULT)
+    sessions = len(db.parse_weekdays(profile.get("train_weekdays"))) or profile.get("days_per_week") \
+        or DEFAULT_SESSIONS
+    minutes = profile.get("session_minutes") or DEFAULT_SESSION_MIN
+    sport = training_kcal(weight, sessions, minutes)
+    tdee = base * pal + sport
     goal = profile.get("goal") or "fitness"
-    kcal = round((tdee + GOAL_DELTA.get(goal, 0)) / 10) * 10
-    protein = round(weight * (2.2 if goal == "abnehmen" else 2.0))
-    fat = round(kcal * 0.25 / 9)
+    adjust = goal_adjustment(goal, tdee, weight)
+    kcal = max(round((tdee + adjust) / 10) * 10, round(base / 10) * 10)   # nie unter den Grundumsatz
+    per_kg = PROTEIN_PER_KG_LEAN if body_fat is not None else PROTEIN_PER_KG
+    ref = weight * (1 - body_fat / 100) if body_fat is not None else weight
+    protein = round(min(ref * per_kg.get(goal, per_kg["fitness"]), kcal * PROTEIN_MAX_KCAL_SHARE / 4))
+    fat = round(max(weight * FAT_MIN_G_PER_KG, kcal * FAT_KCAL_SHARE / 9))
     carbs = max(0, round((kcal - protein * 4 - fat * 9) / 4))
     return {"kcal": kcal, "protein": protein, "carbs": carbs, "fat": fat,
-            "tdee": round(tdee), "weight": weight}, []
+            "tdee": round(tdee), "weight": weight,
+            "breakdown": {"bmr": round(base), "formula": formula, "pal": pal,
+                          "daily_kcal": round(base * pal), "training_kcal": round(sport),
+                          "sessions": sessions, "adjustment": adjust, "body_fat": body_fat}}, []
 
 
 def goals(profile):
