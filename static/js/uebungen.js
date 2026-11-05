@@ -59,10 +59,14 @@ export async function load() {
   render();
 }
 
-async function openExercise(id) {
+/** Details einer Übung als Sheet. Auch aus der laufenden Einheit (Übungsmenü → „Anleitung“):
+ *  dort ohne „Bearbeiten“ – mitten im Satz will man nachlesen, nicht den Katalog pflegen. */
+export async function openExercise(id, { session = false } = {}) {
   let ex;
   try {
-    ex = await api(`exercises/${id}`);
+    // Muskelnamen laden, falls die Bibliothek noch nie offen war (sonst stehen dort nur Schlüssel).
+    [ex] = await Promise.all([api(`exercises/${id}`), Object.keys(muscles).length ? null
+      : api("muscles").then((m) => { muscles = m; }).catch(() => {})]);
   } catch (e) {
     return toast(e.offline ? "Die Anleitung ist offline noch nicht verfügbar." : e.message, { error: true });
   }
@@ -89,10 +93,10 @@ async function openExercise(id) {
         ${hist.length > 1 ? sparkline(hist.map((p) => ({ value: p.value, date: p.date }))) : ""}` : ""}
       ${ex.used_in.length ? `<p class="hint">Im Plan: ${ex.used_in.map((u) => esc(`${u.split} · ${u.day}`)).join(", ")}</p>` : ""}`,
     footer: `<span class="grow"></span>
-      <button type="button" class="btn ghost" data-edit>${icon("edit")} Bearbeiten</button>
+      ${session ? "" : `<button type="button" class="btn ghost" data-edit>${icon("edit")} Bearbeiten</button>`}
       <button type="button" class="btn ghost" data-close>Schließen</button>`,
   });
-  $("[data-edit]", sheet).addEventListener("click", () => editExercise(all.find((e) => e.id === id)));
+  $("[data-edit]", sheet)?.addEventListener("click", () => editExercise(all.find((e) => e.id === id)));
 }
 
 export async function mount(el) {

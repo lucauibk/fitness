@@ -1,7 +1,7 @@
 /** Körper: Gewicht, Körperfett, Muskelmasse, Umfänge – manuell oder aus einem
  *  Screenshot der Studio-Körperanalyse (ViCoach), den die KI ausliest. */
 import { $, api, armDelete, closeSheet, deleteLater, esc, formData, formError, getProfile,
-  icon, isPendingDelete, openSheet, skeleton, submitOnce, toast, parseYmd } from "./util.js";
+  icon, isPendingDelete, openSheet, skeleton, submitOnce, toast, parseYmd, prefs } from "./util.js";
 import * as outbox from "./outbox.js";
 import { sparkline } from "./fortschritt.js";
 
@@ -17,17 +17,95 @@ const GIRTHS = ["waist_cm", "hip_cm", "chest_cm", "arm_cm", "thigh_cm", "neck_cm
 const fmt = (v, key) => `${Number(v).toLocaleString("de-AT", { maximumFractionDigits: 1 })}${UNITS[key] ? ` ${UNITS[key]}` : ""}`;
 const dm = (d) => parseYmd(d).toLocaleDateString("de-AT", { day: "numeric", month: "short" });
 
+const signed = (v, key) => `${v > 0 ? "+" : "−"}${fmt(Math.abs(v), key)}`;
+
+/** Veränderung als Text; unter der Anzeigegenauigkeit (0,1) gilt „unverändert“. */
+function delta(v, key) {
+  return v === null || v === undefined ? null : Math.abs(v) < 0.1 ? "±0" : signed(v, key);
+}
+
+function trendLines(key) {
+  const m = data.trend?.metrics?.[key];
+  if (!m) return "";
+  const parts = [];
+  if (m.since_last) parts.push(`${delta(m.since_last.delta, key)} seit letzter Messung`);
+  const w4 = delta(m.w4, key), w12 = delta(m.w12, key);
+  if (w4 !== null) parts.push(`4 Wo. ${w4}`);
+  if (w12 !== null) parts.push(`12 Wo. ${w12}`);
+  if (!parts.length) return "";
+  return `<p class="hint">${parts.join(" · ")}${m.noisy ? " · Tendenz, Waage ungenau" : ""}${m.stale ? " · lange nicht gemessen" : ""}</p>`;
+}
+
+function verdictCard() {
+  const v = data.trend?.verdict;
+  if (!v) return "";
+  const cls = v.status === "gegenlaeufig" ? " warn" : "";
+  return `<p class="callout${cls}">${icon(v.status === "passt" ? "check" : v.status === "gegenlaeufig" ? "warn" : "spark")}<span><b>Gewichtstrend · Ziel ${esc(v.goal)}</b><br>${esc(v.text)}</span></p>`;
+}
+
+// KI-Tipps: das erste Mal auf Knopfdruck, danach erneuern sie sich selbst, sobald neuer
+// Kontext da ist (neue Messung). Gemerkt pro Profil auf dem Gerät; die Signatur ändert
+// sich mit jeder Messung, dann sind alte Tipps überholt und werden ersetzt.
+const SECTIONS = [["gut", "Was gut läuft", "check"], ["schlecht", "Was nicht gut läuft", "warn"],
+  ["verbessern", "Was du verbessern kannst", "spark"]];
+const tipsKey = () => `bodytips.${getProfile()}`;
+const tipsSignature = () => JSON.stringify(Object.entries(data.latest).map(([k, v]) => [k, v.date, v.value]));
+let tipsBusy = false;
+let tipsFailedSig = null;   // nach einem Fehler nicht in Schleife neu versuchen, bis wieder neuer Kontext kommt
+
+function tipsCard() {
+  if (!data.tips_available || !Object.keys(data.latest).length) return "";
+  const saved = prefs.get(tipsKey());
+  const tips = saved?.sig === tipsSignature() ? saved.tips : null;
+  const sections = tips ? SECTIONS.filter(([k]) => tips[k]?.length).map(([k, title, ic]) => `
+    <h4 class="tips-title">${icon(ic)} ${title}</h4>
+    <ul class="tips-list">${tips[k].map((t) => `<li>${esc(t)}</li>`).join("")}</ul>`).join("") : "";
+  const note = tipsBusy ? "Tipps werden aktualisiert …"
+    : tips ? "KI-Einschätzung, keine ärztliche Beratung. Sie erneuert sich bei jeder neuen Messung."
+    : `Die KI bewertet deine Messungen: was gut läuft, was nicht und was du an Werten oder am Messen verbessern kannst. Danach
+      aktualisiert sie sich bei jeder neuen Messung selbst. Dafür gehen Ziel, Geschlecht, Größe und die
+      Trend-Zahlen (kein Name) an Anthropic.`;
+  return `<div class="card body-tips">
+    <div class="bw-head"><p class="eyebrow">Tipps zur Körpermessung</p>
+      <button type="button" class="btn tonal" data-tips${tipsBusy ? " disabled" : ""}>${icon("spark")} ${tips ? "Neu erstellen" : "Tipps erstellen"}</button></div>
+    ${sections}<p class="hint"${tipsBusy ? ' role="status"' : ""}>${note}</p>
+  </div>`;
+}
+
+async function fetchTips() {
+  if (tipsBusy) return;
+  const sig = tipsSignature();
+  tipsBusy = true;
+  render();
+  try {
+    const tips = await api("measurements/advice", { method: "POST", body: {}, timeout: 65000 });
+    tipsFailedSig = null;
+    if (!prefs.set(tipsKey(), { sig, tips })) toast("Tipps werden nicht gemerkt (Speicher voll oder privater Modus).");
+  } catch (e) {
+    tipsFailedSig = sig;
+    toast(e.offline ? "Für Tipps braucht es eine Verbindung." : e.message, { error: true });
+  } finally {
+    tipsBusy = false;
+    render();
+  }
+}
+
+/** Hat die Person schon einmal Tipps erstellt und passen sie nicht mehr zu den Messungen? */
+function tipsOutdated() {
+  const saved = prefs.get(tipsKey());
+  return Boolean(data.tips_available && saved && Object.keys(data.latest).length
+    && saved.sig !== tipsSignature() && tipsFailedSig !== tipsSignature());
+}
+
 function tile(key) {
   const latest = data.latest[key];
   if (!latest) return "";
   const series = data.series[key] || [];
-  const first = series[0];
-  const diff = series.length > 1 ? latest.value - first.value : null;
   return `<div class="card body-tile">
     <p class="eyebrow">${esc(data.labels[key])}${latest.estimated ? " · geschätzt" : ""}</p>
     <div class="bw-head"><span class="big-number">${fmt(latest.value, key)}</span>
-      <span class="hint">${dm(latest.date)}${latest.source === "vicoach" ? " · ViCoach" : ""}
-      ${diff !== null && Math.abs(diff) >= 0.1 ? ` · ${diff > 0 ? "+" : "−"}${fmt(Math.abs(diff), key)} seit ${dm(first.date)}` : ""}</span></div>
+      <span class="hint">${dm(latest.date)}${latest.source === "vicoach" ? " · ViCoach" : ""}</span></div>
+    ${trendLines(key)}
     ${series.length > 1 ? sparkline(series.map((p) => ({ value: p.value, date: p.date })), { height: 48 }) : ""}
   </div>`;
 }
@@ -41,6 +119,8 @@ function render() {
       ${data.ai_available ? `<button type="button" class="btn tonal" data-scan>${icon("camera")} ViCoach-Screenshot</button>` : ""}
     </div>
     ${pend.length ? `<p class="callout">${pend.length} Messung(en) warten auf Verbindung.</p>` : ""}
+    ${verdictCard()}
+    ${tipsCard()}
     ${hasAny ? `<div class="body-grid">${MAIN.map(tile).join("")}</div>` : `<div class="card quiet"><p>
       Noch keine Messung. Trag Gewicht und Umfänge ein – oder lies das Ergebnis deiner
       Körperanalyse im Studio per Screenshot ein.</p></div>`}
@@ -63,6 +143,7 @@ export async function load() {
   if (!data) root.innerHTML = skeleton(4);
   data = await api("measurements");
   render();
+  if (tipsOutdated()) fetchTips();
 }
 
 // ------------------------------------------------------------- Formular
@@ -174,7 +255,7 @@ function openEntry(id) {
   armDelete($("[data-delete]", sheet), () => {
     closeSheet();
     deleteLater(`measurements/${id}`, "Messung gelöscht", { onDone: () => { data = null; } });
-  }, "Löschen", "Messung löschen? (Der Eintrag im Gewichtsverlauf bleibt.)");
+  }, "Löschen", "Messung löschen? (Ihr Gewicht verschwindet dann auch aus dem Gewichtsverlauf.)");
 }
 
 export async function mount(el) {
@@ -182,6 +263,7 @@ export async function mount(el) {
   el.addEventListener("click", (ev) => {
     if (ev.target.closest("[data-new]")) return openForm();
     if (ev.target.closest("[data-scan]")) return openScan();
+    if (ev.target.closest("[data-tips]")) return fetchTips();
     const row = ev.target.closest("[data-entry]");
     if (row) openEntry(Number(row.dataset.entry));
   });

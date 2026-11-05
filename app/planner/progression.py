@@ -3,7 +3,7 @@
 Innerhalb der Wiederholungsspanne arbeiten; erst wenn in allen Saetzen das obere Ende bei
 passender Anstrengung erreicht ist, kommt Gewicht drauf (Dynamic Double Progression).
 Jede Empfehlung hat einen erklaerenden Satz. Reine Rechenlogik (sessions rein, Empfehlung raus),
-nur `sessions()` und `for_exercise()` greifen auf die Datenbank zu.
+nur `sessions_by_exercise()` und `context()` greifen auf die Datenbank zu.
 """
 from datetime import date
 
@@ -23,20 +23,32 @@ def epley(weight, reps):
 
 def sessions(profile_id, exercise_id, limit=6):
     """Letzte Einheiten dieser Uebung, neueste zuerst: [{date, sets: [{reps, weight, rpe}]}]."""
+    return sessions_by_exercise(profile_id, [exercise_id], limit)[exercise_id]
+
+
+def sessions_by_exercise(profile_id, exercise_ids, limit=6):
+    """Wie sessions(), aber fuer viele Uebungen in einer Abfrage: {exercise_id: [...]}.
+    Jede angefragte Uebung ist enthalten, ohne Einheiten mit leerer Liste."""
+    ids = list(dict.fromkeys(exercise_ids))
+    if not ids:
+        return {}
     rows = db.rows(
-        "SELECT w.id AS wid, COALESCE(w.started_at, w.finished_at) AS at, s.reps, s.weight, s.rpe"
+        "SELECT s.exercise_id, w.id AS wid, COALESCE(w.started_at, w.finished_at) AS at,"
+        " s.reps, s.weight, s.rpe"
         " FROM sets s JOIN workouts w ON w.id = s.workout_id"
-        " WHERE w.profile_id=? AND s.exercise_id=? AND s.warmup=0"
-        " ORDER BY at DESC, w.id DESC, s.set_no, s.id", (profile_id, exercise_id))
-    out, index = [], {}
+        f" WHERE w.profile_id=? AND s.exercise_id IN ({','.join('?' * len(ids))}) AND s.warmup=0"
+        " ORDER BY s.exercise_id, at DESC, w.id DESC, s.set_no, s.id", (profile_id, *ids))
+    out, index = {ex: [] for ex in ids}, {}
     for r in rows:
-        if r["wid"] not in index:
-            if len(out) >= limit:
-                break
+        ex, key = r["exercise_id"], (r["exercise_id"], r["wid"])
+        hist = out[ex]
+        if key not in index:
+            if len(hist) >= limit:
+                continue
             local = stats._local_date(r["at"])
-            index[r["wid"]] = {"date": local.isoformat() if local else (r["at"] or "")[:10], "sets": []}
-            out.append(index[r["wid"]])
-        index[r["wid"]]["sets"].append({"reps": r["reps"] or 0, "weight": r["weight"], "rpe": r["rpe"]})
+            index[key] = {"date": local.isoformat() if local else (r["at"] or "")[:10], "sets": []}
+            hist.append(index[key])
+        index[key]["sets"].append({"reps": r["reps"] or 0, "weight": r["weight"], "rpe": r["rpe"]})
     return out
 
 
@@ -270,17 +282,33 @@ def recommend(history, lo, hi, target_sets=None, equipment=None, pattern=None, r
             "reason": "gleiches Gewicht, eine Wiederholung mehr"}
 
 
-def for_exercise(profile_id, exercise_id, lo, hi, target_sets=None, rir=2, deload=False):
-    ex = db.one("SELECT equipment_type, pattern FROM exercises WHERE id=?", (exercise_id,)) or {}
+def context(profile_id, exercise_ids):
+    """Alles, was for_exercise() aus der DB braucht – fuer viele Uebungen auf einmal geladen.
+    Ohne Kontext kostete jede Uebung vier Abfragen, zwei davon je Profil immer gleich."""
+    ids = list(dict.fromkeys(exercise_ids))
+    exercises = {r["id"]: r for r in db.rows(
+        f"SELECT id, equipment_type, pattern FROM exercises WHERE id IN ({','.join('?' * len(ids))})",
+        ids)} if ids else {}
     experience = (db.one("SELECT experience FROM profiles WHERE id=?", (profile_id,)) or {}).get("experience")
-    history = sessions(profile_id, exercise_id)
+    last = db.one("SELECT COALESCE(started_at, finished_at) AS at FROM workouts WHERE profile_id=?"
+                  " ORDER BY COALESCE(started_at, finished_at) DESC LIMIT 1", (profile_id,))
+    last_day = stats._local_date((last or {}).get("at"))
+    return {"exercises": exercises, "experience": experience,
+            "last_workout": last_day.isoformat() if last_day else None,
+            "history": sessions_by_exercise(profile_id, ids)}
+
+
+def for_exercise(profile_id, exercise_id, lo, hi, target_sets=None, rir=2, deload=False, ctx=None):
+    """Empfehlung fuer eine Uebung. ctx aus context() spart bei vielen Uebungen die Abfragen;
+    fehlt die Uebung darin, wird fuer sie allein nachgeladen."""
+    if ctx is None or exercise_id not in ctx["history"]:
+        ctx = context(profile_id, [exercise_id])
+    ex = ctx["exercises"].get(exercise_id) or {}
+    history = ctx["history"][exercise_id]
     start = None
     if not history:
         from . import cold_start
         kg, why = cold_start.starting_weight(profile_id, exercise_id)
         start = (kg, why) if kg else None
-    last = db.one("SELECT COALESCE(started_at, finished_at) AS at FROM workouts WHERE profile_id=?"
-                  " ORDER BY COALESCE(started_at, finished_at) DESC LIMIT 1", (profile_id,))
-    last_day = stats._local_date((last or {}).get("at"))
     return recommend(history, lo, hi, target_sets, ex.get("equipment_type"), ex.get("pattern"), rir,
-                     deload, experience, start, last_workout=last_day.isoformat() if last_day else None)
+                     deload, ctx["experience"], start, last_workout=ctx["last_workout"])

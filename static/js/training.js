@@ -5,6 +5,7 @@ import { $, $$, api, armDelete, closeSheet, empty, esc, reviewHtml, watchCoach, 
   icon, openSheet, prefs, setsSummary, skeleton, toast } from "./util.js";
 import * as outbox from "./outbox.js";
 import { openCoach } from "./coach.js";
+import { openExercise } from "./uebungen.js";
 
 let root;
 let today = null;     // /api/today fuer den Startbildschirm
@@ -185,6 +186,7 @@ function openExerciseMenu(index) {
   const sheet = openSheet({
     title: esc(ex.name),
     body: `<div class="menu-list">
+      ${item("data-m-info", "dumbbell", "Anleitung")}
       ${item("data-m-warmup", "plus", "Aufwärmsatz vorne einfügen")}
       ${ex.sets.length > 1 ? item("data-m-drop-set", "x", `Letzten Satz entfernen${last.done ? " (abgehakt)" : ""}`) : ""}
       ${ex.unit === "kg" ? item("data-m-plates", "weight", "Scheiben ausrechnen") : ""}
@@ -194,6 +196,9 @@ function openExerciseMenu(index) {
     </div>`,
   });
   const after = (fn) => () => { closeSheet(); fn(); };
+  // Ausführung und typische Fehler nachlesen, ohne die Einheit zu verlassen. Für die Übungen
+  // des aktiven Plans liegt die Anleitung schon im Offline-Speicher (main.js, warmOfflineCache).
+  sheet.querySelector("[data-m-info]").addEventListener("click", after(() => openExercise(ex.exercise_id, { session: true })));
   sheet.querySelector("[data-m-warmup]").addEventListener("click", after(() => update((d) => {
     const e = d.exercises[index];
     const first = e.sets.find((x) => !x.warmup) || e.sets[0];
@@ -796,7 +801,41 @@ if (prefs.get("rest")) { restTick = setInterval(tick, 500); }
 // statt auf den naechsten (verspaeteten) Tick zu warten.
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && prefs.get("rest")) tick();
+  syncWakeLock();
 });
+
+// ------------------------------------------------------ Bildschirm wach
+// Waehrend einer laufenden Einheit bleibt der Bildschirm an – sonst sperrt das Handy in
+// der Pause und man entsperrt vor jedem Haken neu. Gekoppelt an die Klasse
+// training-fullscreen: die setzt nur load() bei offenem Entwurf, beim Beenden/Verwerfen
+// und beim Verlassen des Tabs (main.js) faellt sie weg. Im Hintergrund gibt der Browser
+// die Sperre selbst frei; beim Zurueckkommen wird sie neu angefordert. Ohne Wake-Lock-API
+// oder bei Ablehnung (z. B. Energiesparmodus) bleibt alles wie bisher.
+let wakeLock = null;   // WakeLockSentinel oder das noch laufende request()-Promise
+
+async function syncWakeLock() {
+  if (!navigator.wakeLock) return;
+  const want = document.body.classList.contains("training-fullscreen") && !document.hidden;
+  if (want && !wakeLock) {
+    const req = navigator.wakeLock.request("screen");
+    wakeLock = req;
+    try {
+      const lock = await req;
+      // Inzwischen beendet oder Tab gewechselt: gleich wieder freigeben.
+      if (wakeLock !== req) { lock.release().catch(() => {}); return; }
+      wakeLock = lock;
+      lock.addEventListener("release", () => { if (wakeLock === lock) wakeLock = null; });
+    } catch {
+      if (wakeLock === req) wakeLock = null;
+    }
+  } else if (!want && wakeLock) {
+    const lock = wakeLock;
+    wakeLock = null;
+    lock.release?.().catch(() => {});
+  }
+}
+
+new MutationObserver(syncWakeLock).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
 // ------------------------------------------------------------- Mount
 export async function mount(el) {

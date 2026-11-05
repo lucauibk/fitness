@@ -1,5 +1,6 @@
 """Koerpermessungen: manuell oder aus einer Studio-Koerperanalyse (ViCoach)."""
 import math
+from datetime import date, timedelta
 
 from . import db, stats
 
@@ -85,6 +86,32 @@ def save(profile_id, data):
     return saved, True
 
 
+def delete(profile_id, mid):
+    """Messung loeschen. Hat sie das Koerpergewicht ihres Tages gesetzt, wird das
+    zurueckgenommen: auf das Gewicht einer anderen Messung desselben Tages, sonst ganz
+    entfernt. Ein Gewicht, das inzwischen anders gesetzt wurde, bleibt unangetastet."""
+    row = db.get_row("body_measurements", mid)
+    if not row:
+        return
+    with db.connect() as c:
+        c.execute("DELETE FROM body_measurements WHERE id=?", (mid,))
+        if row.get("weight_kg") is None:
+            return
+        bw = c.execute("SELECT kg FROM bodyweight WHERE profile_id=? AND date=?",
+                       (profile_id, row["date"])).fetchone()
+        if not bw or bw[0] != row["weight_kg"]:
+            return
+        other = c.execute("SELECT weight_kg FROM body_measurements WHERE profile_id=? AND date=?"
+                          " AND weight_kg IS NOT NULL ORDER BY id DESC LIMIT 1",
+                          (profile_id, row["date"])).fetchone()
+        if other:
+            c.execute("UPDATE bodyweight SET kg=? WHERE profile_id=? AND date=?",
+                      (other[0], profile_id, row["date"]))
+        else:
+            c.execute("DELETE FROM bodyweight WHERE profile_id=? AND date=?",
+                      (profile_id, row["date"]))
+
+
 def history(profile_id):
     rows = db.rows("SELECT * FROM body_measurements WHERE profile_id=? ORDER BY date, id",
                    (profile_id,))
@@ -98,3 +125,133 @@ def history(profile_id):
               for key in RANGES}
     return {"entries": list(reversed(rows)), "latest": latest,
             "series": {k: v for k, v in series.items() if v}, "labels": LABELS}
+
+
+# ---------------------------------------------------------------- Trend & Einordnung
+# Einzelne Messungen schwanken (Wasser, Tageszeit, vor allem bei BIA-Waagen). Darum
+# beruht jede Aussage auf einem zeitgewichteten Mittel (Halbwertszeit 7 Tage) und
+# braucht mehrere Messungen ueber mindestens zwei Wochen.
+TREND_KEYS = ("weight_kg", "body_fat_pct", "muscle_mass_kg", "waist_cm", "hip_cm",
+              "chest_cm", "arm_cm", "thigh_cm")
+NOISY_KEYS = ("body_fat_pct", "muscle_mass_kg")     # BIA: nur als Tendenz lesen
+HALF_LIFE_DAYS = 7
+WINDOW_DAYS = 28            # Fenster fuer das Urteil
+MIN_POINTS = 3              # Messtage im Fenster
+MIN_SPAN_DAYS = 14          # so weit muessen erste und letzte Messung auseinanderliegen
+STALE_DAYS = 21             # aelter: keine aktuelle Einordnung
+BASELINE_TOLERANCE_DAYS = 14
+MUSCLE_STABLE_KG = 1.0      # BIA-Genauigkeit: kleinere Aenderungen sind Rauschen
+# "passt zum Ziel": Gewichtsaenderung in % Koerpergewicht pro Woche (von, bis)
+GOAL_RATE = {"abnehmen": (-1.0, -0.25), "aufbau": (0.1, 0.5), "kraft": (0.0, 0.5),
+             "fitness": (-0.25, 0.25)}
+GOAL_LABELS = {"abnehmen": "Abnehmen", "aufbau": "Aufbau", "kraft": "Kraft", "fitness": "Halten"}
+
+
+def _daily(points):
+    """[(Datum, Wert)] chronologisch, mehrere Messungen eines Tages gemittelt."""
+    by_day = {}
+    for p in points:
+        by_day.setdefault(date.fromisoformat(p["date"]), []).append(p["value"])
+    return [(d, sum(v) / len(v)) for d, v in sorted(by_day.items())]
+
+
+def _smooth(daily):
+    """Zeitgewichteter exponentieller Mittelwert: je laenger die Pause, desto mehr zaehlt
+    die neue Messung."""
+    out, s, prev = [], None, None
+    for d, v in daily:
+        if s is None:
+            s = v
+        else:
+            s += (1 - 0.5 ** ((d - prev).days / HALF_LIFE_DAYS)) * (v - s)
+        out.append((d, s))
+        prev = d
+    return out
+
+
+def _change(smoothed, days):
+    """Aenderung des geglaetteten Werts gegenueber dem Stand vor `days` Tagen."""
+    ref, now = smoothed[-1]
+    target = ref - timedelta(days=days)
+    base = [(d, v) for d, v in smoothed if d <= target and (target - d).days <= BASELINE_TOLERANCE_DAYS]
+    return round(now - base[-1][1], 1) if base else None
+
+
+def _classify(goal, pct):
+    """(Status, Satzende) fuer eine Gewichtsaenderung von `pct` % pro Woche."""
+    label = GOAL_LABELS[goal]
+    lo, hi = GOAL_RATE[goal]
+    if lo <= pct <= hi:
+        return "passt", f"passt zum Ziel {label}"
+    if goal == "abnehmen":
+        if pct < lo:
+            return "neutral", "schneller als empfohlen, das kann Muskelmasse kosten"
+        if pct > 0.1:
+            return "gegenlaeufig", "das Gewicht steigt – gegenläufig zum Ziel Abnehmen"
+        return "neutral", "langsamer als für das Ziel Abnehmen üblich"
+    if goal in ("aufbau", "kraft"):
+        if pct > hi:
+            return "neutral", f"schneller als für das Ziel {label} nötig, der Fettanteil kann mitwachsen"
+        if pct < -0.1:
+            return "gegenlaeufig", f"das Gewicht sinkt – gegenläufig zum Ziel {label}"
+        return "neutral", f"stagniert – für das Ziel {label} darf es etwas mehr werden"
+    return "neutral", "das Gewicht steigt etwas" if pct > hi else "das Gewicht sinkt etwas"
+
+
+def _verdict(goal, weight_window, muscle_window):
+    """Urteil zum Gewichtstrend; weight_window/muscle_window = geglaettete Punkte im Fenster."""
+    label = GOAL_LABELS[goal]
+    if len(weight_window) < MIN_POINTS or (weight_window[-1][0] - weight_window[0][0]).days < MIN_SPAN_DAYS:
+        return {"status": "zu_wenig", "goal": label, "rate_kg_week": None,
+                "text": "Für eine Einordnung fehlen noch Messungen: mindestens "
+                        f"{MIN_POINTS} über zwei Wochen."}
+    span = (weight_window[-1][0] - weight_window[0][0]).days
+    rate = (weight_window[-1][1] - weight_window[0][1]) / (span / 7)
+    pct = rate / weight_window[-1][1] * 100
+    sign = "+" if rate > 0 else "−"
+    head = f"{sign}{abs(rate):.1f} kg/Woche".replace(".", ",")
+    muscle = ""
+    if len(muscle_window) >= 2:
+        dm = muscle_window[-1][1] - muscle_window[0][1]
+        muscle = (" bei etwa gleicher Muskelmasse" if abs(dm) < MUSCLE_STABLE_KG else
+                  " – die Muskelmasse sinkt dabei tendenziell (BIA-Werte sind ungenau)" if dm < 0
+                  else " – die Muskelmasse steigt dabei tendenziell")
+    status, tail = _classify(goal, pct)
+    text = f"{head}{muscle}: {tail}. Das ist ein Trend aus mehreren Messungen, kein Einzelwert."
+    return {"status": status, "goal": label, "rate_kg_week": round(rate, 2), "text": text}
+
+
+def trend(series, goal, today=None):
+    """Einordnung der Verlaeufe (`history()["series"]`) gegenueber dem Profilziel.
+    Rueckgabe: {"metrics": {key: {...}}, "verdict": {...} | None}"""
+    today = today or stats.today()
+    goal = goal if goal in GOAL_RATE else "fitness"
+    metrics, smoothed_by_key, daily_by_key = {}, {}, {}
+    for key in TREND_KEYS:
+        if not series.get(key):
+            continue
+        daily = _daily(series[key])
+        smoothed = _smooth(daily)
+        daily_by_key[key], smoothed_by_key[key] = daily, smoothed
+        last = daily[-1]
+        since_last = None
+        if len(daily) > 1:
+            since_last = {"delta": round(last[1] - daily[-2][1], 1), "days": (last[0] - daily[-2][0]).days}
+        metrics[key] = {"smoothed": round(smoothed[-1][1], 1), "since_last": since_last,
+                        "w4": _change(smoothed, 28), "w12": _change(smoothed, 84),
+                        "stale": (today - last[0]).days > STALE_DAYS, "noisy": key in NOISY_KEYS}
+    verdict = None
+    if "weight_kg" in metrics:
+        if metrics["weight_kg"]["stale"]:
+            verdict = {"status": "veraltet", "goal": GOAL_LABELS[goal], "rate_kg_week": None,
+                       "text": "Die letzte Gewichtsmessung ist mehr als drei Wochen her – "
+                               "für eine Einordnung bitte neu messen."}
+        else:
+            def window(key):
+                sm = smoothed_by_key.get(key, [])
+                if not sm:
+                    return []
+                start = sm[-1][0] - timedelta(days=WINDOW_DAYS)
+                return [(d, v) for d, v in sm if d >= start]
+            verdict = _verdict(goal, window("weight_kg"), window("muscle_mass_kg"))
+    return {"metrics": metrics, "verdict": verdict}

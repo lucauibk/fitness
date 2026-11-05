@@ -9,7 +9,7 @@ sichtbar, Einträge werden lokal gesammelt und nachgesendet, sobald wieder Netz 
 | Tab | Inhalt |
 |---|---|
 | Heute | Tages-Serie, Check-in (Schlaf, Energie, Stress, Muskelkater) → Readiness, an die Erholung angepasstes Training, Mobility-Routine, Kalorien |
-| Training | Einheit (mit Pausen-Timer, Bewertung beim Beenden) · Plan (Splits, Assistent, Plan-Check) · Übungen (Anleitung, Muskel-Grafik, Video-Suche) · Cardio |
+| Training | Einheit (mit Pausen-Timer, Bildschirm bleibt an, Bewertung beim Beenden) · Plan (Splits, Assistent, Plan-Check) · Übungen (Anleitung, Muskel-Grafik, Video-Suche) · Cardio |
 | Ernährung | Kalorien/Makros gegen das Ziel, Mahlzeiten, Suche und Barcode über Open Food Facts, eigene Lebensmittel |
 | Fortschritt | Übersicht (Bestleistungen, Volumen) · Körper (Gewicht, Körperfett, Maße, ViCoach) · Erfolge (Serien, Abzeichen) · Verlauf |
 | Profil | Daten, Ernährungsziel, Plan-Assistent |
@@ -51,11 +51,31 @@ ViCoach hat keine Schnittstelle und keinen Export. Stattdessen: in ViCoach einen
 vom Messergebnis machen → Fortschritt → Körper → „ViCoach-Screenshot“. Die KI liest die Werte,
 man prüft sie im Formular und speichert erst dann. Das Bild wird nicht gespeichert.
 
+## Kalorien- und Eiweißbedarf
+
+Aufbau wie bei Kalorienrechnern (z. B. ESN), der Rechenweg steht im Profil unter Ernährungsziel:
+
+- **Grundumsatz:** Mifflin-St Jeor (genauer als Harris-Benedict). Mit einem gemessenen Körperfettanteil
+  (nicht älter als 120 Tage, nicht per Navy-Formel geschätzt) stattdessen Katch-McArdle aus der fettfreien Masse.
+- **Gesamtumsatz:** Grundumsatz × Alltags-PAL (ohne Sport: wenig 1,3 · mittel 1,5 · hoch 1,7, unbekannt 1,4)
+  plus Krafttraining als eigener Posten (Einheiten pro Woche × Dauer, MET 5, netto). 1 oder 6 Einheiten ergeben
+  also unterschiedliche Werte.
+- **Ziel:** Abnehmen ≈ 0,5 % Körpergewicht pro Woche (−300 bis −500 kcal), Aufbau +10 % (+200 bis +500 kcal),
+  Kraft +150, Fitness ±0. Nie unter dem Grundumsatz.
+- **Eiweiß:** 1,6 bis 2,2 g pro kg Körpergewicht je nach Ziel, mit Körperfett auf die fettfreie Masse bezogen,
+  höchstens 35 % der Kalorien (ISSN 2017, Morton et al. 2018). **Fett:** mindestens 0,8 g/kg und 25 % der Kalorien.
+  **Kohlenhydrate:** der Rest.
+
+Alle Werte sind Schätzungen. Nach 2 bis 3 Wochen am Gewichtsverlauf prüfen und bei Bedarf nachjustieren.
+
 ## Datenschutz
 
 - Alle Daten liegen in `fitness.db` auf dem Pi.
 - An **Anthropic** (nur mit `ANTHROPIC_API_KEY`, nur auf Knopfdruck): Plan-Check, KI-Verfeinerung
   (Plan + Eckdaten ohne Namen) und der ViCoach-Screenshot.
+- An **Anthropic** über Claude Code (`claude -p`, ohne API-Schlüssel): die Körper-Tipps (Ziel, Geschlecht, Größe
+  und die Trend-Zahlen aus den Messungen, ohne Namen und ohne einzelne Messtage) – beim ersten Mal auf
+  Knopfdruck, danach bei jeder neuen Messung automatisch.
 - An **Anthropic** über Claude Code (nur wenn der Coach-Timer eingerichtet ist, täglich): aktiver Plan,
   Block-Stand, Trainings der letzten sechs Wochen, Check-ins (Schlaf, Stress, Muskelkater), Ziele und
   eingetragene Beschwerden – ohne Namen und Körperdaten.

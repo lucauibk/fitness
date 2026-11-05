@@ -100,7 +100,7 @@ def deload_signals(profile_id, split, on_date=None):
     """Hinweise auf aufgelaufene Ermuedung. Zwei davon -> Entlastung (Bell et al.: bedarfsgesteuert,
     ein fester Rhythmus ist nicht belegt). Der Ermuedungswert allein loest nie eine Entlastung aus."""
     rows = _split_rows(split)
-    hist = {e["exercise_id"]: progression.sessions(profile_id, e["exercise_id"]) for e in rows}
+    hist = progression.sessions_by_exercise(profile_id, [e["exercise_id"] for e in rows])
     signals = []
     drifting = [e["name"] for e in rows if progression.rpe_drift(hist[e["exercise_id"]])]
     if len(drifting) >= 2:

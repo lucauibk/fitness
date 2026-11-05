@@ -6,7 +6,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import activity, ai, body, db
+from .. import activity, ai, body, body_advice, claude_cli, db
 from ..common import FIELD_NAMES, current_profile, owned
 from .daily import _day
 
@@ -47,7 +47,10 @@ class ScanIn(BaseModel):
 @router.get("/measurements")
 def list_measurements(profile_id: int = Depends(current_profile)):
     out = body.history(profile_id)
-    out["ai_available"] = ai.available()
+    goal = (db.get_row("profiles", profile_id) or {}).get("goal")
+    out["trend"] = body.trend(out["series"], goal)
+    out["ai_available"] = ai.available()            # Screenshot einlesen (API-Schluessel)
+    out["tips_available"] = claude_cli.available()   # Tipps (Claude Code)
     return out
 
 
@@ -67,10 +70,26 @@ def add_measurement(data: MeasurementIn):
             "milestones": activity.new_milestones(before, profile_id) if created else []}
 
 
+@router.post("/measurements/advice")
+def advice(profile_id: int = Depends(current_profile)):
+    """KI-Tipps zur Entwicklung ueber Claude Code – nur Trend-Zahlen und Eckdaten."""
+    if not claude_cli.available():
+        raise HTTPException(400, "Für Tipps braucht es Claude Code auf dem Server (claude).")
+    profile = db.get_row("profiles", profile_id) or {}
+    hist = body.history(profile_id)
+    if not hist["latest"]:
+        raise HTTPException(400, "Trag zuerst eine Messung ein.")
+    res = body_advice.generate(profile, body.trend(hist["series"], profile.get("goal")),
+                               hist["latest"], body.LABELS)
+    if "error" in res:
+        raise HTTPException(422, res["error"])
+    return res
+
+
 @router.delete("/measurements/{mid}")
 def delete_measurement(mid: int, profile_id: int = Depends(current_profile)):
     owned("body_measurements", mid, profile_id, "Diese Messung")
-    db.delete_row("body_measurements", mid)
+    body.delete(profile_id, mid)
     return {"ok": True}
 
 

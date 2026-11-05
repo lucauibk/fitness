@@ -248,3 +248,4 @@ def read_measurement(image_b64, media_type):
     except (TypeError, ValueError):
         day = None
     return {"values": values, "date": day, "dropped": dropped}
+

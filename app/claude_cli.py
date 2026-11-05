@@ -19,12 +19,21 @@ log = logging.getLogger(__name__)
 RETRY_PAUSE = 30
 
 
+def _exe():
+    return shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+
+
+def available():
+    """Ist Claude Code auf diesem Rechner installiert? (Anmeldung wird erst beim Aufruf geprueft.)"""
+    return os.access(_exe(), os.X_OK)
+
+
 def env():
     return {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
 
 
 def command(system, model, *extra):
-    exe = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+    exe = _exe()
     return [exe, "-p", "--model", model, "--tools", "", "--system-prompt", system,
             "--strict-mcp-config", "--no-session-persistence", *extra]
 

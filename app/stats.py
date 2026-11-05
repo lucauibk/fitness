@@ -54,6 +54,13 @@ def _local_date(iso):
     return dt.date()
 
 
+def _since_bound(start):
+    """Untergrenze fuer die SQL-Abfrage ab einem oertlichen Datum. Gespeichert wird in UTC –
+    eine Einheit am Montag 00:30 in Wien steht dort noch mit Sonntag. Ein Tag Puffer reicht
+    fuer jede Zeitzone; was davor liegt, faellt danach ueber `_local_date` heraus."""
+    return (start - timedelta(days=1)).isoformat()
+
+
 def _sets(profile_id, since=None):
     # Aufwaermsaetze zaehlen nicht in Volumen, Bestleistungen oder Progression.
     sql = ("SELECT s.*, e.name AS exercise, e.muscle_group, e.unit,"
@@ -91,10 +98,11 @@ def best_per_exercise(profile_id):
             }
     out = sorted(best.values(), key=lambda b: (b["muscle_group"] or "", b["exercise"]))
     from .planner import progression
+    hist = progression.sessions_by_exercise(profile_id, [b["exercise_id"] for b in out], limit=12)
     for b in out:
         b.pop("score", None)
         # aktuelle Schaetzung (Kalman ueber die letzten Einheiten) statt nur des besten Einzelsatzes
-        est = progression.estimate(progression.sessions(profile_id, b["exercise_id"], limit=12))
+        est = progression.estimate(hist.get(b["exercise_id"], []))
         b["one_rm_now"] = round(est[0], 1) if est else None
         b["one_rm_spread"] = round(100 * est[1] / est[0]) if est else None
     return out
@@ -125,9 +133,9 @@ def weekly_volume(profile_id, weeks=12):
     """Sätze und bewegte Kilogramm je Muskelgruppe und Woche."""
     start = _monday(today()) - timedelta(weeks=weeks - 1)
     by_week = {}
-    for s in _sets(profile_id, since=start.isoformat()):
+    for s in _sets(profile_id, since=_since_bound(start)):
         day = _local_date(s["at"])
-        if not day:
+        if not day or day < start:
             continue
         week = _monday(day).isoformat()
         group = s["muscle_group"] or "sonstige"
@@ -157,8 +165,9 @@ def frequency(profile_id, weeks=12):
     workouts = db.rows(
         "SELECT COALESCE(started_at, finished_at) AS at FROM workouts"
         " WHERE profile_id=? AND COALESCE(started_at, finished_at) >= ?",
-        (profile_id, start.isoformat()))
-    days = sorted({_local_date(w["at"]).isoformat() for w in workouts if _local_date(w["at"])})
+        (profile_id, _since_bound(start)))
+    days = sorted({d.isoformat() for d in (_local_date(w["at"]) for w in workouts)
+                   if d and d >= start})
     per_week = {}
     for d in days:
         per_week[_monday(date.fromisoformat(d)).isoformat()] = per_week.get(
@@ -205,12 +214,14 @@ def last_sets(profile_id, exercise_id):
                    " ORDER BY set_no, id", (last["id"], exercise_id))
 
 
-def suggest(profile_id, exercise, target_sets=None, reps_min=None, reps_max=None, rir=2, deload=False):
-    """Vorschlag fuer die naechste Einheit – Rechenlogik in planner.progression."""
+def suggest(profile_id, exercise, target_sets=None, reps_min=None, reps_max=None, rir=2, deload=False,
+            ctx=None):
+    """Vorschlag fuer die naechste Einheit – Rechenlogik in planner.progression.
+    ctx: progression.context() fuer mehrere Uebungen, einmal geladen."""
     from .planner import progression
     lo = reps_min or 8
     return progression.for_exercise(profile_id, exercise["id"], lo, max(reps_max or lo, lo),
-                                    target_sets, rir, deload)
+                                    target_sets, rir, deload, ctx=ctx)
 
 
 def ready_to_raise(profile_id):
@@ -219,12 +230,14 @@ def ready_to_raise(profile_id):
     split = db.active_split(profile_id)
     if not split:
         return []
+    from .planner import progression
+    ctx = progression.context(profile_id, [i["exercise_id"] for d in split["days"] for i in d["exercises"]])
     out = []
     for day in split["days"]:
         for item in day["exercises"]:
             ex = {"id": item["exercise_id"], "muscle_group": item["muscle_group"]}
             s = suggest(profile_id, ex, item["target_sets"],
-                        item["target_reps_min"], item["target_reps_max"])
+                        item["target_reps_min"], item["target_reps_max"], ctx=ctx)
             if s["raise_weight"]:
                 out.append({"exercise": item["name"], "day": day["label"],
                             "unit": item["unit"], "from": max(
@@ -329,9 +342,10 @@ def rotation_day(profile_id, split):
 
 def day_plan(profile_id, day):
     """Ein Trainingstag mit letzten Werten und Vorschlägen je Übung – nach Blockwoche."""
-    from .planner import blocks
+    from .planner import blocks, progression
     block = blocks.ensure(profile_id)
     st = blocks.state(block) if block else None
+    ctx = progression.context(profile_id, [i["exercise_id"] for i in day["exercises"]])
     items = []
     for item in day["exercises"]:
         ex = {"id": item["exercise_id"], "muscle_group": item["muscle_group"]}
@@ -339,7 +353,7 @@ def day_plan(profile_id, day):
             item = {**item, "target_sets": blocks.sets_for(block, item)}
         s = suggest(profile_id, ex, item["target_sets"],
                     item["target_reps_min"], item["target_reps_max"],
-                    rir=st["rir"] if st else 2, deload=bool(st and st["deload"]))
+                    rir=st["rir"] if st else 2, deload=bool(st and st["deload"]), ctx=ctx)
         items.append({
             "split_exercise_id": item["id"], "exercise_id": item["exercise_id"],
             "name": item["name"], "unit": item["unit"], "muscle_group": item["muscle_group"],

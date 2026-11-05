@@ -1,5 +1,5 @@
 /** Ernährung: Tagesbilanz, Mahlzeiten, Lebensmittel suchen/scannen/anlegen. */
-import { $, api, armDelete, closeSheet, deleteLater, esc, formData, formError, getProfile, icon,
+import { $, api, armDelete, closeSheet, deleteLater, entryDay, esc, formData, formError, getProfile, icon,
   isPendingDelete, openSheet, prefs, skeleton, submitOnce, toast, busy, parseYmd } from "./util.js";
 import * as outbox from "./outbox.js";
 import { scanBarcode } from "./scanner.js";
@@ -247,7 +247,7 @@ async function copyMeal(meal, btn) {
           ? { name: e.name, kcal: e.kcal, protein: e.protein, carbs: e.carbs, fat: e.fat }
           : { food_id: e.food_id, grams: e.grams };
         const res = await outbox.send({ path: "food-log", body: {
-          profile_id: getProfile(), ...what, meal, date: data.date,
+          profile_id: getProfile(), ...what, meal, date: entryDay(data?.date),
           client_id: outbox.uuid(), preview: { name: e.name, kcal: Math.round(e.kcal || 0) } } });
         if (res.queued) queued += 1;
       }
@@ -307,7 +307,7 @@ async function openSavedMeals(meal) {
     try {
       for (const it of m.items) {
         const res = await outbox.send({ path: "food-log", body: { profile_id: getProfile(), food_id: it.food_id,
-          grams: it.grams, meal, date: data.date, client_id: outbox.uuid(), preview: { name: it.name, kcal: Math.round(it.kcal || 0) } } });
+          grams: it.grams, meal, date: entryDay(data?.date), client_id: outbox.uuid(), preview: { name: it.name, kcal: Math.round(it.kcal || 0) } } });
         if (res.queued) queued += 1;
       }
     } catch (e) { return toast(e.message, { error: true }); }
@@ -620,7 +620,7 @@ function openAdd(meal, opts = {}) {
     await busy(btn, async () => {
       try {
         const food = await ensureFood(f);
-        const body = { profile_id: getProfile(), food_id: food.id, grams, meal, date: data.date,
+        const body = { profile_id: getProfile(), food_id: food.id, grams, meal, date: entryDay(data?.date),
           client_id: outbox.uuid(),
           preview: { name: food.name, kcal: Math.round((food.kcal * grams) / 100) } };
         const res = await outbox.send({ path: "food-log", body });
@@ -869,7 +869,7 @@ function reviewAi(meal, res) {
             : { name: it.name, kcal: Math.max(1, Math.round(f(it.estimate.kcal) || 0)), protein: f(it.estimate.protein),
               carbs: f(it.estimate.carbs), fat: f(it.estimate.fat) };
           const r = await outbox.send({ path: "food-log", body: { profile_id: getProfile(), ...what, meal: m,
-            date: data.date, client_id: outbox.uuid(), preview: { name: it.pick >= 0 ? it.candidates[it.pick].name : it.name, kcal: Math.round(kcalOf(it)) } } });
+            date: entryDay(data?.date), client_id: outbox.uuid(), preview: { name: it.pick >= 0 ? it.candidates[it.pick].name : it.name, kcal: Math.round(kcalOf(it)) } } });
           if (r.queued) queued += 1;
         }
       } catch (e) { return toast(e.message, { error: true }); }
@@ -988,7 +988,7 @@ function openQuick(meal, entry = null) {
         await api(`food-log/${entry.id}`, { method: "PATCH", body: f });
         toast("Gespeichert");
       } else {
-        const res = await outbox.send({ path: "food-log", body: { profile_id: getProfile(), ...f, date: data.date,
+        const res = await outbox.send({ path: "food-log", body: { profile_id: getProfile(), ...f, date: entryDay(data?.date),
           client_id: outbox.uuid(), preview: { name: f.name || "Schnelleintrag", kcal: Math.round(f.kcal) } } });
         toast(res.queued ? "Gespeichert – wird gesendet, sobald wieder Verbindung da ist" : `${Math.round(f.kcal)} kcal eingetragen`);
       }
@@ -1082,7 +1082,7 @@ export async function mount(el) {
 }
 
 async function addWater(ml) {
-  const body = { profile_id: getProfile(), ml, date: data.date, client_id: outbox.uuid() };
+  const body = { profile_id: getProfile(), ml, date: entryDay(data?.date), client_id: outbox.uuid() };
   waterExtra += ml;   // sofort sichtbar, nicht erst nach der Antwort vom Pi
   render();
   try {
