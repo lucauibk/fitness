@@ -1,5 +1,5 @@
 /** Ernährung: Tagesbilanz, Mahlzeiten, Lebensmittel suchen/scannen/anlegen. */
-import { $, api, armDelete, closeSheet, deleteLater, esc, formData, formError, getProfile, icon,
+import { $, api, armDelete, closeSheet, deleteLater, entryDay, esc, formData, formError, getProfile, icon,
   isPendingDelete, openSheet, skeleton, submitOnce, toast, busy, parseYmd } from "./util.js";
 import * as outbox from "./outbox.js";
 import { scanBarcode } from "./scanner.js";
@@ -168,7 +168,7 @@ async function copyMeal(meal, btn) {
     try {
       for (const e of entries) {
         const res = await outbox.send({ path: "food-log", body: {
-          profile_id: getProfile(), food_id: e.food_id, grams: e.grams, meal, date: data.date,
+          profile_id: getProfile(), food_id: e.food_id, grams: e.grams, meal, date: entryDay(data?.date),
           client_id: outbox.uuid(), preview: { name: e.name, kcal: Math.round(e.kcal || 0) } } });
         if (res.queued) queued += 1;
       }
@@ -228,7 +228,7 @@ async function openSavedMeals(meal) {
     try {
       for (const it of m.items) {
         const res = await outbox.send({ path: "food-log", body: { profile_id: getProfile(), food_id: it.food_id,
-          grams: it.grams, meal, date: data.date, client_id: outbox.uuid(), preview: { name: it.name, kcal: Math.round(it.kcal || 0) } } });
+          grams: it.grams, meal, date: entryDay(data?.date), client_id: outbox.uuid(), preview: { name: it.name, kcal: Math.round(it.kcal || 0) } } });
         if (res.queued) queued += 1;
       }
     } catch (e) { return toast(e.message, { error: true }); }
@@ -505,7 +505,7 @@ function openAdd(meal) {
             carbs: f.carbs, fat: f.fat, serving_g: f.serving_g, serving_label: f.serving_label,
             pack_g: f.pack_g, source: "off" } });
         }
-        const body = { profile_id: getProfile(), food_id: food.id, grams, meal, date: data.date,
+        const body = { profile_id: getProfile(), food_id: food.id, grams, meal, date: entryDay(data?.date),
           client_id: outbox.uuid(),
           preview: { name: food.name, kcal: Math.round((food.kcal * grams) / 100) } };
         const res = await outbox.send({ path: "food-log", body });
@@ -670,7 +670,7 @@ export async function mount(el) {
 }
 
 async function addWater(ml) {
-  const body = { profile_id: getProfile(), ml, date: data.date, client_id: outbox.uuid() };
+  const body = { profile_id: getProfile(), ml, date: entryDay(data?.date), client_id: outbox.uuid() };
   waterExtra += ml;   // sofort sichtbar, nicht erst nach der Antwort vom Pi
   render();
   try {

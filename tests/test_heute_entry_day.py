@@ -41,7 +41,8 @@ def test_entry_day_nimmt_nie_einen_vergangenen_tag(tmp_path):
                    "ahead": "2026-10-19"}   # Server-Zeitzone schon weiter: dessen Tag bleibt
 
 
-def test_heute_schickt_nicht_das_datum_aus_dem_cache():
-    src = (ROOT / "static" / "js" / "heute.js").read_text()
-    assert not re.search(r"date:\s*data\??\.date", src), "Eintrag nimmt das Datum der /today-Antwort ungeprüft"
-    assert src.count("date: entryDay(data?.date)") == 3     # Check-in, Mobility, Wasser
+def test_kein_eintrag_nimmt_das_datum_aus_dem_cache():
+    """Gilt für alle Seiten: Einträge senden nie das Datum einer (evtl. gecachten) Tagesantwort ungeprüft."""
+    for js in sorted((ROOT / "static" / "js").glob("*.js")):
+        src = js.read_text()
+        assert not re.search(r"date:\s*data\??\.date", src), f"{js.name}: Datum der Tagesantwort ungeprüft"
