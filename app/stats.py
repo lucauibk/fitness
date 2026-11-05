@@ -240,6 +240,47 @@ def _big_groups(day):
     return {e.get("muscle_group") for e in day.get("exercises", [])} & RECOVERY_GROUPS
 
 
+def _week_sessions(profile_id, on_date):
+    """Einheiten mit Plan-Tag von Montag bis on_date (Ortszeit): [{split_day_id, date, n_sets}]."""
+    monday = on_date - timedelta(days=on_date.weekday())
+    out = []
+    for r in db.rows("SELECT w.split_day_id, COALESCE(w.started_at, w.finished_at) AS at,"
+                     " (SELECT COUNT(*) FROM sets s WHERE s.workout_id = w.id AND s.warmup=0) AS n_sets"
+                     " FROM workouts w WHERE w.profile_id=? AND w.split_day_id IS NOT NULL"
+                     " ORDER BY at DESC LIMIT 60", (profile_id,)):
+        d = _local_date(r["at"])
+        if d and monday <= d <= on_date:
+            out.append({"split_day_id": r["split_day_id"], "date": d, "n_sets": r["n_sets"] or 0})
+    return out
+
+
+def _slots(split):
+    return sorted(((wd, d) for d in split["days"] for wd in (d.get("weekdays") or [])), key=lambda s: s[0])
+
+
+def _remaining_slots(profile_id, slots, on_date):
+    """Soll-Termine der Woche, die noch nicht abgehakt sind – jede Einheit hakt einen Termin
+    ihres Plan-Tags ab, egal an welchem Wochentag sie stattfand."""
+    done = {}
+    for r in _week_sessions(profile_id, on_date):
+        done[r["split_day_id"]] = done.get(r["split_day_id"], 0) + 1
+    remaining = []
+    for wd, d in slots:
+        if done.get(d["id"], 0) > 0:
+            done[d["id"]] -= 1
+        else:
+            remaining.append((wd, d))
+    return remaining
+
+
+def week_status(profile_id, split, on_date):
+    """Diese Woche in Zahlen – dieselbe Zaehlung wie schedule_day: geplant, erledigt, offen."""
+    slots = _slots(split)
+    remaining = _remaining_slots(profile_id, slots, on_date)
+    return {"geplant": len(slots), "erledigt": len(slots) - len(remaining),
+            "offen": [d["label"] for _, d in remaining]}
+
+
 def schedule_day(profile_id, split, on_date):
     """Adaptiver Wochenplan. Die Wochentage der Split-Tage sind nur der Soll-Plan; was in dieser
     Woche tatsaechlich trainiert wurde, hakt den passenden Tag ab – egal an welchem Wochentag.
@@ -248,29 +289,16 @@ def schedule_day(profile_id, split, on_date):
     Praeferenz), sofern die Muskeln von gestern erholt sind.
     Rueckgabe: (Tag, fest, Hinweis) – fest = der Tag ist wie geplant dran; Hinweis "nachgeholt"
     oder "erholung" (ausstehender Tag belastet dieselben Muskeln wie gestern)."""
-    slots = sorted(((wd, d) for d in split["days"] for wd in (d.get("weekdays") or [])),
-                   key=lambda s: s[0])
+    slots = _slots(split)
     if not slots:
         return rotation_day(profile_id, split), False, None
-    monday = on_date - timedelta(days=on_date.weekday())
     yesterday = on_date - timedelta(days=1)
-    done, yesterday_ids = {}, set()
-    for r in db.rows("SELECT w.split_day_id, COALESCE(w.started_at, w.finished_at) AS at,"
-                     " (SELECT COUNT(*) FROM sets s WHERE s.workout_id = w.id AND s.warmup=0) AS n_sets"
-                     " FROM workouts w WHERE w.profile_id=? AND w.split_day_id IS NOT NULL"
-                     " ORDER BY at DESC LIMIT 60", (profile_id,)):
-        d = _local_date(r["at"])
-        if d and monday <= d <= on_date:
-            done[r["split_day_id"]] = done.get(r["split_day_id"], 0) + 1
-            # Erholungs-Sperre: gestern immer, vorgestern nach einer langen Einheit (>= 15 Saetze) – ~48 h
-            if d == yesterday or (d == on_date - timedelta(days=2) and (r["n_sets"] or 0) >= 15):
-                yesterday_ids.add(r["split_day_id"])
-    remaining = []
-    for wd, d in slots:
-        if done.get(d["id"], 0) > 0:
-            done[d["id"]] -= 1
-        else:
-            remaining.append((wd, d))
+    yesterday_ids = set()
+    for r in _week_sessions(profile_id, on_date):
+        # Erholungs-Sperre: gestern immer, vorgestern nach einer langen Einheit (>= 15 Saetze) – ~48 h
+        if r["date"] == yesterday or (r["date"] == on_date - timedelta(days=2) and r["n_sets"] >= 15):
+            yesterday_ids.add(r["split_day_id"])
+    remaining = _remaining_slots(profile_id, slots, on_date)
     tired = set()
     for d in split["days"]:
         if d["id"] in yesterday_ids:

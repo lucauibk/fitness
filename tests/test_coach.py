@@ -1,15 +1,13 @@
-"""Coach-Hinweise: Claude-Antworten werden streng geprueft, bevor sie in der App landen,
-und der Lauf schreibt nur in coach_notes – nie in den Plan."""
+"""Morgen-Coach: hoechstens eine Nachricht pro Lauf, streng geprueft, und der Lauf schreibt nur
+in coach_messages – nie in den Plan."""
 import json
 import os
 from datetime import timedelta
 
 import pytest
-from fastapi import HTTPException
 
-from app import coach, db, main
+from app import coach, coach_chat, db
 from app.planner import blocks
-from app.stats import today
 
 
 def _plan(profile_id):
@@ -25,107 +23,62 @@ def _plan(profile_id):
     return ex, db.get_row("exercises", ex)["name"], split
 
 
-def _note(profile_id, title, status="open", days_ago=0):
-    with db.connect() as c:
-        return c.execute("INSERT INTO coach_notes (profile_id, date, category, title, text, status)"
-                         " VALUES (?,?,?,?,?,?)",
-                         (profile_id, (today() - timedelta(days=days_ago)).isoformat(), "plan",
-                          title, "t", status)).lastrowid
+def _answer(message, impuls="Heute UK: Hip Thrust zuerst."):
+    body = json.dumps({"impuls": impuls, "message": message}, ensure_ascii=False)
+    return f"<analyse>\n- Woche 1 [noch wenig Daten], {{kein JSON}}\n</analyse>\n<nachricht>{body}</nachricht>"
 
 
-def _answer(*items, erledigt=()):
-    body = json.dumps({"notes": list(items), "erledigt": list(erledigt)}, ensure_ascii=False)
-    return f"<analyse>\n- Woche 1 [noch wenig Daten], {{kein JSON}}\n</analyse>\n<hinweise>{body}</hinweise>"
+def test_parse_message_and_impulse():
+    assert coach.parse(_answer("Stark: 3 von 3 Einheiten diese Woche.")) == \
+        {"impuls": "Heute UK: Hip Thrust zuerst.", "message": "Stark: 3 von 3 Einheiten diese Woche.",
+         "aktionen": []}
 
 
-def test_parse_maps_exercise_and_clips(profile_id):
-    ex, name, _ = _plan(profile_id)
-    r = coach.parse(_answer({"category": "plan", "title": "T" * 100, "text": "x " * 300,
-                             "exercise": name.upper()}), profile_id)
-    assert len(r["notes"]) == 1
-    assert r["notes"][0]["exercise_id"] == ex
-    assert len(r["notes"][0]["title"]) <= coach.MAX_TITLE
-    assert len(r["notes"][0]["text"]) <= coach.MAX_TEXT
+def test_parse_nothing_new():
+    assert coach.parse(_answer(None))["message"] is None
+    assert coach.parse(_answer("   "))["message"] is None
+    assert coach.parse(_answer(None, impuls=None)) == {"impuls": None, "message": None, "aktionen": []}
 
 
-def test_parse_drops_invalid_unknown_and_duplicates(profile_id):
-    _plan(profile_id)
-    _note(profile_id, "Schon da")
-    r = coach.parse(_answer(
-        {"category": "ernaehrung", "title": "Falsche Kategorie", "text": "x"},
-        {"category": "plan", "title": "", "text": "ohne Titel"},
-        {"category": "plan", "title": "schon da", "text": "Dublette eines offenen Hinweises"},
-        {"category": "progress", "title": "Neu", "text": "ok", "exercise": "Gibt es nicht"},
-        {"category": "progress", "title": "Neu", "text": "doppelt in derselben Antwort"},
-        "kein Objekt"), profile_id)
-    assert [(n["title"], n["exercise_id"]) for n in r["notes"]] == [("Neu", None)]
+def test_parse_actions_only_with_message():
+    raw = '<nachricht>{"impuls": "i", "message": "Tausch?", "aktionen": [{"typ": "ersetzen", "plan_id": 1, "neu": "X"}]}</nachricht>'
+    assert coach.parse(raw)["aktionen"] == [{"typ": "ersetzen", "plan_id": 1, "neu": "X"}]
+    raw = '<nachricht>{"impuls": "i", "message": null, "aktionen": [{"typ": "ersetzen", "plan_id": 1, "neu": "X"}]}</nachricht>'
+    assert coach.parse(raw)["aktionen"] == []
 
 
-def test_parse_caps_count(profile_id):
-    _plan(profile_id)
-    r = coach.parse(_answer(*({"category": "plan", "title": f"N{i}", "text": "t"} for i in range(6))), profile_id)
-    assert len(r["notes"]) == coach.MAX_NOTES
+def test_parse_clips_long_texts():
+    r = coach.parse(_answer("wort " * 400, impuls="lang " * 100))
+    assert len(r["message"]) == coach.MAX_TEXT and r["message"].endswith("…")
+    assert len(r["impuls"]) == coach.MAX_IMPULSE
 
 
-def test_parse_resolved_only_own_open_notes(profile_id):
-    mine = _note(profile_id, "Alt")
-    done = _note(profile_id, "Schon weg", status="dismissed")
-    with db.connect() as c:
-        other = c.execute("INSERT INTO profiles (name, created_at) VALUES (?,?)",
-                          (f"Andere-{os.urandom(4).hex()}", db.now())).lastrowid
-    foreign = _note(other, "Fremd")
-    r = coach.parse(_answer(erledigt=[mine, done, foreign, 999999, "x"]), profile_id)
-    assert r["resolved"] == [mine]
-    coach.resolve(profile_id, r["resolved"])
-    assert coach.open_notes(profile_id) == []
-    assert db.get_row("coach_notes", mine)["status"] == "resolved"
-    assert db.get_row("coach_notes", foreign)["status"] == "open"
-
-
-def test_resolved_title_may_be_reused(profile_id):
-    old = _note(profile_id, "Rumpf ergänzen")
-    r = coach.parse(_answer({"category": "plan", "title": "Rumpf ergänzen", "text": "neu formuliert"},
-                            erledigt=[old]), profile_id)
-    assert [n["title"] for n in r["notes"]] == ["Rumpf ergänzen"]
-
-
-def test_parse_accepts_plain_list_and_empty(profile_id):
-    r = coach.parse('[{"category": "plan", "title": "A", "text": "b"}]', profile_id)
-    assert [n["title"] for n in r["notes"]] == ["A"]
-    assert coach.parse('<hinweise>{"notes": [], "erledigt": []}</hinweise>', profile_id) == \
-        {"notes": [], "resolved": []}
-
-
-@pytest.mark.parametrize("raw", ["", "Keine Ideen heute.", "<hinweise>kaputt</hinweise>",
-                                 '<hinweise>{"notes": "x"}</hinweise>'])
-def test_parse_rejects_non_json(profile_id, raw):
+@pytest.mark.parametrize("raw", ["", "kein json", "<nachricht>[1, 2]</nachricht>",
+                                 '<nachricht>{"notes": []}</nachricht>'])
+def test_parse_rejects_garbage(raw):
     with pytest.raises(ValueError):
-        coach.parse(raw, profile_id)
+        coach.parse(raw)
 
 
-def test_expire_old_open_notes(profile_id):
-    old = _note(profile_id, "Alt", days_ago=coach.EXPIRE_DAYS + 1)
-    _note(profile_id, "Neu")
-    coach.expire(profile_id)
-    assert [n["title"] for n in coach.open_notes(profile_id)] == ["Neu"]
-    assert db.get_row("coach_notes", old)["status"] == "expired"
+def test_parse_ignores_braces_in_analysis():
+    # Die Analyse enthaelt "{kein JSON}" – geparst wird nur der <nachricht>-Block.
+    assert coach.parse(_answer("ok"))["message"] == "ok"
 
 
-def test_context_block_and_history(profile_id):
+def test_context_block_and_recent_messages(profile_id):
     _, name, split = _plan(profile_id)
     blocks.create(profile_id, split, "aufbau", "fortgeschritten")
-    _note(profile_id, "Offen")
-    _note(profile_id, "Weggeklickt", status="dismissed")
-    _note(profile_id, "Abgelaufen", status="expired")
-    _note(profile_id, "Erledigt", status="resolved")
+    coach_chat.add_message(profile_id, "user", "Warum stagniert mein Bankdrücken?")
+    coach_chat.add_message(profile_id, "coach", "Weil …")
+    coach_chat.add_message(profile_id, "coach", "kaputt", status="error")
     ctx = coach.context(profile_id)
     assert ctx["block"]["woche"] == 1 and ctx["block"]["einheiten_seit_start"] == 0
     assert ctx["plan"]["tage"][0]["uebungen"][0]["name"] == name
-    assert ctx["plan"]["tage"][0]["uebungen"][0]["saetze_diese_woche"] >= 2
-    assert [n["title"] for n in ctx["offene_hinweise"]] == ["Offen"]
-    assert ctx["weggeklickt"] == ["Weggeklickt"]
+    assert [m["von"] for m in ctx["letzte_nachrichten"]] == ["person", "du"]
     assert ctx["tage_seit_letzter_einheit"] is None
-    assert "Offen" in coach.prompt(ctx)
+    assert "Warum stagniert" in coach.prompt(ctx)
+    assert ctx["heute_geplant"]["tag"] == "Push" and ctx["heute_geplant"]["heute_schon_trainiert"] is False
+    assert ctx["letzte_impulse"] == [] and ctx["weggeklickt"] == []
 
 
 def test_context_leaves_plan_untouched(profile_id):
@@ -138,8 +91,8 @@ def test_context_leaves_plan_untouched(profile_id):
 
     before = snapshot()
     coach.context(profile_id)
-    r = coach.parse(_answer({"category": "plan", "title": "X", "text": "y"}), profile_id)
-    coach.store(profile_id, r["notes"])
+    coach_chat.add_message(profile_id, "coach", coach.parse(_answer("x"))["message"], source="daily")
+    coach_chat.set_impulse(profile_id, coach.parse(_answer("x"))["impuls"])
     assert snapshot() == before
 
 
@@ -147,20 +100,72 @@ def test_context_without_plan(profile_id):
     assert coach.context(profile_id) is None
 
 
-def test_api_list_and_dismiss(profile_id):
-    _note(profile_id, "Weg damit")
-    note = main.api_coach_notes(profile_id)[0]
-    assert note["title"] == "Weg damit"
-    assert main.api_coach_dismiss(note["id"], profile_id) == {"ok": True}
-    assert main.api_coach_notes(profile_id) == []
+def test_absaetze_bleiben_in_der_nachricht():
+    r = coach.parse(_answer("Erster Absatz.\n\n\n**Zweiter**   Absatz\nmit Zeile.\n\n- Punkt"))
+    assert r["message"] == "Erster Absatz.\n\n**Zweiter** Absatz\nmit Zeile.\n\n- Punkt"
+    # Der Impuls bleibt einzeilig
+    assert "\n" not in coach.parse(_answer("x", impuls="a\n\nb"))["impuls"]
 
 
-def test_api_dismiss_foreign_profile(profile_id):
-    note = _note(profile_id, "Meins")
+def _day_plan(profile_id, weekdays):
     with db.connect() as c:
-        other = c.execute("INSERT INTO profiles (name, created_at) VALUES (?,?)",
-                          (f"Andere-{os.urandom(4).hex()}", db.now())).lastrowid
-    with pytest.raises(HTTPException) as e:
-        main.api_coach_dismiss(note, other)
-    assert e.value.status_code == 403
-    assert coach.open_notes(profile_id)
+        split = c.execute("INSERT INTO splits (profile_id, name, active, created_at) VALUES (?,?,1,?)",
+                          (profile_id, "W", db.now())).lastrowid
+        ids = []
+        for i, (label, wd) in enumerate(weekdays):
+            ids.append(c.execute("INSERT INTO split_days (split_id, position, label, weekdays) VALUES (?,?,?,?)",
+                                 (split, i, label, wd)).lastrowid)
+        ex = c.execute("INSERT INTO exercises (name, muscle_group, unit) VALUES (?,?,?)",
+                       (f"X-{os.urandom(3).hex()}", "beine", "kg")).lastrowid
+        for d in ids:
+            c.execute("INSERT INTO split_exercises (split_day_id, exercise_id, position) VALUES (?,?,0)", (d, ex))
+    return ids, ex
+
+
+def test_heute_wie_startseite_und_woche(profile_id):
+    from app import stats
+    today = stats.today()
+    # B liegt nach heute: ein schon vergangener B-Tag waere "nachgeholt" und stuende heute vorne
+    days = [("A", str(today.weekday()))] + ([("B", str(today.weekday() + 1))] if today.weekday() < 6 else [])
+    _day_plan(profile_id, days)
+    ctx = coach.context(profile_id)
+    day, fixed, _ = stats.schedule_day(profile_id, db.active_split(profile_id), today)
+    assert ctx["heute_geplant"]["tag"] == day["label"] == "A" and ctx["heute_geplant"]["wie_geplant"] is fixed
+    assert ctx["diese_woche"]["geplant"] == len(days) and ctx["diese_woche"]["erledigt"] == 0
+
+
+def test_woche_zaehlt_erledigte_und_pause(profile_id):
+    from datetime import datetime, time as dtime, timezone
+    from app import stats
+    today = stats.today()
+    ids, ex = _day_plan(profile_id, [("A", str(today.weekday()))])
+    for days_ago in (10, 0):
+        at = datetime.combine(today - timedelta(days=days_ago), dtime(10), tzinfo=timezone.utc).isoformat()
+        db.save_workout({"profile_id": profile_id, "split_day_id": ids[0], "started_at": at,
+                         "sets": [{"exercise_id": ex, "reps": 10, "weight": 20}]})
+    ctx = coach.context(profile_id)
+    assert ctx["diese_woche"] == {"geplant": 1, "erledigt": 1, "offen": []}
+    assert ctx["pause_vor_letzter_einheit_tage"] == 10
+    assert ctx["heute_geplant"]["heute_schon_trainiert"] is True
+
+
+def test_weggeklickt_und_motivation_im_kontext(profile_id):
+    _plan(profile_id)
+    with db.connect() as c:
+        c.execute("INSERT INTO coach_notes (profile_id, date, category, title, text, status)"
+                  " VALUES (?,?,?,?,?,?)", (profile_id, today_iso(), "progress", "Wadenheben RPE", "t", "dismissed"))
+    db.update_row("profiles", profile_id, {"motivation": "Ziel-Outfit"})
+    ctx = coach.context(profile_id)
+    assert ctx["weggeklickt"] == ["Wadenheben RPE"] and ctx["profil"]["motivation"] == "Ziel-Outfit"
+
+
+def today_iso():
+    from app import stats
+    return stats.today().isoformat()
+
+
+def test_datum_in_ortszeit(monkeypatch):
+    from zoneinfo import ZoneInfo
+    from app import stats
+    monkeypatch.setattr(stats, "tz", lambda: ZoneInfo("Europe/Vienna"))
+    assert coach._date("2026-10-14T23:30:00+00:00") == "2026-10-15"

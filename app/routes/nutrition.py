@@ -1,4 +1,6 @@
 """Ernaehrung: Tagesbilanz, Ziele, Lebensmittel-Suche, Eintraege."""
+import base64
+import binascii
 import json
 import re
 from typing import Literal, Optional
@@ -6,7 +8,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from .. import db, nutrition
+from .. import db, food_ai, food_catalog, nutrition, portions, recipes
 from ..common import FIELD_NAMES, _found, current_profile, insert_once, owned
 from .daily import _day
 
@@ -63,17 +65,58 @@ def _local(q, profile_id):
     """Eigene und schon verwendete Lebensmittel, sortiert nach Relevanz und Haeufigkeit.
     Gefiltert wird in Python statt per LIKE, weil SQLite Umlaute und Gross/klein nur fuer
     ASCII vergleicht – die Tabelle bleibt auf dem Pi klein genug dafuer."""
-    found = [f for f in db.rows("SELECT * FROM foods") if nutrition.matches(f, q)]
+    vs = food_catalog.variants(q)
+    # Erst nur id + Suchform (7.000+ Zeilen), dann die Treffer vollstaendig – auf dem Pi
+    # spart das den Grossteil der Zeit gegenueber SELECT * fuer alles.
+    ids = [r["id"] for r in db.rows("SELECT id, search, name, brand FROM foods")
+           if food_catalog.matches(r["search"] or food_catalog.search_text(r), q, vs)]
+    found = []
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        found += db.rows(f"SELECT * FROM foods WHERE id IN ({','.join('?' * len(chunk))})", chunk)
     uses = {r["food_id"]: r["n"] for r in db.rows(
         "SELECT food_id, COUNT(*) AS n FROM food_log WHERE profile_id=? GROUP BY food_id",
         (profile_id,))}
     last = {r["food_id"]: r["grams"] for r in db.rows(
         "SELECT food_id, grams FROM food_log WHERE id IN"
         " (SELECT MAX(id) FROM food_log WHERE profile_id=? GROUP BY food_id)", (profile_id,))}
+    favs = _favorite_ids(profile_id)
     for f in found:
         f["uses"] = uses.get(f["id"], 0)
         f["last_grams"] = last.get(f["id"])
-    return nutrition.rank(found, q, uses)[:15]
+        f["favorite"] = f["id"] in favs
+    # Favoriten zaehlen wie oft Gegessenes: weiter nach oben
+    boost = {fid: uses.get(fid, 0) + (5 if fid in favs else 0) for fid in {f["id"] for f in found}}
+    return portions.with_units(nutrition.rank(found, q, boost)[:25])
+
+
+def _favorite_ids(profile_id):
+    return {r["food_id"] for r in db.rows("SELECT food_id FROM food_favorites WHERE profile_id=?", (profile_id,))}
+
+
+@router.get("/foods/favorites")
+def favorites(profile_id: int = Depends(current_profile)):
+    """Mit Stern markierte Lebensmittel – mit der zuletzt gegessenen Menge."""
+    return portions.with_units([{**r, "favorite": True} for r in db.rows(
+        "SELECT f.*, (SELECT grams FROM food_log x WHERE x.food_id=f.id AND x.profile_id=? AND x.grams > 0"
+        " ORDER BY x.id DESC LIMIT 1) AS last_grams FROM food_favorites v JOIN foods f ON f.id = v.food_id"
+        " WHERE v.profile_id=? ORDER BY v.created_at DESC", (profile_id, profile_id))])
+
+
+@router.put("/foods/{food_id}/favorite")
+def add_favorite(food_id: int, profile_id: int = Depends(current_profile)):
+    _found(db.get_row("foods", food_id))
+    with db.connect() as c:
+        c.execute("INSERT OR IGNORE INTO food_favorites (profile_id, food_id, created_at) VALUES (?,?,?)",
+                  (profile_id, food_id, db.now()))
+    return {"favorite": True}
+
+
+@router.delete("/foods/{food_id}/favorite")
+def remove_favorite(food_id: int, profile_id: int = Depends(current_profile)):
+    with db.connect() as c:
+        c.execute("DELETE FROM food_favorites WHERE profile_id=? AND food_id=?", (profile_id, food_id))
+    return {"favorite": False}
 
 
 @router.get("/foods/search/local")
@@ -101,14 +144,14 @@ def barcode(code: str):
         raise HTTPException(400, "Barcode: ungültige Eingabe.")
     have = db.one("SELECT * FROM foods WHERE barcode=?", (code,))
     if have:
-        return {"food": have}
+        return {"food": portions.with_units([have])[0]}
     try:
         food = nutrition.product_off(code)
     except nutrition.FoodError as e:
         raise HTTPException(503, str(e)) from e
     if not food:
         raise HTTPException(404, "Produkt nicht gefunden – du kannst es als eigenes Lebensmittel anlegen.")
-    return {"food": nutrition.remember(food)}
+    return {"food": portions.with_units([nutrition.remember(food)])[0]}
 
 
 @router.get("/foods/portion/{code}")
@@ -133,12 +176,12 @@ def portion(code: str):
 @router.get("/foods/recent")
 def recent(profile_id: int = Depends(current_profile)):
     """Zuletzt und oft gegessene Lebensmittel – auch offline aus dem Vorrat nutzbar."""
-    return db.rows(
+    return portions.with_units(db.rows(
         "SELECT f.*, COUNT(l.id) AS uses, MAX(l.date) AS last_date,"
         " (SELECT grams FROM food_log x WHERE x.food_id=f.id AND x.profile_id=? ORDER BY x.id DESC LIMIT 1) AS last_grams"
         " FROM food_log l JOIN foods f ON f.id = l.food_id"
         " WHERE l.profile_id=? GROUP BY f.id ORDER BY MAX(l.id) DESC LIMIT 30",
-        (profile_id, profile_id))
+        (profile_id, profile_id)))
 
 
 class FoodIn(BaseModel):
@@ -149,6 +192,10 @@ class FoodIn(BaseModel):
     protein: Optional[float] = Nutrient
     carbs: Optional[float] = Nutrient
     fat: Optional[float] = Nutrient
+    fiber: Optional[float] = Nutrient
+    sugar: Optional[float] = Nutrient
+    sat_fat: Optional[float] = Nutrient
+    salt: Optional[float] = Nutrient
     serving_g: Optional[float] = Field(None, gt=0, le=2000, allow_inf_nan=False)
     serving_label: Optional[str] = Field(None, max_length=60)
     pack_g: Optional[float] = Field(None, gt=0, le=5000, allow_inf_nan=False)
@@ -164,11 +211,11 @@ def add_food(body: FoodIn):
     return nutrition.remember(data)
 
 
-def _own_food(food_id):
+def _own_food(food_id, sources=("eigen",)):
     """Nur selbst angelegte Lebensmittel sind aenderbar – Open-Food-Facts-Produkte gehoeren
     der Datenbank dort, und beide Profile teilen sich den Vorrat."""
     food = _found(db.get_row("foods", food_id))
-    if food.get("source") != "eigen":
+    if food.get("source") not in sources:
         raise HTTPException(403, "Nur selbst angelegte Lebensmittel lassen sich ändern.")
     return food
 
@@ -179,25 +226,113 @@ def patch_food(food_id: int, body: FoodIn):
     data = body.model_dump(exclude={"source", "barcode"})
     data["name"] = data["name"].strip()
     data["serving_label"] = (data["serving_label"] or "").strip() or None
+    data["search"] = food_catalog.search_text(data)
     # Eingetragene Mahlzeiten behalten ihre Werte (food_log friert sie ein).
     return db.update_row("foods", food_id, data)
 
 
 @router.delete("/foods/{food_id}")
 def delete_food(food_id: int):
-    _own_food(food_id)
+    _own_food(food_id, ("eigen", "rezept"))
     with db.connect() as c:
         # Alte Eintraege bleiben mit Name und Werten erhalten, nur der Verweis faellt weg.
         c.execute("UPDATE food_log SET food_id=NULL WHERE food_id=?", (food_id,))
+        c.execute("DELETE FROM food_favorites WHERE food_id=?", (food_id,))
     db.delete_row("foods", food_id)
     return {"deleted": food_id}
 
 
-# ------------------------------------------------------------ Eintraege
-class LogIn(BaseModel):
-    profile_id: int
+# ------------------------------------------------------------ KI-Erkennung
+AI_IMAGE_PREFIX = re.compile(r"^data:(image/(?:jpeg|png|webp));base64,")
+MAX_AI_IMAGE = 3_000_000
+
+
+class AiIn(BaseModel):
+    text: Optional[str] = Field(None, max_length=500)
+    image: Optional[str] = Field(None, max_length=MAX_AI_IMAGE)
+
+
+@router.post("/nutrition/ai")
+def recognize(body: AiIn, profile_id: int = Depends(current_profile)):
+    """Mahlzeit aus Text oder Foto erkennen (claude -p, Claude-Abo). Liefert nur Vorschlaege –
+    eingetragen wird erst nach der Bestaetigung in der App."""
+    if not (body.text or "").strip() and not body.image:
+        raise HTTPException(400, "Bitte beschreiben oder ein Foto wählen.")
+    image = None
+    if body.image:
+        m = AI_IMAGE_PREFIX.match(body.image)
+        data = body.image[m.end():] if m else ""
+        try:
+            if not m or len(base64.b64decode(data, validate=True)) < 1000:
+                raise ValueError
+        except (binascii.Error, ValueError) as e:
+            raise HTTPException(400, "Foto: ungültiges Bild.") from e
+        image = (m.group(1), data)
+    try:
+        return food_ai.recognize(profile_id, body.text, image, _local)
+    except food_ai.Busy as e:
+        raise HTTPException(429, "Es wird gerade schon eine Mahlzeit erkannt – einen Moment.") from e
+    except (RuntimeError, ValueError) as e:
+        low = str(e).lower()
+        msg = ("Das Claude-Abo hat gerade sein Nutzungslimit erreicht." if "limit" in low or "usage" in low
+               else "Die Erkennung hat nicht geklappt – bitte nochmal oder genauer beschreiben.")
+        raise HTTPException(502, msg) from e
+
+
+# ------------------------------------------------------------ Rezepte
+class RecipeItem(BaseModel):
     food_id: int
     grams: float = Field(..., gt=0, le=5000, allow_inf_nan=False)
+
+
+class RecipeIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    portions: int = Field(..., ge=1, le=50)
+    cooked_g: Optional[float] = Field(None, gt=0, le=20000, allow_inf_nan=False)
+    items: list[RecipeItem] = Field(..., min_length=1, max_length=40)
+
+
+def _recipe_call(fn, *args, **kw):
+    try:
+        return fn(*args, **kw)
+    except recipes.RecipeError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.post("/recipes")
+def add_recipe(body: RecipeIn):
+    return _recipe_call(recipes.save, body.name, [i.model_dump() for i in body.items], body.portions, body.cooked_g)
+
+
+@router.get("/recipes/{recipe_id}")
+def get_recipe(recipe_id: int):
+    return recipes.out(_own_food(recipe_id, ("rezept",)))
+
+
+@router.put("/recipes/{recipe_id}")
+def update_recipe(recipe_id: int, body: RecipeIn):
+    _own_food(recipe_id, ("rezept",))
+    return _recipe_call(recipes.save, body.name, [i.model_dump() for i in body.items], body.portions,
+                        body.cooked_g, recipe_id)
+
+
+# ------------------------------------------------------------ Eintraege
+Macro = Field(None, ge=0, le=500, allow_inf_nan=False)
+QUICK_NAME = "Schnelleintrag"
+
+
+class LogIn(BaseModel):
+    """Lebensmittel mit Menge – oder ein Schnelleintrag ohne Lebensmittel: nur kcal (und
+    optional Makros), z. B. fuers Restaurant. Beides ueber denselben Weg, damit der Ausgang
+    (offline) beide gleich behandelt."""
+    profile_id: int
+    food_id: Optional[int] = None
+    grams: Optional[float] = Field(None, gt=0, le=5000, allow_inf_nan=False)
+    name: Optional[str] = Field(None, max_length=80)
+    kcal: Optional[float] = Field(None, gt=0, le=5000, allow_inf_nan=False)
+    protein: Optional[float] = Macro
+    carbs: Optional[float] = Macro
+    fat: Optional[float] = Macro
     meal: Meal
     date: Optional[str] = None
     client_id: Optional[str] = Field(None, max_length=60)
@@ -206,18 +341,38 @@ class LogIn(BaseModel):
 class LogPatch(BaseModel):
     grams: Optional[float] = Field(None, gt=0, le=5000, allow_inf_nan=False)
     meal: Optional[Meal] = None
+    # nur fuer Schnelleintraege
+    name: Optional[str] = Field(None, max_length=80)
+    kcal: Optional[float] = Field(None, gt=0, le=5000, allow_inf_nan=False)
+    protein: Optional[float] = Macro
+    carbs: Optional[float] = Macro
+    fat: Optional[float] = Macro
+
+
+def _quick(entry):
+    return entry["food_id"] is None and not entry["grams"]
 
 
 @router.post("/food-log")
 def add_log(body: LogIn):
     profile_id = current_profile(body.profile_id)
+    base = {"profile_id": profile_id, "date": _day(body.date), "meal": body.meal,
+            "client_id": body.client_id}
+    if body.food_id is None:
+        if not body.kcal:
+            raise HTTPException(400, "Bitte Kalorien eintragen.")
+        row, created = insert_once("food_log", {
+            **base, "food_id": None, "grams": 0, "name": (body.name or "").strip() or QUICK_NAME,
+            "kcal": round(body.kcal), "protein": body.protein, "carbs": body.carbs, "fat": body.fat})
+        return {"entry": row, "created": created}
     food = db.get_row("foods", body.food_id)
     if not food:
         raise HTTPException(400, "Dieses Lebensmittel gibt es nicht (mehr).")
+    if not body.grams:
+        raise HTTPException(400, "Bitte eine Menge eintragen.")
     row, created = insert_once("food_log", {
-        "profile_id": profile_id, "date": _day(body.date), "meal": body.meal,
-        "food_id": food["id"], "name": food["name"], "grams": body.grams,
-        "client_id": body.client_id, **nutrition.portion(food, body.grams)})
+        **base, "food_id": food["id"], "name": food["name"], "grams": body.grams,
+        **nutrition.portion(food, body.grams)})
     return {"entry": row, "created": created}
 
 
@@ -225,14 +380,26 @@ def add_log(body: LogIn):
 def patch_log(entry_id: int, body: LogPatch, profile_id: int = Depends(current_profile)):
     entry = owned("food_log", entry_id, profile_id, "Dieser Eintrag")
     data = body.model_dump(exclude_unset=True)
+    quick_fields = {"name", "kcal", "protein", "carbs", "fat"} & set(data)
+    if _quick(entry):
+        if data.pop("grams", None):
+            raise HTTPException(400, "Ein Schnelleintrag hat keine Grammzahl.")
+        if "name" in data:
+            data["name"] = (data["name"] or "").strip() or QUICK_NAME
+        if "kcal" in data and data["kcal"] is not None:
+            data["kcal"] = round(data["kcal"])
+    elif quick_fields:
+        raise HTTPException(400, "Kalorien lassen sich nur bei Schnelleinträgen direkt ändern.")
     if data.get("grams"):
         food = db.get_row("foods", entry["food_id"]) if entry["food_id"] else None
         if food:
             data.update(nutrition.portion(food, data["grams"]))
         else:   # Lebensmittel geloescht: anteilig aus dem alten Eintrag rechnen
             f = data["grams"] / entry["grams"]
-            data.update({k: round((entry[k] or 0) * f, 1) for k in ("kcal", "protein", "carbs", "fat")})
-    data = {k: v for k, v in data.items() if v is not None}
+            data.update({k: None if entry[k] is None else round(entry[k] * f, 2 if k == "salt" else 1)
+                         for k in nutrition.NUTRIENTS})
+    # Makros eines Schnelleintrags duerfen geleert werden (None), alles andere nicht
+    data = {k: v for k, v in data.items() if v is not None or (_quick(entry) and k in ("protein", "carbs", "fat"))}
     with db.connect() as c:
         if data:
             c.execute(f"UPDATE food_log SET {', '.join(f'{k}=?' for k in data)} WHERE id=?",

@@ -1,6 +1,6 @@
 /** Einstieg: Tab-Verwaltung, Profil-Umschalter und die Offline-Hinweise. */
 import { $, $$, ago, api, closeSheet, empty, esc, getProfile, icon, openSheet, prefs,
-  setProfile, submitOnce, toast, formData, formError, safeColor } from "./util.js";
+  setProfile, submitOnce, toast, formData, formError, safeColor, applyAccent } from "./util.js";
 import * as outbox from "./outbox.js";
 import { subTabs } from "./tabs.js";
 import * as heute from "./heute.js";
@@ -130,6 +130,7 @@ async function loadProfiles() {
     setProfile(remembered);
     showProfileName(prefs.get("profileName") || "Profil");
     $("#profileDot").style.setProperty("--c", safeColor(prefs.get("profileColor")));
+    applyAccent(prefs.get("profileColor"));   // vor dem Laden – sonst blitzt kurz das Standard-Gruen auf
   }
   profiles = await api("profiles");
   if (!profiles.length) return;
@@ -146,6 +147,7 @@ function applyProfile(id) {
   prefs.set("profileColor", p.color);
   showProfileName(p.name);
   $("#profileDot").style.setProperty("--c", safeColor(p.color));
+  applyAccent(p.color);
 }
 
 /** Alle Ansichten frisch einhängen. Ersetzt die Elemente, damit mount() keine

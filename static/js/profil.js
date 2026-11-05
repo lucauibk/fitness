@@ -1,6 +1,7 @@
 /** Profil: persönliche Angaben und der Einstieg in den Plan-Assistenten. */
 import { $, api, esc, formData, formError, getProfile, hasDirtyForm, icon, skeleton, submitOnce, toast,
   WEEKDAYS, parseYmd } from "./util.js";
+import { openTopf } from "./topf.js";
 import { openWizard, GOALS, EXPERIENCE, FOCUS, hasWizardDraft } from "./wizard.js";
 
 let root;
@@ -88,6 +89,14 @@ function render() {
 
     ${nutritionCard()}
 
+    <div class="card mini-card" role="button" tabindex="0" data-topf>
+      <span class="row-icon">${icon("bag")}</span>
+      <div class="grow"><p class="eyebrow">Shopping-Topf</p>
+        <p class="hint">${p.reward_per_workout ? `${String(p.reward_per_workout).replace(".", ",")} € pro Training · Wunschliste öffnen`
+          : "Jedes Training bringt Geld für deine Wunschliste."}</p></div>
+      ${icon("right", "chev")}
+    </div>
+
     <div class="card">
       <p class="eyebrow">Deine Daten</p>
       <form id="profilForm" class="form">
@@ -112,6 +121,11 @@ function render() {
             : "noch nicht eingetragen"}</p>
           <a class="btn small ghost" href="#fortschritt/koerper">Gewicht &amp; Maße eintragen</a>
         </div>
+        <label class="field">Was dich motiviert – warum du trainierst
+          <textarea name="motivation" rows="3" maxlength="300"
+            placeholder="optional, z. B. Ziel-Outfit, mehr Energie im Alltag, Rücken stärken">${esc(p.motivation || "")}</textarea>
+          <span class="hint">Das liest nur dein Coach – er bezieht sich darauf statt auf Druck.</span>
+        </label>
         <label class="field">Einschränkungen oder Verletzungen
           <textarea name="limitations" rows="2" maxlength="500"
             placeholder="optional, z. B. Knie links, keine Überkopf-Übungen">${esc(p.limitations || "")}</textarea>
@@ -180,6 +194,7 @@ export async function mount(el) {
   el.addEventListener("click", (ev) => {
     if (ev.target.closest("[data-wizard]")) openWizard(data?.profile);
     if (ev.target.closest("[data-profiles]")) document.getElementById("profileBtn")?.click();
+    if (ev.target.closest("[data-topf]")) openTopf();
   });
 }
 

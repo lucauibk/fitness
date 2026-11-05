@@ -1,20 +1,22 @@
-"""Taeglicher Coach: sammelt Plan, Block und letzte Trainings eines Profils, laesst Claude als
-Personal Trainer kurze Hinweise formulieren und legt sie in der App ab.
+"""Taeglicher Coach: sammelt Plan, Block und letzte Trainings eines Profils und laesst Claude
+als Personal Trainer hoechstens eine Nachricht in den Coach-Chat schreiben – nur wenn seit
+seiner letzten etwas Neues passiert ist. Darauf kann die Person direkt antworten (coach_chat).
 
 Der Coach aendert nie den Plan. Claude bekommt keine Werkzeuge und liefert nur Text,
-dieses Modul schreibt ausschliesslich in coach_notes. Aufgerufen von scripts/coach_daily.py."""
+gespeichert wird nur in coach_messages. Aufgerufen von scripts/coach_daily.py."""
 import json
 import re
 from datetime import date, timedelta
 
-from . import analysis, db, stats
+from . import analysis, coach_patterns, db, stats
 from .planner import blocks, explain
 
-CATEGORIES = ("plan", "progress")
-MAX_NOTES = 3
-MAX_TITLE = 60
-MAX_TEXT = 220
-EXPIRE_DAYS = 14          # offene Hinweise, die so lange niemand wegklickt, verschwinden
+MAX_TEXT = 600
+MAX_IMPULSE = 160
+RECENT_IMPULSES = 14
+DISMISSED_DAYS = 30
+MIN_NUTRITION_DAYS = 4
+RECENT_MESSAGES = 10
 HISTORY_WEEKS = 6
 CHECKIN_DAYS = 14
 WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
@@ -26,18 +28,39 @@ guter Trainer seinem Klienten zwischen zwei Terminen schreibt: auf Deutsch, per 
 und ehrlich. Du kennst ihre Ziele, ihren Plan und alles, was du ihr schon gesagt hast."""
 
 PROMPT = """<aufgabe>
-Schau dir an, was seit deiner letzten Nachricht passiert ist, und schreib höchstens {max_notes} \
-Hinweise, die jetzt für den Fortschritt am meisten bringen. Ein echter Coach:
+Es ist Morgen. Schau dir an, was seit deiner letzten Nachricht im Chat passiert ist, und schreib \
+der Person höchstens EINE Nachricht – oder keine. Neu ist zum Beispiel: eine neue Einheit, ein \
+Check-in mit schlechtem Schlaf, viel Stress oder starkem Muskelkater, ein geplanter Trainingstag, \
+der seit 3 oder mehr Tagen offen ist, ein neuer Block oder die Entlastungswoche. Gab es nichts \
+davon, schreib nichts – eine Nachricht ohne neuen Anlass nervt und wird ignoriert.
+Ein echter Coach:
 - erkennt Erfolge und sagt es, wenn etwas gut läuft (neue Bestleistung, volle Trainingswoche, \
-  sauber gesteigert). Lob nur mit Beleg aus den Daten, höchstens ein Lob pro Tag.
-- spricht Probleme offen an (ausgelassene Einheiten, Sätze weit vor dem Versagen, lange Pausen), \
-  ohne zu schimpfen.
-- erklärt in einem Halbsatz, warum etwas wichtig ist, und gibt genau eine klare nächste Handlung.
+  sauber gesteigert, nach einer Pause zurückgekommen). Lob nur mit Beleg aus den Daten.
+- spricht Probleme offen an (Sätze weit vor dem Versagen, ein geplanter Tag fällt aus), ohne zu \
+  schimpfen und ohne Fehlzählungen aufzurechnen.
+- erklärt in einem Halbsatz, warum etwas wichtig ist, und endet mit genau einer nächsten \
+  Handlung als konkretem Wenn-dann-Plan (Tag und Anlass, z. B. "Morgen nach der Arbeit: UK B").
+- bezieht sich auf die eigenen Gründe der Person ("profil.motivation"), nicht auf Druck.
+- greift auf, was die Person im Chat gefragt oder erzählt hat ("letzte_nachrichten"), und \
+  wiederholt nichts, was dort schon steht.
 - passt sich der Lage an: am Blockanfang Routine aufbauen, mitten im Block dranbleiben und sauber \
   steigern, vor der Entlastung auf Erholung achten.
-- nervt nicht: Gab es seit deinen offenen Hinweisen keine neue Einheit und nichts Neues, schreib \
-  lieber nichts als dasselbe anders formuliert.
-Du änderst nichts am Plan, die Person setzt deine Vorschläge selbst um.
+Du änderst nichts am Plan, die Person setzt deine Vorschläge selbst um. Sie kann dir antworten.
+
+Gewohnheiten erkennen: "muster.ersetzt_im_training" listet Planübungen, die die Person im \
+Training mehrfach durch eine andere ersetzt hat (auch beim letzten Mal). Prüf, ob ein dauerhafter \
+Tausch im Plan sinnvoll ist: Trifft der Ersatz dieselben Muskeln mindestens so gut für ihr Ziel, \
+und spricht im Chat nichts dagegen (z. B. "Gerät war nur besetzt")? Dann ist das ein guter Anlass \
+für deine Nachricht: Sprich die Gewohnheit an (wie oft, seit wann) und biete den Tausch an, indem \
+du ihn in "aktionen" einträgst – die App zeigt dafür einen Ersetzen-Knopf, die Person entscheidet. \
+Ist das Original klar besser, sag kurz warum und schlag keinen Tausch vor.
+
+Außerdem schreibst du JEDEN Tag einen Impuls für die Startseite der App: ein Satz, höchstens \
+{max_impulse} Zeichen, der genau zu heute passt. Steht heute Training an ("heute_geplant"), ein \
+konkreter Tipp oder Ansporn dafür (z. B. die Übung, bei der eine Steigerung fällig ist). An einem \
+Ruhetag etwas für Erholung, Schritte, Eiweiß oder Schlaf, oder echte Motivation mit Bezug zu ihrem \
+Ziel und Fortschritt. Abwechseln: nie dasselbe Thema oder dieselbe Formulierung wie in \
+"letzte_impulse". Kein Lob ohne Beleg, keine Floskeln wie "Du schaffst das!".
 </aufgabe>
 
 <was_die_app_schon_selbst_macht>
@@ -55,14 +78,19 @@ Schlag NICHTS davon vor, das erledigt die App automatisch:
 
 <worauf_du_achtest>
 Nach Wirkung sortiert:
-1. Regelmäßigkeit: Einheiten seit Blockstart gegen "block.einheiten_pro_woche_geplant", \
-   "tage_seit_letzter_einheit", Trainingstage, die nie stattfinden. Bewerte nur die Zeit seit \
-   "block.start", davor galt ein anderer Plan.
+1. Regelmäßigkeit – nach vorne schauen, nicht abrechnen: Zähl nur die laufende Woche \
+   ("diese_woche": x von y, was noch offen ist). Kam die Person nach einer Pause zurück \
+   ("pause_vor_letzter_einheit_tage" ≥ 5), würdige genau das – Zurückkommen ist der wichtigste \
+   Schritt. Ist der letzte geplante Tag ausgefallen, ist die einzige Ermahnung: nie zweimal \
+   hintereinander auslassen, plus wann der nächste Termin ist. Rechne NIE Fehlzählungen seit \
+   Blockstart vor ("2 von 7 Einheiten") – das demotiviert und ändert nichts.
 2. Ausführung laut Daten: Sätze mit RPE ≤ 6 oder unter dem Wiederholungsbereich, stark \
    schwankende Gewichte, Bestleistungen.
 3. Planaufbau: Fokus-Muskel ohne passende Übung, Beschwerden aus "profil.beschwerden", gleiche \
    Muskeln an aufeinanderfolgenden Tagen, Einheit zu lang für "profil.session_minutes".
 4. Erholung: mehrere Check-ins mit schlechtem Schlaf, hohem Stress oder starkem Muskelkater.
+Was heute ansteht, steht in "heute_geplant" – genau das sieht die Person auch auf ihrer \
+Startseite; widersprich dem nie (auch nicht im Impuls).
 In Blockwoche 1 oder bei weniger als 3 Einheiten sind Trends nicht belastbar: dann keine Aussagen \
 über Stillstand, sondern Routine, Ausführung oder Lob für den Start.
 </worauf_du_achtest>
@@ -72,29 +100,33 @@ In Blockwoche 1 oder bei weniger als 3 Einheiten sind Trends nicht belastbar: da
   Einheiten). Nichts erfinden, keine allgemeinen Tipps ohne Datenbezug.
 - Ein Hinweis = eine Sache. Grenzen der App gelten auch für dich (nie über MRV, keine Entlastung \
   ohne Signale). Keine medizinischen Ratschläge; bei Schmerzen an Arzt oder Physio verweisen.
-- Nichts wiederholen aus "offene_hinweise" oder "weggeklickt" (das wollte die Person nicht).
-- Ist ein offener Hinweis erledigt oder überholt, nimm seine id in "erledigt" auf.
-- category: "plan" (Aufbau, Übungen, Tage) oder "progress" (Verlauf, Ausführung, Regelmäßigkeit, \
-  Erholung, Lob).
-- title höchstens {max_title} Zeichen, text höchstens {max_text} Zeichen.
-- exercise: exakter Übungsname aus dem Plan oder null.
+- Nicht wiederholen: kein Thema (z. B. "RPE bei Übung X"), das in "letzte_impulse", \
+  "letzte_nachrichten" oder "weggeklickt" schon vorkam – "weggeklickt" wollte die Person nicht.
+- Ernährung nur bewerten, wenn "ernaehrung.tage_mit_eintrag" mindestens {min_nutrition} ist; \
+  sonst höchstens zum Eintragen ermuntern, nie "du isst zu wenig/zu viel".
+- Höchstens {max_text} Zeichen, per Du, wie eine kurze Messenger-Nachricht. Kurze Absätze mit \
+Leerzeile dazwischen, **fett** nur für die eine Kernaussage, keine Überschriften oder Emojis.
 </regeln>
 
 <beispiele>
-Gut (Lob): {{"category": "progress", "title": "Starker Start in den Block", "text": "Do und Fr \
-direkt beide Einheiten durchgezogen, genau so baut sich die Routine auf. Halt den Rhythmus: \
-nächste Einheit OK B.", "exercise": null}}
-Gut (Ausführung): {{"category": "progress", "title": "Rudern Kabel: letzten Satz ausreizen", \
-"text": "Am 09.10. endete Satz 3 bei 60x6 @ RPE 6, da war noch viel Luft. Bleib bei 60 kg und geh \
-bis RPE 8–9, nur so erkennt die App, wann sie steigern darf.", "exercise": "Rudern Kabel"}}
-Schlecht: "Mehr Sätze für Waden" (macht der Block selbst), "Achte auf deine Ernährung" (kein \
-Datenbezug), "Super gemacht!" (Lob ohne Beleg).
+Gut (Lob): {{"message": "Do und Fr direkt beide Einheiten durchgezogen, genau so baut sich die \
+Routine auf. Halt den Rhythmus: nächste Einheit OK B."}}
+Gut (Ausführung): {{"message": "Rudern Kabel am 09.10.: Satz 3 endete bei 60x6 @ RPE 6, da war noch \
+viel Luft. Bleib bei 60 kg und geh bis RPE 8–9, nur so erkennt die App, wann sie steigern darf."}}
+Gut (Zurückkommen): {{"message": "Nach 9 Tagen Pause gestern direkt die volle OK-Einheit, das \
+ist der wichtigste Schritt überhaupt. **Diese Woche 1 von 3** – Fr nach der Arbeit UK B, dann \
+läuft der Rhythmus wieder."}}
+Schlecht: "Seit Blockstart erst 2 von 7 Einheiten" (Fehlzählung, demotiviert), \
+"Mehr Sätze für Waden" (macht der Block selbst), "Achte auf deine Ernährung" (kein \
+Datenbezug), "Super gemacht!" (Lob ohne Beleg), dieselbe Botschaft wie gestern.
 </beispiele>
 
 <ausgabe>
 Denk zuerst kurz in <analyse>…</analyse> nach (höchstens 8 Stichpunkte). Gib dann genau einen Block aus:
-<hinweise>{{"notes": [{{"category": "...", "title": "...", "text": "...", "exercise": null}}], "erledigt": []}}</hinweise>
-Keine Hinweise ist eine gültige Antwort: {{"notes": [], "erledigt": []}}
+<nachricht>{{"impuls": "...", "message": "...", "aktionen": []}}</nachricht>
+"aktionen" nur bei einem Tausch-Angebot in der Nachricht, sonst leer: \
+[{{"typ": "ersetzen", "plan_id": <plan_id aus muster>, "neu": "<exakter Name des Ersatzes>"}}]
+Der Impuls ist Pflicht. Keine Nachricht ist gültig: <nachricht>{{"impuls": "...", "message": null}}</nachricht>
 </ausgabe>
 
 <daten>
@@ -103,7 +135,9 @@ Keine Hinweise ist eine gültige Antwort: {{"notes": [], "erledigt": []}}
 
 
 def _date(iso):
-    return (iso or "")[:10]
+    """Ortsdatum als ISO-Text – eine Einheit um 00:30 gehoert zum neuen Tag, nicht zum UTC-Vortag."""
+    d = stats._local_date(iso)
+    return d.isoformat() if d else ""
 
 
 def _weekday(iso):
@@ -155,14 +189,14 @@ def context(profile_id):
     workouts = _workouts(profile_id, min(start, today - timedelta(weeks=HISTORY_WEEKS)))
     since_start = [w for w in workouts if w["datum"] >= start.isoformat()]
     last = workouts[-1]["datum"] if workouts else None
-    notes = db.rows("SELECT id, date, status, title, text FROM coach_notes WHERE profile_id=?"
-                    " AND (status='open' OR (status='dismissed' AND date >= ?)) ORDER BY date",
-                    (profile_id, (today - timedelta(days=30)).isoformat()))
+    recent = db.rows("SELECT role, source, created_at, text FROM coach_messages WHERE profile_id=?"
+                     " AND status='ok' ORDER BY id DESC LIMIT ?", (profile_id, RECENT_MESSAGES))
     return {
         "heute": f"{WEEKDAYS[today.weekday()]} {today.isoformat()}",
         "profil": {"ziel": profile.get("goal"), "erfahrung": profile.get("experience"),
                    "fokus": profile.get("focus"), "beschwerden": profile.get("limitations"),
-                   "session_minutes": profile.get("session_minutes")},
+                   "session_minutes": profile.get("session_minutes"),
+                   "motivation": profile.get("motivation")},
         "block": {"start": start.isoformat(), "woche": st["week"], "wochen": st["weeks"],
                   "entlastung": st["deload"], "rir_ziel": st["rir"],
                   "einheiten_pro_woche_geplant": check.get("sessions"),
@@ -182,15 +216,52 @@ def context(profile_id):
         "trainings": workouts,
         "tage_seit_letzter_einheit": (today - date.fromisoformat(last)).days if last else None,
         "checkins": _checkins(profile_id, today - timedelta(days=CHECKIN_DAYS)),
-        "offene_hinweise": [{k: n[k] for k in ("id", "date", "title", "text")}
-                            for n in notes if n["status"] == "open"],
-        "weggeklickt": [n["title"] for n in notes if n["status"] == "dismissed"],
+        "muster": {"ersetzt_im_training": coach_patterns.substitutions(profile_id, today)},
+        "heute_geplant": _today_plan(profile_id, split, today, workouts),
+        "diese_woche": stats.week_status(profile_id, split, today),
+        "pause_vor_letzter_einheit_tage": _gap_before_last(workouts),
+        "weggeklickt": [r["title"] for r in db.rows(
+            "SELECT title FROM coach_notes WHERE profile_id=? AND status='dismissed' AND date >= ?",
+            (profile_id, (today - timedelta(days=DISMISSED_DAYS)).isoformat()))],
+        "letzte_impulse": [r["text"] for r in db.rows(
+            "SELECT text FROM coach_impulses WHERE profile_id=? ORDER BY date DESC LIMIT ?",
+            (profile_id, RECENT_IMPULSES))],
+        "letzte_nachrichten": [{"von": "du" if m["role"] == "coach" else "person",
+                                "datum": _date(m["created_at"]), "text": m["text"]}
+                               for m in reversed(recent)],
     }
 
 
+def _today_plan(profile_id, split, today, workouts):
+    """Was heute dran ist – dieselbe Rechnung wie die Startseite (stats.schedule_day)."""
+    day, fixed, note = stats.schedule_day(profile_id, split, today)
+    trained = any(w["datum"] == today.isoformat() for w in workouts)
+    if not day:
+        return {"tag": None, "heute_schon_trainiert": trained}
+    return {"tag": day["label"], "wie_geplant": fixed,
+            "hinweis": {"nachgeholt": "nachgeholt von einem früheren Tag dieser Woche",
+                        "erholung": "eigentlich fällig, aber die Muskeln von gestern brauchen noch Ruhe"
+                        }.get(note) or (None if fixed else "kein fester Termin heute, nächster offener Tag"),
+            "heute_schon_trainiert": trained}
+
+
+def _gap_before_last(workouts):
+    """Tage Pause vor der letzten Einheit – zum Erkennen eines Wiedereinstiegs."""
+    days = sorted({date.fromisoformat(w["datum"]) for w in workouts if w["datum"]})
+    return (days[-1] - days[-2]).days if len(days) >= 2 else None
+
+
 def prompt(ctx):
-    return PROMPT.format(max_notes=MAX_NOTES, max_title=MAX_TITLE, max_text=MAX_TEXT,
-                         data=json.dumps(ctx, ensure_ascii=False, default=str))
+    return PROMPT.format(max_text=MAX_TEXT, max_impulse=MAX_IMPULSE, min_nutrition=MIN_NUTRITION_DAYS, data=json.dumps(ctx, ensure_ascii=False, default=str))
+
+
+def _clip_text(text, limit):
+    """Wie _clip, aber Absaetze bleiben: Leerzeichen je Zeile zusammenfassen, hoechstens eine
+    Leerzeile zwischen Absaetzen."""
+    paras = ["\n".join(" ".join(line.split()) for line in p.splitlines() if line.strip())
+             for p in re.split(r"\n\s*\n", str(text or ""))]
+    out = "\n\n".join(p for p in paras if p).strip()
+    return out if len(out) <= limit else out[:limit - 1].rstrip() + "…"
 
 
 def _clip(text, limit):
@@ -198,79 +269,23 @@ def _clip(text, limit):
     return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
-def _payload(raw):
-    """JSON aus dem <hinweise>-Block holen; zur Not das erste Objekt bzw. die erste Liste."""
+def parse(raw):
+    """{"impuls": text|None, "message": text|None} aus dem <nachricht>-Block, gekuerzt.
+    message None = heute nichts Neues. ValueError nur, wenn gar kein JSON-Objekt da ist."""
     raw = raw or ""
-    tag = re.search(r"<hinweise>(.*?)</hinweise>", raw, re.S)
-    body = tag.group(1) if tag else raw
-    match = re.search(r"\{.*\}|\[.*\]", body, re.S)
+    tag = re.search(r"<nachricht>(.*?)</nachricht>", raw, re.S)
+    match = re.search(r"\{.*\}", tag.group(1) if tag else raw, re.S)
     if not match:
         raise ValueError("Kein JSON in der Antwort")
     data = json.loads(match.group(0))
-    if isinstance(data, list):
-        return {"notes": data, "erledigt": []}
-    if not isinstance(data, dict) or not isinstance(data.get("notes", []), list):
-        raise ValueError("Antwort hat kein notes-Feld")
-    return data
+    if not isinstance(data, dict) or not ({"message", "impuls"} & set(data)):
+        raise ValueError("Antwort hat weder impuls noch message")
 
+    def text(key, limit, clip=_clip):
+        value = data.get(key)
+        return (clip(value, limit) or None) if isinstance(value, str) else None
 
-def parse(raw, profile_id):
-    """Claude-Antwort pruefen: {"notes": [...], "resolved": [ids]}. Unbrauchbares fliegt raus,
-    statt den Lauf scheitern zu lassen. ValueError nur, wenn gar kein JSON da ist."""
-    data = _payload(raw)
-    names = {r["name"].casefold(): r["exercise_id"] for r in db.rows(
-        "SELECT DISTINCT e.name, e.id AS exercise_id FROM split_exercises se"
-        " JOIN exercises e ON e.id = se.exercise_id JOIN split_days d ON d.id = se.split_day_id"
-        " JOIN splits s ON s.id = d.split_id WHERE s.profile_id=?", (profile_id,))}
-    open_ids = {n["id"] for n in open_notes(profile_id)}
-    resolved = {i for i in data.get("erledigt") or [] if isinstance(i, int) and i in open_ids}
-    seen = {n["title"].casefold() for n in open_notes(profile_id) if n["id"] not in resolved}
-    out = []
-    for item in data.get("notes") or []:
-        if not isinstance(item, dict) or item.get("category") not in CATEGORIES:
-            continue
-        title, text = _clip(item.get("title"), MAX_TITLE), _clip(item.get("text"), MAX_TEXT)
-        if not title or not text or title.casefold() in seen:
-            continue
-        seen.add(title.casefold())
-        ex = item.get("exercise")
-        out.append({"category": item["category"], "title": title, "text": text,
-                    "exercise_id": names.get(ex.casefold()) if isinstance(ex, str) else None})
-        if len(out) == MAX_NOTES:
-            break
-    return {"notes": out, "resolved": sorted(resolved)}
-
-
-def store(profile_id, notes):
-    day = stats.today().isoformat()
-    with db.connect() as c:
-        for n in notes:
-            c.execute("INSERT INTO coach_notes (profile_id, date, category, title, text, exercise_id)"
-                      " VALUES (?,?,?,?,?,?)",
-                      (profile_id, day, n["category"], n["title"], n["text"], n["exercise_id"]))
-
-
-def resolve(profile_id, note_ids):
-    """Vom Coach selbst als erledigt markiert – zaehlt nicht als 'weggeklickt'."""
-    with db.connect() as c:
-        for i in note_ids:
-            c.execute("UPDATE coach_notes SET status='resolved' WHERE id=? AND profile_id=? AND status='open'",
-                      (i, profile_id))
-
-
-def expire(profile_id):
-    cutoff = (stats.today() - timedelta(days=EXPIRE_DAYS)).isoformat()
-    with db.connect() as c:
-        c.execute("UPDATE coach_notes SET status='expired'"
-                  " WHERE profile_id=? AND status='open' AND date < ?", (profile_id, cutoff))
-
-
-def open_notes(profile_id):
-    return db.rows("SELECT n.id, n.date, n.category, n.title, n.text, n.exercise_id, e.name AS exercise"
-                   " FROM coach_notes n LEFT JOIN exercises e ON e.id = n.exercise_id"
-                   " WHERE n.profile_id=? AND n.status='open' ORDER BY n.date DESC, n.id", (profile_id,))
-
-
-def dismiss(note_id):
-    with db.connect() as c:
-        c.execute("UPDATE coach_notes SET status='dismissed' WHERE id=?", (note_id,))
+    actions = data.get("aktionen") if isinstance(data.get("aktionen"), list) else []
+    message = text("message", MAX_TEXT, _clip_text)
+    return {"impuls": text("impuls", MAX_IMPULSE), "message": message,
+            "aktionen": actions if message else []}     # ein Knopf ohne Nachricht waere ohne Erklaerung

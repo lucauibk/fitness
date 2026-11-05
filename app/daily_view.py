@@ -3,7 +3,7 @@ Mobility-Vorschlag, Wochen-Streak und Kalorienbilanz."""
 import logging
 from datetime import timedelta
 
-from . import activity, coach, db, mobility, nutrition, readiness, session_review, stats
+from . import activity, coach_chat, db, mobility, nutrition, readiness, rewards, session_review, stats
 
 # "Heute" zeigt nur frische Plan-Aenderungen; die ganze Liste steht im Plan unter "Was sich geaendert hat"
 EVENT_DAYS = 3
@@ -79,13 +79,15 @@ def build(profile_id):
     done_mobility = db.one("SELECT 1 AS x FROM mobility_log WHERE profile_id=? AND date=? AND routine=?",
                            (profile_id, day_iso, key))
     trained_today = any(w["active"] and w["today"] for w in ach["week"])
+    done_today = today_workout(profile_id, base.get("last_workout"))
     return {
         **base,
         "date": day_iso,
         "block": block_info["block"] if block_info else None,
         "plan_events": recent_events(block_info["events"]) if block_info else [],
-        "coach_notes": coach.open_notes(profile_id),
-        "today_workout": today_workout(profile_id, base.get("last_workout")),
+        "coach": coach_chat.summary(profile_id, done_today),
+        "rewards": rewards.card(profile_id),
+        "today_workout": done_today,
         "checkin": checkin,
         "sore_today": sore,
         "alternative": alternative,

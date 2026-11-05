@@ -6,6 +6,8 @@ import { startDraft, hasDraft, getDraft } from "./training.js";
 import { weekStrip } from "./erfolge.js";
 import { ring } from "./ernaehrung.js";
 import * as outbox from "./outbox.js";
+import { openTopf, topfCard } from "./topf.js";
+import { openCoach, prose } from "./coach.js";
 
 let root;
 let data = null;
@@ -69,31 +71,20 @@ function readinessCard(c) {
 }
 
 // ---------------------------------------------------------- Coach-Hinweise
-/** Vorschlaege des taeglichen Coach-Laufs. Nur Hinweise: umgesetzt wird von Hand. */
+/** Coach: Impuls des Tages (Morgen-Coach), sonst Begruessung oder Tipp – und der Weg in den Chat. */
 function coachCard() {
-  const notes = data.coach_notes || [];
-  if (!notes.length) return "";
-  return `<div class="card coach-notes"><p class="eyebrow">${icon("spark")} Coach-Hinweise</p>
-    ${notes.map((n) => `<div class="coach-note" data-note="${n.id}">
-      <div class="grow"><p class="coach-note-title">${esc(n.title)}${n.exercise ? ` <small>· ${esc(n.exercise)}</small>` : ""}</p>
-        <p class="hint">${esc(n.text)}</p></div>
-      <button type="button" class="icon-btn" data-dismiss-note="${n.id}" aria-label="Hinweis ausblenden">${icon("x")}</button>
-    </div>`).join("")}</div>`;
-}
-
-async function dismissNote(btn) {
-  const id = Number(btn.dataset.dismissNote);
-  btn.disabled = true;
-  try {
-    await api(`coach-notes/${id}/dismiss`, { method: "POST" });
-  } catch (e) {
-    btn.disabled = false;
-    return toast(e.message, { error: true });
-  }
-  data.coach_notes = data.coach_notes.filter((n) => n.id !== id);
-  const card = btn.closest(".coach-notes");
-  if (data.coach_notes.length) btn.closest(".coach-note").remove();
-  else card.remove();
+  const c = data.coach || {};
+  const imp = c.impulse || {};
+  const label = { impuls: "Dein Coach für heute", hallo: "Dein Coach", tipp: "Tipp des Tages",
+    erledigt: "Heute erledigt" }[imp.kind] || "Coach";
+  return `<div class="card mini-card coach-card" role="button" tabindex="0" data-coach>
+    <span class="row-icon">${icon("chat")}</span>
+    <div class="grow"><p class="eyebrow">${label}</p>
+      ${imp.text ? `<div class="coach-last">${prose(imp.text)}</div>` : ""}
+      ${c.unread ? `<p class="coach-unread"><span class="pill ok">${c.unread === 1 ? "1 neue Nachricht" : `${c.unread} neue Nachrichten`}</span></p>` : ""}
+    </div>
+    <span class="btn small tonal">${c.unread ? "Lesen" : "Fragen"}</span>
+  </div>`;
 }
 
 // --------------------------------------------------------------- Karten
@@ -224,6 +215,7 @@ function render() {
       ${icon("right", "chev")}</a>` : ""}
     ${coachCard()}
     ${workoutCard()}
+    ${topfCard(d.rewards)}
     ${(d.plan_events || []).length ? `<div class="card quiet-events"><p class="eyebrow">${icon("spark")} Dein Plan passt sich an</p>
       ${d.plan_events.map((e) => `<p class="hint">${esc(e.text)}</p>`).join("")}</div>` : ""}
     ${showForm ? checkinForm(d.checkin) : readinessCard(d.checkin)}
@@ -451,13 +443,13 @@ export async function mount(el) {
     if (save) return saveCheckin(save);
     if (t("[data-edit-checkin]")) { editingCheckin = true; return render(); }
     if (t("[data-cancel-checkin]")) { editingCheckin = false; return render(); }
-    const note = t("[data-dismiss-note]");
-    if (note) return dismissNote(note);
+    if (t("[data-coach]")) return openCoach();
     const start = t("[data-start]");
     if (start) return begin(Number(start.dataset.start));
     if (t("[data-pick]")) return pickDay();
     const show = t("[data-show-workout]");
     if (show) return showWorkout(Number(show.dataset.showWorkout));
+    if (t("[data-topf]")) return openTopf();
     const mob = t("[data-mobility]");
     if (mob) return openMobility(mob.dataset.mobility);
     const go = t("[data-goto]");
@@ -492,3 +484,8 @@ async function addWater(ml) {
     toast(e.message, { error: true });
   }
 }
+
+// Chat gelesen oder neue Antwort: "neu"-Punkt und letzte Nachricht auffrischen
+window.addEventListener("coach-seen", () => {
+  if (data && root?.isConnected) load().catch(() => {});
+});

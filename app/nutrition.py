@@ -26,6 +26,11 @@ MEALS = {"fruehstueck": "Frühstück", "mittag": "Mittagessen", "abend": "Abende
          "snack": "Snacks"}
 ACTIVITY = {"niedrig": 1.3, "mittel": 1.45, "hoch": 1.6}
 GOAL_DELTA = {"abnehmen": -400, "aufbau": 250, "kraft": 150, "fitness": 0}
+MACROS = ("kcal", "protein", "carbs", "fat")
+# Naehrwerte im Detail: nicht jedes Lebensmittel kennt sie (Open Food Facts oft ohne), daher
+# bleibt ein unbekannter Wert NULL statt 0 – sonst waere die Tagessumme still zu niedrig.
+DETAILS = ("fiber", "sugar", "sat_fat", "salt")
+NUTRIENTS = MACROS + DETAILS
 
 
 # ------------------------------------------------------------- Ziele
@@ -83,23 +88,37 @@ def goals(profile):
         if not active["kcal"] and calc:
             active = {k: calc[k] for k in ("kcal", "protein", "carbs", "fat")}
     return {"auto": auto, "goals": active, "computed": calc, "missing": missing,
-            "activity_level": profile.get("activity_level")}
+            "activity_level": profile.get("activity_level"), "reference": reference(active.get("kcal"))}
+
+
+def reference(kcal):
+    """Richtwerte fuer die Detail-Naehrwerte. "min": mindestens so viel ist gut, "max": darunter
+    bleiben. Ballaststoffe 30 g (DGE); freier Zucker und gesaettigte Fette je hoechstens 10 % der
+    Energie (WHO); Salz 6 g (DGE). Zucker im BLS ist Gesamtzucker inkl. Obst – Orientierung, keine Grenze."""
+    out = {"fiber": {"value": 30, "kind": "min"}, "salt": {"value": 6, "kind": "max"}}
+    if kcal:
+        out["sugar"] = {"value": round(kcal * 0.10 / 4), "kind": "max"}
+        out["sat_fat"] = {"value": round(kcal * 0.10 / 9), "kind": "max"}
+    return out
 
 
 def day(profile_id, day_iso):
     # Portion des Lebensmittels mitliefern, damit ein Eintrag in Portionen bearbeitet werden kann
-    entries = db.rows("SELECT l.*, f.serving_g, f.serving_label, f.pack_g FROM food_log l"
+    from .portions import units
+    entries = db.rows("SELECT l.*, f.serving_g, f.serving_label, f.pack_g, f.source FROM food_log l"
                       " LEFT JOIN foods f ON f.id = l.food_id"
                       " WHERE l.profile_id=? AND l.date=? ORDER BY l.id", (profile_id, day_iso))
-    totals = {k: round(sum(e[k] or 0 for e in entries), 1) for k in ("kcal", "protein", "carbs", "fat")}
+    for e in entries:   # natuerliche Einheiten, damit "2 Stück · 300 g" statt nur Gramm erscheint
+        e["units"] = units(e) if e["food_id"] else []
     meals = {k: {"label": v, "entries": [e for e in entries if e["meal"] == k],
-                 "kcal": round(sum(e["kcal"] or 0 for e in entries if e["meal"] == k))}
+                 "kcal": round(sum(e["kcal"] or 0 for e in entries if e["meal"] == k)),
+                 "totals": sums([e for e in entries if e["meal"] == k])}
              for k, v in MEALS.items()}
     water = db.one("SELECT COALESCE(SUM(ml), 0) AS ml FROM water_log WHERE profile_id=? AND date=?",
                    (profile_id, day_iso))["ml"]
     burned = db.one("SELECT COALESCE(SUM(kcal), 0) AS kcal FROM cardio WHERE profile_id=? AND date=?",
                     (profile_id, day_iso))["kcal"]
-    return {"date": day_iso, "meals": meals, "totals": totals, "water_ml": max(0, water),
+    return {"date": day_iso, "meals": meals, "totals": sums(entries), "water_ml": max(0, water),
             "burned_kcal": round(burned or 0)}
 
 
@@ -128,9 +147,21 @@ def water_goals(profile):
             "from_weight": latest_weight(profile["id"]) is not None}
 
 
+def sums(entries):
+    """Summen aller Naehrwerte. "missing": je Detail-Wert, wie viele Eintraege ihn nicht kennen –
+    dann ist die Summe eine Untergrenze und die Anzeige sagt das."""
+    out = {k: round(sum(e.get(k) or 0 for e in entries), 2 if k == "salt" else 1) for k in NUTRIENTS}
+    out["missing"] = {k: sum(1 for e in entries if e.get(k) is None) for k in DETAILS}
+    return out
+
+
 def portion(food, grams):
+    """Werte fuer eine Menge. Makros fehlend = 0 (wie bisher), Detail-Werte fehlend = None."""
     f = grams / 100
-    return {k: round((food.get(k) or 0) * f, 1) for k in ("kcal", "protein", "carbs", "fat")}
+    out = {k: round((food.get(k) or 0) * f, 1) for k in MACROS}
+    out.update({k: None if food.get(k) is None else round(food[k] * f, 2 if k == "salt" else 1)
+                for k in DETAILS})
+    return out
 
 
 # ------------------------------------------------------ Open Food Facts
@@ -207,12 +238,17 @@ def _from_off(p):
         "protein": _num(n.get("proteins_100g")),
         "carbs": _num(n.get("carbohydrates_100g")),
         "fat": _num(n.get("fat_100g")),
+        "fiber": _num(n.get("fiber_100g")),
+        "sugar": _num(n.get("sugars_100g")),
+        "sat_fat": _num(n.get("saturated-fat_100g")),
+        "salt": _num(n.get("salt_100g")),
         "serving_g": _num(p.get("serving_quantity")) or None,
         "serving_label": _serving_label(p.get("serving_size")),
         "pack_g": _num(p.get("product_quantity")) or _grams(p.get("quantity")),
         "source": "off",
         # nur fuer die Reihenfolge der Treffer, wird nicht gespeichert
         "dach": bool(DACH & set(p.get("countries_tags") or [])),
+        "at": "en:austria" in (p.get("countries_tags") or []),
     }
 
 
@@ -251,7 +287,39 @@ def matches(food, query):
     return all(w in hay for w in norm(query).split())
 
 
-def score(food, query, uses=0):
+# Zubereitungen, die bei einer allgemeinen Suche nicht oben stehen sollen ("Apfel" -> "Apfel roh",
+# nicht "Apfel getrocknet"). Steht das Wort in der Suche, zaehlt es nicht.
+PREPARED = ("gedunstet", "getrocknet", "tiefgefroren", "pulver", "konserve", "trockenprodukt",
+            "angereichert", "gegrillt", "geschmort", "frittiert", "gebraten", "gegart", "kandiert",
+            "eingelegt", "gesusst", "zubereitet", "instant", "reduziert", "babynahrung", "glutenfrei",
+            "laktosefrei", "angereichert")
+
+
+def _generic_bonus(food, query):
+    """Allgemeine Lebensmittel (BLS) vor Zubereitungen: "roh" vorne, Zubereitungswoerter hinten."""
+    if food.get("source") != "bls":
+        return 0
+    name = norm(food.get("name"))
+    q = norm(query)
+    s = 15 if name.endswith(" roh") or " roh " in name else 0
+    s -= 25 * sum(1 for w in PREPARED if w in name and w not in q)
+    if " mit " in f" {name} " and "mit" not in q.split():
+        s -= 20   # "Quark mit Konfitüre" ist ein Gericht, nicht der Quark
+    return s
+
+
+def score(food, query, uses=0, vs=None):
+    """Beste Relevanz ueber die Suchanfrage und ihre AT/DE-Uebersetzungen.
+    vs: vorberechnete food_catalog.variants(query) – bei tausenden Zeilen nicht je Zeile rechnen."""
+    from .food_catalog import canonical, variants
+    s = max(_score(food, v, uses) for v in (vs or variants(query))) + _generic_bonus(food, query)
+    c = canonical(query)
+    if c and all(w in norm(f"{food.get('name') or ''} {food.get('brand') or ''}") for w in c.split()):
+        s += 15
+    return s
+
+
+def _score(food, query, uses=0):
     """Relevanz eines Treffers: Name vor Marke, exakt vor Wortanfang vor Teilwort.
     Marken werden ohne Leer- und Satzzeichen und etwas unscharf verglichen, damit
     "macdonalds" auch "McDonald's" findet."""
@@ -262,10 +330,17 @@ def score(food, query, uses=0):
     name, brand = norm(food.get("name")), compact(food.get("brand"))
     tokens = f"{name} {norm(food.get('brand'))}".split()
     s = 0.0
+    # Als ganzes Wort: "Joghurt mild" vor "Joghurteis" und "Joghurt-Dip" (Bindestrich = Gericht)
+    plain = norm((food.get("name") or "").replace("-", " zzbind "))
+    if re.search(rf"(^| ){re.escape(q)}( (?!zzbind)|$)", plain):
+        s += 30
+        if plain.startswith(q + " ") or plain == q:
+            s += 20
     if name == q:
         s += 100
     elif name.startswith(q):
-        s += 60
+        # "Schinken" ganz vorne schlaegt "Schinkenwurst" (nur Wortanfang einer Zusammensetzung)
+        s += 60 if name[len(q):len(q) + 1] in ("", " ") else 35
     elif re.search(rf"\b{re.escape(q)}", name):
         s += 40
     elif q in name:
@@ -283,6 +358,8 @@ def score(food, query, uses=0):
         s += 45
     if food.get("dach"):
         s += 25
+    if food.get("at"):   # in Oesterreich verkauft (Spar, Billa, Hofer, ...) – die App wird dort benutzt
+        s += 15
     if food.get("serving_g"):
         s += 5
     s += min(uses, 10) * 4   # oft gegessen -> weiter oben
@@ -290,8 +367,10 @@ def score(food, query, uses=0):
 
 
 def rank(foods, query, uses=None):
+    from .food_catalog import variants
     uses = uses or {}
-    return sorted(foods, key=lambda f: -score(f, query, uses.get(f.get("id"), 0)))
+    vs = variants(query)
+    return sorted(foods, key=lambda f: -score(f, query, uses.get(f.get("id"), 0), vs))
 
 
 # --------------------------------------------------------------- Suche
@@ -406,11 +485,15 @@ def product_off(barcode):
 
 def remember(food):
     """Produkt lokal ablegen (einmal pro Barcode) und die gespeicherte Zeile liefern."""
-    food = {k: v for k, v in food.items() if k != "dach"}
+    from .food_catalog import search_text
+    food = {k: v for k, v in food.items() if k not in ("dach", "at")}
+    food["search"] = search_text(food)
     if food.get("barcode"):
         have = db.one("SELECT * FROM foods WHERE barcode=?", (food["barcode"],))
         if have:
-            return have
+            # Frueher uebernommene Produkte kannten Zucker, Salz usw. nicht: fehlende Werte ergaenzen
+            fill = {k: food[k] for k in DETAILS if have.get(k) is None and food.get(k) is not None}
+            return db.update_row("foods", have["id"], fill) if fill else have
     elif food.get("source", "eigen") == "eigen":
         # Ohne Barcode entstand frueher bei jedem Anlegen eine Dublette. Gleicher Name und
         # gleiche Marke = dasselbe Lebensmittel: die neuen Werte uebernehmen.
