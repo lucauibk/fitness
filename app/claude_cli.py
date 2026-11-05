@@ -14,8 +14,17 @@ log = logging.getLogger(__name__)
 RETRY_PAUSE = 30
 
 
+def _exe():
+    return shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+
+
+def available():
+    """Ist Claude Code auf diesem Rechner installiert? (Anmeldung wird erst beim Aufruf geprueft.)"""
+    return os.access(_exe(), os.X_OK)
+
+
 def ask(text, system, model, timeout=300):
-    exe = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+    exe = _exe()
     with tempfile.TemporaryDirectory() as cwd:
         res = subprocess.run(
             [exe, "-p", "--output-format", "json", "--model", model, "--tools", "",

@@ -129,11 +129,12 @@ def test_measurements_route_liefert_trend_mit_profilziel(profile_id):
 
 # ------------------------------------------------------------ KI-Tipps
 import json
+import subprocess
 
 import pytest
 from fastapi import HTTPException
 
-from app import ai
+from app import body_advice, claude_cli
 
 
 def _messungen(profile_id):
@@ -144,9 +145,9 @@ def _messungen(profile_id):
                                "weight_kg": kg})
 
 
-def test_advice_ohne_schluessel_ist_ein_klarer_fehler(profile_id, monkeypatch):
+def test_advice_ohne_claude_code_ist_ein_klarer_fehler(profile_id, monkeypatch):
     from app.routes import body as routes
-    monkeypatch.setattr(ai, "available", lambda: False)
+    monkeypatch.setattr(claude_cli, "available", lambda: False)
     with pytest.raises(HTTPException) as e:
         routes.advice(profile_id)
     assert e.value.status_code == 400
@@ -154,8 +155,8 @@ def test_advice_ohne_schluessel_ist_ein_klarer_fehler(profile_id, monkeypatch):
 
 def test_advice_ohne_messung_wird_abgelehnt(profile_id, monkeypatch):
     from app.routes import body as routes
-    monkeypatch.setattr(ai, "available", lambda: True)
-    monkeypatch.setattr(ai, "ask", lambda *a, **k: pytest.fail("ohne Daten darf nichts verschickt werden"))
+    monkeypatch.setattr(claude_cli, "available", lambda: True)
+    monkeypatch.setattr(claude_cli, "ask", lambda *a, **k: pytest.fail("ohne Daten darf nichts verschickt werden"))
     with pytest.raises(HTTPException) as e:
         routes.advice(profile_id)
     assert e.value.status_code == 400
@@ -168,28 +169,46 @@ def test_advice_schickt_nur_zahlen_und_eckdaten_und_begrenzt_die_antwort(profile
     db.update_row("profiles", profile_id, {"name": "Geheimer Name"})
     seen = {}
 
-    def fake(prompt, max_tokens=500, images=()):
-        seen["prompt"] = prompt
-        return {"text": json.dumps({"gut": ["a", "b", "c", "d", " "], "schlecht": [],
-                                    "verbessern": ["x" * 500, 7]})}
-    monkeypatch.setattr(ai, "available", lambda: True)
-    monkeypatch.setattr(ai, "ask", fake)
+    def fake(text, system, model, timeout=300):
+        seen.update(text=text, system=system)
+        return json.dumps({"gut": ["a", "b", "c", "d", " "], "schlecht": [], "verbessern": ["x" * 500, 7]})
+    monkeypatch.setattr(claude_cli, "available", lambda: True)
+    monkeypatch.setattr(claude_cli, "ask", fake)
     res = routes.advice(profile_id)
-    assert "Geheimer Name" not in seen["prompt"]
-    assert "Keine Tipps zu Training, Ernährung" in seen["prompt"]       # nur Körpermessung
-    assert "abnehmen" in seen["prompt"] and "Gewicht" in seen["prompt"]
-    assert res["gut"] == ["a", "b", "c"]                        # höchstens 3, Leeres raus
+    assert "Geheimer Name" not in seen["text"]
+    assert "abnehmen" in seen["text"] and "Gewicht" in seen["text"]
+    assert "Keine Tipps zu Training, Ernährung" in seen["system"]       # nur Körpermessung
+    assert res["gut"] == ["a", "b", "c"]                                # höchstens 3, Leeres raus
     assert res["schlecht"] == []
-    assert len(res["verbessern"]) == 1 and len(res["verbessern"][0]) == ai.ADVICE_MAX_CHARS
+    assert len(res["verbessern"]) == 1 and len(res["verbessern"][0]) == body_advice.MAX_CHARS
 
 
-@pytest.mark.parametrize("antwort", [{"error": "KI gerade nicht erreichbar (HTTP 529)."},
-                                     {"text": "kein json"}, {"text": "{}"}])
-def test_advice_ki_fehler_werden_zu_422(profile_id, monkeypatch, antwort):
+def test_tipps_werden_am_satzende_gekuerzt_nicht_mittendrin():
+    lang = "Das ist ein ganzer Satz mit etwas Länge. " * 12
+    out = body_advice.parse(json.dumps({"gut": [lang], "schlecht": [], "verbessern": []}))["gut"][0]
+    assert len(out) <= body_advice.MAX_CHARS and out.endswith(".")
+
+
+@pytest.mark.parametrize("fehler", [RuntimeError("claude Exit 1"), OSError("nicht gefunden"),
+                                    subprocess.TimeoutExpired("claude", 90), "kein json", "{}"])
+def test_advice_fehler_werden_zu_422(profile_id, monkeypatch, fehler):
     from app.routes import body as routes
     _messungen(profile_id)
-    monkeypatch.setattr(ai, "available", lambda: True)
-    monkeypatch.setattr(ai, "ask", lambda *a, **k: antwort)
+
+    def fake(*a, **k):
+        if isinstance(fehler, Exception):
+            raise fehler
+        return fehler
+    monkeypatch.setattr(claude_cli, "available", lambda: True)
+    monkeypatch.setattr(claude_cli, "ask", fake)
     with pytest.raises(HTTPException) as e:
         routes.advice(profile_id)
     assert e.value.status_code == 422
+
+
+def test_measurements_route_meldet_ob_tipps_moeglich_sind(profile_id, monkeypatch):
+    from app.routes import body as routes
+    monkeypatch.setattr(claude_cli, "available", lambda: True)
+    assert routes.list_measurements(profile_id)["tips_available"] is True
+    monkeypatch.setattr(claude_cli, "available", lambda: False)
+    assert routes.list_measurements(profile_id)["tips_available"] is False

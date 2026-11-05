@@ -54,7 +54,7 @@ let tipsBusy = false;
 let tipsFailedSig = null;   // nach einem Fehler nicht in Schleife neu versuchen, bis wieder neuer Kontext kommt
 
 function tipsCard() {
-  if (!data.ai_available || !Object.keys(data.latest).length) return "";
+  if (!data.tips_available || !Object.keys(data.latest).length) return "";
   const saved = prefs.get(tipsKey());
   const tips = saved?.sig === tipsSignature() ? saved.tips : null;
   const sections = tips ? SECTIONS.filter(([k]) => tips[k]?.length).map(([k, title, ic]) => `
@@ -93,7 +93,7 @@ async function fetchTips() {
 /** Hat die Person schon einmal Tipps erstellt und passen sie nicht mehr zu den Messungen? */
 function tipsOutdated() {
   const saved = prefs.get(tipsKey());
-  return Boolean(data.ai_available && saved && Object.keys(data.latest).length
+  return Boolean(data.tips_available && saved && Object.keys(data.latest).length
     && saved.sig !== tipsSignature() && tipsFailedSig !== tipsSignature());
 }
 
