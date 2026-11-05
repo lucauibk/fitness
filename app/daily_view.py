@@ -72,7 +72,7 @@ def build(profile_id):
     profile = db.get_row("profiles", profile_id)
     day_nutrition = nutrition.day(profile_id, day_iso)
     kcal_day = day_nutrition["totals"]
-    goal_info = nutrition.goals(profile)
+    goal_info = nutrition.goals(profile, day_iso)
     goals = goal_info["goals"]
     water_goal = nutrition.water_goals(profile)["goal"]
     ach = activity.achievements(profile_id)

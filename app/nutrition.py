@@ -11,11 +11,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, timedelta
 from difflib import SequenceMatcher
 
 from . import db
-from .activity import latest_weight
+from .activity import latest_weight, planned_weekdays
+from .stats import _local_date, today as local_today
 
 log = logging.getLogger(__name__)
 OFF = "https://world.openfoodfacts.org"
@@ -85,7 +86,12 @@ def _body_fat(profile_id):
 def training_kcal(weight, sessions, minutes):
     """Durchschnittlicher Mehrverbrauch pro Tag durch Krafttraining (netto: MET minus
     Ruhe, denn der Alltags-PAL enthaelt den Grundumsatz schon)."""
-    return (STRENGTH_MET - 1) * weight * (minutes / 60) * sessions / 7
+    return training_session_kcal(weight, minutes) * sessions / 7
+
+
+def training_session_kcal(weight, minutes):
+    """Mehrverbrauch einer einzelnen Krafteinheit (netto)."""
+    return (STRENGTH_MET - 1) * weight * (minutes / 60)
 
 
 def goal_adjustment(goal, tdee, weight):
@@ -130,30 +136,69 @@ def computed_goals(profile):
     tdee = base * pal + sport
     goal = profile.get("goal") or "fitness"
     adjust = goal_adjustment(goal, tdee, weight)
-    kcal = max(round((tdee + adjust) / 10) * 10, round(base / 10) * 10)   # nie unter den Grundumsatz
+    floor = round(base / 10) * 10                                         # nie unter den Grundumsatz
+    daily = base * pal
+    session = training_session_kcal(weight, minutes)
+    kcal = max(round((tdee + adjust) / 10) * 10, floor)
+    by_day = {   # Trainingstag mit dem vollen Mehrverbrauch, Ruhetag ohne: im Wochenmittel wie `kcal`
+        "training": _macros(max(round((daily + session + adjust) / 10) * 10, floor), weight, goal, body_fat),
+        "rest": _macros(max(round((daily + adjust) / 10) * 10, floor), weight, goal, body_fat)}
+    return {**_macros(kcal, weight, goal, body_fat), "by_day": by_day,
+            "tdee": round(tdee), "weight": weight,
+            "breakdown": {"bmr": round(base), "formula": formula, "pal": pal,
+                          "daily_kcal": round(base * pal), "training_kcal": round(sport),
+                          "session_kcal": round(session),
+                          "sessions": sessions, "adjustment": adjust, "body_fat": body_fat}}, []
+
+
+def _macros(kcal, weight, goal, body_fat):
+    """Eiweiss, Fett und Kohlenhydrate zu einem Kalorienziel."""
     per_kg = PROTEIN_PER_KG_LEAN if body_fat is not None else PROTEIN_PER_KG
     ref = weight * (1 - body_fat / 100) if body_fat is not None else weight
     protein = round(min(ref * per_kg.get(goal, per_kg["fitness"]), kcal * PROTEIN_MAX_KCAL_SHARE / 4))
     fat = round(max(weight * FAT_MIN_G_PER_KG, kcal * FAT_KCAL_SHARE / 9))
     carbs = max(0, round((kcal - protein * 4 - fat * 9) / 4))
-    return {"kcal": kcal, "protein": protein, "carbs": carbs, "fat": fat,
-            "tdee": round(tdee), "weight": weight,
-            "breakdown": {"bmr": round(base), "formula": formula, "pal": pal,
-                          "daily_kcal": round(base * pal), "training_kcal": round(sport),
-                          "sessions": sessions, "adjustment": adjust, "body_fat": body_fat}}, []
+    return {"kcal": kcal, "protein": protein, "carbs": carbs, "fat": fat}
 
 
-def goals(profile):
+def trained_on(profile_id, day_iso):
+    """Gab es an diesem (lokalen) Tag eine Krafteinheit?"""
+    d = date.fromisoformat(day_iso)
+    rows = db.rows("SELECT started_at FROM workouts WHERE profile_id=? AND started_at>=? AND started_at<?",
+                   (profile_id, (d - timedelta(days=1)).isoformat(), (d + timedelta(days=2)).isoformat()))
+    return any(_local_date(r["started_at"]) == d for r in rows)
+
+
+def is_training_day(profile, day_iso):
+    """True: Einheit geplant oder gemacht. False: geplanter Ruhetag. None: unbekannt (kein Plan,
+    keine Einheit) – dann gilt das Wochenmittel statt eines geschaetzten Ruhetags."""
+    if trained_on(profile["id"], day_iso):
+        return True
+    planned = planned_weekdays(profile["id"])
+    if not planned:
+        return None
+    return date.fromisoformat(day_iso).weekday() in planned
+
+
+def goals(profile, day_iso=None):
+    """Ziele. Mit `day_iso` und automatischer Berechnung die des Tages: Trainingstag oder Ruhetag
+    (`day_type`), sonst das Wochenmittel. Eigene Ziele gelten an jedem Tag gleich."""
     calc, missing = computed_goals(profile)
     auto = profile.get("nutrition_auto") in (None, 1)
+    day_type = None
     if auto and calc:
-        active = {k: calc[k] for k in ("kcal", "protein", "carbs", "fat")}
+        active = {k: calc[k] for k in MACROS}
+        if day_iso:
+            training = is_training_day(profile, day_iso)
+            if training is not None:
+                day_type = "training" if training else "rest"
+                active = dict(calc["by_day"][day_type])
     else:
         active = {"kcal": profile.get("kcal_goal"), "protein": profile.get("protein_goal"),
                   "carbs": profile.get("carbs_goal"), "fat": profile.get("fat_goal")}
         if not active["kcal"] and calc:
-            active = {k: calc[k] for k in ("kcal", "protein", "carbs", "fat")}
-    return {"auto": auto, "goals": active, "computed": calc, "missing": missing,
+            active = {k: calc[k] for k in MACROS}
+    return {"auto": auto, "goals": active, "computed": calc, "missing": missing, "day_type": day_type,
             "activity_level": profile.get("activity_level"), "reference": reference(active.get("kcal"))}
 
 
@@ -186,6 +231,86 @@ def day(profile_id, day_iso):
                     (profile_id, day_iso))["kcal"]
     return {"date": day_iso, "meals": meals, "totals": sums(entries), "water_ml": max(0, water),
             "burned_kcal": round(burned or 0)}
+
+
+# ------------------------------------------------------ Rueckmeldung
+KCAL_CORRIDOR = 0.10          # +-10 % um das Kalorienziel gelten als getroffen
+PROTEIN_HIT = 0.90            # ab 90 % des Eiweissziels gilt es als erreicht
+WEEK_DAYS = 7
+MIN_WEEK_LOGGED = 3           # ab so vielen Tagen mit Eintraegen gibt es eine Bilanz
+LOW_AVG, HIGH_AVG = 0.85, 1.15
+
+
+def day_feedback(info, totals, burned=0):
+    """Rueckmeldung zum Tag, hoechstens zwei kurze Saetze: Kalorien und Eiweiss.
+    [{"tone": "good"|"info"|"warn", "text": ...}]. Ohne Eintraege oder Ziel kommt nichts."""
+    g = info["goals"]
+    if not g.get("kcal") or not totals["kcal"]:
+        return []
+    out = []
+    allowance = g["kcal"] + (burned or 0)
+    left = round(allowance - totals["kcal"])
+    if left > allowance * KCAL_CORRIDOR:
+        out.append({"tone": "info", "text": f"Noch {left} kcal frei."})
+    elif left < -allowance * KCAL_CORRIDOR:
+        out.append({"tone": "warn", "text": f"{-left} kcal über dem Ziel."})
+    else:
+        out.append({"tone": "good", "text": "Kalorien im Zielbereich."})
+    if g.get("protein"):
+        missing = round(g["protein"] - totals["protein"])
+        if missing > g["protein"] * (1 - PROTEIN_HIT):
+            after = " – am besten nach dem Training" if info.get("day_type") == "training" else ""
+            out.append({"tone": "info", "text": f"Noch {missing} g Eiweiß{after}."})
+        else:
+            out.append({"tone": "good", "text": "Eiweißziel erreicht."})
+    return out
+
+
+def week(profile, end_iso):
+    """Die sieben Tage bis einschliesslich `end_iso`. Mittelwerte zaehlen nur abgeschlossene
+    Tage mit Eintraegen: heute ist noch offen, ein Tag ohne Eintrag ist nicht 0 kcal."""
+    end = date.fromisoformat(end_iso)
+    start = end - timedelta(days=WEEK_DAYS - 1)
+    eaten = {r["date"]: r for r in db.rows(
+        "SELECT date, SUM(kcal) AS kcal, SUM(protein) AS protein FROM food_log"
+        " WHERE profile_id=? AND date BETWEEN ? AND ? GROUP BY date",
+        (profile["id"], start.isoformat(), end.isoformat()))}
+    today = local_today()
+    days = []
+    for i in range(WEEK_DAYS):
+        d = (start + timedelta(days=i)).isoformat()
+        g = goals(profile, d)
+        row = eaten.get(d)
+        days.append({"date": d, "kcal": round(row["kcal"] or 0) if row else 0,
+                     "protein": round(row["protein"] or 0) if row else 0,
+                     "goal_kcal": g["goals"].get("kcal"), "goal_protein": g["goals"].get("protein"),
+                     "training": g["day_type"] == "training",
+                     "logged": bool(row and row["kcal"]), "open": d >= today.isoformat()})
+    counted = [d for d in days if d["logged"] and not d["open"] and d["goal_kcal"]]
+    out = {"from": start.isoformat(), "to": end.isoformat(), "days": days, "counted": len(counted),
+           "avg_kcal": None, "avg_protein": None, "goal_kcal": None, "kcal_ok": 0, "protein_ok": 0,
+           "text": []}
+    if len(counted) < MIN_WEEK_LOGGED:
+        out["text"] = [f"Für eine Wochenbilanz fehlen noch Einträge: {len(counted)} von {WEEK_DAYS} Tagen "
+                       f"sind abgeschlossen und eingetragen (mindestens {MIN_WEEK_LOGGED})."]
+        return out
+    n = len(counted)
+    out["avg_kcal"] = round(sum(d["kcal"] for d in counted) / n)
+    out["avg_protein"] = round(sum(d["protein"] for d in counted) / n)
+    out["goal_kcal"] = round(sum(d["goal_kcal"] for d in counted) / n)
+    out["kcal_ok"] = sum(1 for d in counted if abs(d["kcal"] - d["goal_kcal"]) <= d["goal_kcal"] * KCAL_CORRIDOR)
+    with_protein = [d for d in counted if d["goal_protein"]]
+    out["protein_ok"] = sum(1 for d in with_protein if d["protein"] >= d["goal_protein"] * PROTEIN_HIT)
+    ratio = out["avg_kcal"] / out["goal_kcal"]
+    texts = [f"Im Schnitt {out['avg_kcal']} kcal bei {out['goal_kcal']} kcal Ziel ({n} Tage mit Einträgen)."]
+    if ratio < LOW_AVG:
+        texts.append("Das ist deutlich unter dem Ziel – oder es fehlen Einträge.")
+    elif ratio > HIGH_AVG:
+        texts.append("Das ist deutlich über dem Ziel.")
+    texts.append(f"Kalorienziel an {out['kcal_ok']} von {n} Tagen getroffen"
+                 + (f", Eiweißziel an {out['protein_ok']} von {len(with_protein)}." if with_protein else "."))
+    out["text"] = texts
+    return out
 
 
 # --------------------------------------------------------------- Wasser

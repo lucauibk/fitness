@@ -301,3 +301,132 @@ def test_eiweiss_ist_auf_35_prozent_der_kalorien_begrenzt(profile_id):
     # Beim Abnehmen (2,2 g/kg = 176 g) wuerde ein kleines Kalorienziel zu viel Eiweiss verlangen
     c = _ziele(profile_id, goal="abnehmen")
     assert c["protein"] == round(c["kcal"] * 0.35 / 4) < round(80 * 2.2)
+
+
+# ------------------------------------- Trainingstag-Ziele, Tages- und Wochenfeedback
+def _logge(profile_id, tag, kcal, protein, meal="mittag"):
+    db.insert_row("food_log", {"profile_id": profile_id, "date": tag.isoformat(), "meal": meal,
+                               "food_id": None, "grams": 0, "name": "Test", "kcal": kcal,
+                               "protein": protein, "carbs": 0, "fat": 0})
+
+
+def _wochentag_von(tag):
+    return str(tag.weekday())
+
+
+def test_trainingstag_hat_mehr_kalorien_als_ruhetag_und_das_wochenmittel_bleibt(profile_id):
+    c = _ziele(profile_id, train_weekdays="0,2,4", goal="aufbau")
+    train, rest = c["by_day"]["training"], c["by_day"]["rest"]
+    assert train["kcal"] > rest["kcal"] and train["carbs"] > rest["carbs"]
+    assert train["protein"] == rest["protein"]
+    mittel = (3 * train["kcal"] + 4 * rest["kcal"]) / 7
+    assert abs(mittel - c["kcal"]) <= 20
+
+
+def test_goals_nimmt_nach_wochentag_das_trainings_oder_ruhetagsziel(profile_id):
+    profil = _profil(profile_id, train_weekdays="0,2,4")          # Mo, Mi, Fr
+    montag, dienstag = "2026-11-02", "2026-11-03"
+    t, r = nutrition.goals(profil, montag), nutrition.goals(profil, dienstag)
+    assert t["day_type"] == "training" and r["day_type"] == "rest"
+    assert t["goals"]["kcal"] > r["goals"]["kcal"]
+    assert nutrition.goals(profil)["day_type"] is None             # ohne Tag: Wochenmittel
+
+
+def test_ohne_trainingsplan_gilt_das_wochenmittel_statt_eines_geschaetzten_ruhetags(profile_id):
+    profil = _profil(profile_id, train_weekdays=None)
+    g = nutrition.goals(profil, "2026-11-03")
+    assert g["day_type"] is None and g["goals"]["kcal"] == g["computed"]["kcal"]
+
+
+def test_gemachte_einheit_macht_den_tag_zum_trainingstag_auch_ohne_plan(profile_id):
+    profil = _profil(profile_id, train_weekdays="0")                # nur Montag geplant
+    db.insert_row("workouts", {"profile_id": profile_id, "started_at": "2026-11-03T16:00:00+00:00",
+                               "finished_at": "2026-11-03T17:00:00+00:00"})    # Dienstag
+    assert nutrition.goals(profil, "2026-11-03")["day_type"] == "training"
+
+
+def test_einheit_kurz_nach_mitternacht_zaehlt_zum_lokalen_tag(profile_id):
+    profil = _profil(profile_id, train_weekdays="0")
+    # 23:30 UTC am Dienstag = 00:30 MEZ am Mittwoch
+    db.insert_row("workouts", {"profile_id": profile_id, "started_at": "2026-11-03T23:30:00+00:00",
+                               "finished_at": "2026-11-04T00:30:00+00:00"})
+    assert nutrition.goals(profil, "2026-11-04")["day_type"] == "training"
+    assert nutrition.goals(profil, "2026-11-03")["day_type"] == "rest"
+
+
+def test_eigene_ziele_gelten_an_jedem_tag_gleich(profile_id):
+    profil = _profil(profile_id, train_weekdays="0,2,4", nutrition_auto=0, kcal_goal=2500,
+                     protein_goal=150, carbs_goal=250, fat_goal=70)
+    g = nutrition.goals(profil, "2026-11-02")
+    assert g["day_type"] is None and g["goals"]["kcal"] == 2500
+
+
+def test_tagesfeedback_eiweiss_kalorien_und_trainingstag():
+    info = {"goals": {"kcal": 2500, "protein": 150}, "day_type": "training"}
+    ok = nutrition.day_feedback(info, {"kcal": 1500, "protein": 60}, 0)
+    texte = [f["text"] for f in ok]
+    assert texte == ["Noch 1000 kcal frei.", "Noch 90 g Eiweiß – am besten nach dem Training."]
+    ruhe = nutrition.day_feedback({**info, "day_type": "rest"}, {"kcal": 1500, "protein": 60}, 0)
+    assert ruhe[1]["text"] == "Noch 90 g Eiweiß."
+    ueber = nutrition.day_feedback({"goals": {"kcal": 2000, "protein": 100}, "day_type": "rest"},
+                                   {"kcal": 2600, "protein": 120}, 0)
+    assert ueber[0]["tone"] == "warn" and "600 kcal über dem Ziel" in ueber[0]["text"]
+    assert ueber[1]["text"] == "Eiweißziel erreicht."
+    assert nutrition.day_feedback(info, {"kcal": 2480, "protein": 150}, 0)[0]["tone"] == "good"
+    # verbrannte Kalorien aus Cardio erhoehen den Rahmen wie im Ring
+    assert "Noch 300 kcal frei." in [f["text"] for f in nutrition.day_feedback(
+        {"goals": {"kcal": 2000, "protein": 0}, "day_type": None}, {"kcal": 2000, "protein": 0}, 300)]
+
+
+def test_tagesfeedback_ohne_eintraege_oder_ziel_ist_leer():
+    assert nutrition.day_feedback({"goals": {"kcal": 2000}, "day_type": None}, {"kcal": 0, "protein": 0}) == []
+    assert nutrition.day_feedback({"goals": {"kcal": None}, "day_type": None}, {"kcal": 500, "protein": 20}) == []
+
+
+def test_wochenbilanz_zaehlt_nur_abgeschlossene_tage_mit_eintraegen(profile_id, monkeypatch):
+    from datetime import timedelta
+    heute = date(2026, 11, 5)
+    monkeypatch.setattr(nutrition, "local_today", lambda: heute)
+    profil = _profil(profile_id, train_weekdays=None, goal="fitness", nutrition_auto=0, kcal_goal=2000,
+                     protein_goal=100, carbs_goal=200, fat_goal=60)
+    for vor, kcal, prot in ((1, 2000, 100), (2, 1900, 95), (3, 2600, 60), (5, 2050, 110)):
+        _logge(profile_id, heute - timedelta(days=vor), kcal, prot)
+    _logge(profile_id, heute, 300, 20)                      # heute: noch offen, zaehlt nicht
+    w = nutrition.week(profil, heute.isoformat())
+    assert w["counted"] == 4 and len(w["days"]) == 7
+    assert w["avg_kcal"] == round((2000 + 1900 + 2600 + 2050) / 4)
+    assert w["kcal_ok"] == 3 and w["protein_ok"] == 3       # 2600 kcal und 60 g Eiweiß fallen raus
+    assert [d["open"] for d in w["days"]][-1] is True
+    assert w["days"][-1]["logged"] is True and w["days"][2]["logged"] is False   # leer ist nicht 0 kcal
+    assert "Im Schnitt" in w["text"][0] and "3 von 4" in w["text"][-1]
+
+
+def test_wochenbilanz_ohne_genug_tage_sagt_das_ehrlich(profile_id, monkeypatch):
+    from datetime import timedelta
+    heute = date(2026, 11, 5)
+    monkeypatch.setattr(nutrition, "local_today", lambda: heute)
+    profil = _profil(profile_id, nutrition_auto=0, kcal_goal=2000, protein_goal=100)
+    _logge(profile_id, heute - timedelta(days=1), 1800, 90)
+    w = nutrition.week(profil, heute.isoformat())
+    assert w["avg_kcal"] is None and "fehlen noch Einträge" in w["text"][0]
+
+
+def test_wochenbilanz_bewertet_deutlich_zu_wenig_vorsichtig(profile_id, monkeypatch):
+    from datetime import timedelta
+    heute = date(2026, 11, 5)
+    monkeypatch.setattr(nutrition, "local_today", lambda: heute)
+    profil = _profil(profile_id, nutrition_auto=0, kcal_goal=2500, protein_goal=100)
+    for vor in (1, 2, 3):
+        _logge(profile_id, heute - timedelta(days=vor), 1500, 80)
+    assert any("deutlich unter dem Ziel" in t and "fehlen Einträge" in t
+               for t in nutrition.week(profil, heute.isoformat())["text"])
+
+
+def test_routen_liefern_feedback_und_woche(profile_id):
+    from app.routes import nutrition as routes
+    _profil(profile_id, train_weekdays="0,2,4")
+    _logge(profile_id, date.today(), 800, 30)
+    tag = routes.get_day(profile_id, date.today().isoformat())
+    assert tag["feedback"] and tag["goals"]["day_type"] in ("training", "rest")
+    woche = routes.get_week(profile_id, date.today().isoformat())
+    assert woche["to"] == date.today().isoformat() and len(woche["days"]) == 7

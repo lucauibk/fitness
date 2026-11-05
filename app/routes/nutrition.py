@@ -37,10 +37,18 @@ def get_goals(profile_id: int = Depends(current_profile)):
 @router.get("/nutrition/day")
 def get_day(profile_id: int = Depends(current_profile), date: Optional[str] = None):
     profile = _profile(profile_id)
-    out = nutrition.day(profile_id, _day(date))
-    out["goals"] = nutrition.goals(profile)
+    day = _day(date)
+    out = nutrition.day(profile_id, day)
+    out["goals"] = nutrition.goals(profile, day)
+    out["feedback"] = nutrition.day_feedback(out["goals"], out["totals"], out["burned_kcal"])
     out["water_goal"] = nutrition.water_goals(profile)["goal"]
     return out
+
+
+@router.get("/nutrition/week")
+def get_week(profile_id: int = Depends(current_profile), date: Optional[str] = None):
+    """Wochenbilanz: die sieben Tage bis zum gewaehlten Tag."""
+    return nutrition.week(_profile(profile_id), _day(date))
 
 
 # ---------------------------------------------------------------- Wasser
