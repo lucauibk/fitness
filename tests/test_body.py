@@ -59,7 +59,7 @@ def test_trend_zu_wenig_messungen_kein_urteil():
 
 
 def test_trend_veraltete_messung_kein_urteil():
-    alt = _serie([86.0, 85.5, 85.0, 84.5], ende=HEUTE - timedelta(days=40))
+    alt = _serie([86.0, 85.5, 85.0, 84.5], ende=HEUTE - timedelta(days=70))
     assert body.trend({"weight_kg": alt}, "abnehmen", HEUTE)["verdict"]["status"] == "veraltet"
 
 
@@ -94,14 +94,35 @@ def test_trend_sinkende_muskelmasse_wird_vorsichtig_erwaehnt():
     assert "Muskelmasse sinkt" in text and "BIA" in text
 
 
-def test_trend_kennzahlen_delta_seit_letzter_und_fenster():
+def test_trend_kennzahlen_delta_seit_letzter_und_verlauf():
     series = {"weight_kg": _serie([90.0, 89.0, 88.0, 87.0, 86.0, 85.0, 84.0], abstand=14),
               "waist_cm": _serie([90.0, 89.0])}
     m = body.trend(series, "abnehmen", HEUTE)["metrics"]
     assert m["weight_kg"]["since_last"] == {"delta": -1.0, "days": 14}
-    assert m["weight_kg"]["w4"] < 0 and m["weight_kg"]["w12"] < m["weight_kg"]["w4"]
-    assert m["waist_cm"]["w12"] is None            # Verlauf zu kurz
+    assert m["weight_kg"]["change"] == {"delta": -6.0, "weeks": 12}      # exakt linear: kein Verlust durch Glättung
+    assert m["weight_kg"]["value"] == 84.0
+    assert m["waist_cm"]["change"] is None                               # zu wenig Verlauf
     assert m["weight_kg"]["noisy"] is False
+
+
+def test_trend_alle_vier_wochen_gemessen_reicht_fuer_ein_urteil():
+    # Drei Messungen im Abstand von vier Wochen: -2 kg in 8 Wochen = -0,25 kg/Woche
+    series = {"weight_kg": _serie([87.0, 86.0, 85.0], abstand=28)}
+    v = body.trend(series, "abnehmen", HEUTE)["verdict"]
+    assert v["status"] == "passt" and v["rate_kg_week"] == -0.25
+
+
+def test_trend_wochenrhythmus_wird_nicht_zu_mild_bewertet():
+    # Linearer Verlust von 0,5 kg/Woche muss auch mit nur vier Messungen als 0,5 erkannt werden
+    series = {"weight_kg": _serie([86.0, 85.5, 85.0, 84.5])}
+    assert body.trend(series, "abnehmen", HEUTE)["verdict"]["rate_kg_week"] == -0.5
+
+
+def test_trend_acht_wochen_ohne_messung_gilt_als_veraltet_vier_noch_nicht():
+    alt = _serie([86.0, 85.5, 85.0, 84.5], ende=HEUTE - timedelta(days=60))
+    assert body.trend({"weight_kg": alt}, "abnehmen", HEUTE)["verdict"]["status"] == "veraltet"
+    ok = _serie([86.0, 85.5, 85.0, 84.5], ende=HEUTE - timedelta(days=28))
+    assert body.trend({"weight_kg": ok}, "abnehmen", HEUTE)["verdict"]["status"] == "passt"
 
 
 def test_trend_bia_werte_sind_als_unsicher_markiert_und_leer_ist_leer():
@@ -113,7 +134,7 @@ def test_trend_bia_werte_sind_als_unsicher_markiert_und_leer_ist_leer():
 
 def test_trend_mehrere_messungen_pro_tag_werden_gemittelt():
     s = [{"date": "2026-11-01", "value": 85.0}, {"date": "2026-11-01", "value": 86.0}]
-    assert body.trend({"weight_kg": s}, "fitness", HEUTE)["metrics"]["weight_kg"]["smoothed"] == 85.5
+    assert body.trend({"weight_kg": s}, "fitness", HEUTE)["metrics"]["weight_kg"]["value"] == 85.5
 
 
 def test_measurements_route_liefert_trend_mit_profilziel(profile_id):
@@ -177,8 +198,9 @@ def test_advice_schickt_nur_zahlen_und_eckdaten_und_begrenzt_die_antwort(profile
     res = routes.advice(profile_id)
     assert "Geheimer Name" not in seen["text"]
     assert "abnehmen" in seen["text"] and "Gewicht" in seen["text"]
-    assert "Keine Tipps zu Training, Ernährung" in seen["system"]       # nur Körpermessung
-    assert res["gut"] == ["a", "b", "c"]                                # höchstens 3, Leeres raus
+    assert "Gib keine Tipps zu Training, Ernährung" in seen["system"]    # nur Körpermessung
+    assert "fordere nie auf, öfter zu messen" in seen["system"]         # misst bewusst selten
+    assert res["gut"] == ["a", "b"]                                      # höchstens 2, Leeres raus
     assert res["schlecht"] == []
     assert len(res["verbessern"]) == 1 and len(res["verbessern"][0]) == body_advice.MAX_CHARS
 

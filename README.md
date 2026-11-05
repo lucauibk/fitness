@@ -73,9 +73,8 @@ Alle Werte sind Schätzungen. Nach 2 bis 3 Wochen am Gewichtsverlauf prüfen und
 - Alle Daten liegen in `fitness.db` auf dem Pi.
 - An **Anthropic** (nur mit `ANTHROPIC_API_KEY`, nur auf Knopfdruck): Plan-Check, KI-Verfeinerung
   (Plan + Eckdaten ohne Namen) und der ViCoach-Screenshot.
-- An **Anthropic** über Claude Code (`claude -p`, ohne API-Schlüssel): die Körper-Tipps (Ziel, Geschlecht, Größe
-  und die Trend-Zahlen aus den Messungen, ohne Namen und ohne einzelne Messtage) – beim ersten Mal auf
-  Knopfdruck, danach bei jeder neuen Messung automatisch.
+- An **Anthropic** über Claude Code (`claude -p`, ohne API-Schlüssel, nur auf Knopfdruck): die Körper-Einordnung
+  (Ziel, Geschlecht, Größe und die Trend-Zahlen aus den Messungen, ohne Namen und ohne einzelne Messtage).
 - An **Anthropic** über Claude Code (nur wenn der Coach-Timer eingerichtet ist, täglich): aktiver Plan,
   Block-Stand, Trainings der letzten sechs Wochen, Check-ins (Schlaf, Stress, Muskelkater), Ziele und
   eingetragene Beschwerden – ohne Namen und Körperdaten.

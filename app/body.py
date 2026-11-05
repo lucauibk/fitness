@@ -128,18 +128,16 @@ def history(profile_id):
 
 
 # ---------------------------------------------------------------- Trend & Einordnung
-# Einzelne Messungen schwanken (Wasser, Tageszeit, vor allem bei BIA-Waagen). Darum
-# beruht jede Aussage auf einem zeitgewichteten Mittel (Halbwertszeit 7 Tage) und
-# braucht mehrere Messungen ueber mindestens zwei Wochen.
+# Gemessen wird hoechstens einmal pro Woche, oft seltener. Darum beruht jede Aussage auf einer
+# Ausgleichsgeraden durch den Verlauf (bei wenigen, weit auseinanderliegenden Punkten unverzerrt,
+# anders als ein gleitender Mittelwert) und braucht mehrere Messungen ueber mehrere Wochen.
 TREND_KEYS = ("weight_kg", "body_fat_pct", "muscle_mass_kg", "waist_cm", "hip_cm",
               "chest_cm", "arm_cm", "thigh_cm")
 NOISY_KEYS = ("body_fat_pct", "muscle_mass_kg")     # BIA: nur als Tendenz lesen
-HALF_LIFE_DAYS = 7
-WINDOW_DAYS = 28            # Fenster fuer das Urteil
+WINDOW_DAYS = 84            # Verlauf, aus dem Veraenderung und Urteil entstehen (12 Wochen)
 MIN_POINTS = 3              # Messtage im Fenster
-MIN_SPAN_DAYS = 14          # so weit muessen erste und letzte Messung auseinanderliegen
-STALE_DAYS = 21             # aelter: keine aktuelle Einordnung
-BASELINE_TOLERANCE_DAYS = 14
+MIN_SPAN_DAYS = 21          # so weit muessen erste und letzte Messung auseinanderliegen
+STALE_DAYS = 56             # aelter: keine aktuelle Einordnung
 MUSCLE_STABLE_KG = 1.0      # BIA-Genauigkeit: kleinere Aenderungen sind Rauschen
 # "passt zum Ziel": Gewichtsaenderung in % Koerpergewicht pro Woche (von, bis)
 GOAL_RATE = {"abnehmen": (-1.0, -0.25), "aufbau": (0.1, 0.5), "kraft": (0.0, 0.5),
@@ -155,26 +153,26 @@ def _daily(points):
     return [(d, sum(v) / len(v)) for d, v in sorted(by_day.items())]
 
 
-def _smooth(daily):
-    """Zeitgewichteter exponentieller Mittelwert: je laenger die Pause, desto mehr zaehlt
-    die neue Messung."""
-    out, s, prev = [], None, None
-    for d, v in daily:
-        if s is None:
-            s = v
-        else:
-            s += (1 - 0.5 ** ((d - prev).days / HALF_LIFE_DAYS)) * (v - s)
-        out.append((d, s))
-        prev = d
-    return out
+def _window(daily):
+    """Messtage der letzten WINDOW_DAYS vor der juengsten Messung."""
+    if not daily:
+        return []
+    start = daily[-1][0] - timedelta(days=WINDOW_DAYS)
+    return [(d, v) for d, v in daily if d >= start]
 
 
-def _change(smoothed, days):
-    """Aenderung des geglaetteten Werts gegenueber dem Stand vor `days` Tagen."""
-    ref, now = smoothed[-1]
-    target = ref - timedelta(days=days)
-    base = [(d, v) for d, v in smoothed if d <= target and (target - d).days <= BASELINE_TOLERANCE_DAYS]
-    return round(now - base[-1][1], 1) if base else None
+def _enough(window):
+    return len(window) >= MIN_POINTS and (window[-1][0] - window[0][0]).days >= MIN_SPAN_DAYS
+
+
+def _fit(window):
+    """Ausgleichsgerade (kleinste Quadrate): (Steigung pro Tag, Wert der Geraden am letzten Tag)."""
+    n = len(window)
+    xs = [(d - window[0][0]).days for d, _ in window]
+    mx, my = sum(xs) / n, sum(v for _, v in window) / n
+    var = sum((x - mx) ** 2 for x in xs)
+    slope = sum((x - mx) * (v - my) for x, (_, v) in zip(xs, window)) / var if var else 0.0
+    return slope, my + slope * (xs[-1] - mx)
 
 
 def _classify(goal, pct):
@@ -199,59 +197,56 @@ def _classify(goal, pct):
 
 
 def _verdict(goal, weight_window, muscle_window):
-    """Urteil zum Gewichtstrend; weight_window/muscle_window = geglaettete Punkte im Fenster."""
+    """Urteil zum Gewichtstrend aus den Messtagen im Fenster."""
     label = GOAL_LABELS[goal]
-    if len(weight_window) < MIN_POINTS or (weight_window[-1][0] - weight_window[0][0]).days < MIN_SPAN_DAYS:
+    if not _enough(weight_window):
         return {"status": "zu_wenig", "goal": label, "rate_kg_week": None,
-                "text": "Für eine Einordnung fehlen noch Messungen: mindestens "
-                        f"{MIN_POINTS} über zwei Wochen."}
-    span = (weight_window[-1][0] - weight_window[0][0]).days
-    rate = (weight_window[-1][1] - weight_window[0][1]) / (span / 7)
-    pct = rate / weight_window[-1][1] * 100
+                "text": f"Für eine Einordnung braucht es mindestens {MIN_POINTS} Messungen "
+                        f"über {MIN_SPAN_DAYS // 7} Wochen."}
+    slope, end = _fit(weight_window)
+    rate = slope * 7
     sign = "+" if rate > 0 else "−"
     head = f"{sign}{abs(rate):.1f} kg/Woche".replace(".", ",")
     muscle = ""
     if len(muscle_window) >= 2:
-        dm = muscle_window[-1][1] - muscle_window[0][1]
+        dm = _fit(muscle_window)[0] * (muscle_window[-1][0] - muscle_window[0][0]).days
         muscle = (" bei etwa gleicher Muskelmasse" if abs(dm) < MUSCLE_STABLE_KG else
                   " – die Muskelmasse sinkt dabei tendenziell (BIA-Werte sind ungenau)" if dm < 0
                   else " – die Muskelmasse steigt dabei tendenziell")
-    status, tail = _classify(goal, pct)
-    text = f"{head}{muscle}: {tail}. Das ist ein Trend aus mehreren Messungen, kein Einzelwert."
-    return {"status": status, "goal": label, "rate_kg_week": round(rate, 2), "text": text}
+    status, tail = _classify(goal, rate / end * 100)
+    return {"status": status, "goal": label, "rate_kg_week": round(rate, 2),
+            "text": f"{head}{muscle}: {tail}."}
 
 
 def trend(series, goal, today=None):
     """Einordnung der Verlaeufe (`history()["series"]`) gegenueber dem Profilziel.
-    Rueckgabe: {"metrics": {key: {...}}, "verdict": {...} | None}"""
+    Rueckgabe: {"metrics": {key: {...}}, "verdict": {...} | None}
+    metrics: value (Gerade am letzten Tag), since_last {delta, days}, change {delta, weeks} ueber das Fenster, stale, noisy."""
     today = today or stats.today()
     goal = goal if goal in GOAL_RATE else "fitness"
-    metrics, smoothed_by_key, daily_by_key = {}, {}, {}
+    metrics, windows = {}, {}
     for key in TREND_KEYS:
         if not series.get(key):
             continue
         daily = _daily(series[key])
-        smoothed = _smooth(daily)
-        daily_by_key[key], smoothed_by_key[key] = daily, smoothed
+        win = windows[key] = _window(daily)
         last = daily[-1]
         since_last = None
         if len(daily) > 1:
             since_last = {"delta": round(last[1] - daily[-2][1], 1), "days": (last[0] - daily[-2][0]).days}
-        metrics[key] = {"smoothed": round(smoothed[-1][1], 1), "since_last": since_last,
-                        "w4": _change(smoothed, 28), "w12": _change(smoothed, 84),
+        change, value = None, last[1]
+        if _enough(win):
+            slope, value = _fit(win)
+            span = (win[-1][0] - win[0][0]).days
+            change = {"delta": round(slope * span, 1), "weeks": round(span / 7)}
+        metrics[key] = {"value": round(value, 1), "since_last": since_last, "change": change,
                         "stale": (today - last[0]).days > STALE_DAYS, "noisy": key in NOISY_KEYS}
     verdict = None
     if "weight_kg" in metrics:
         if metrics["weight_kg"]["stale"]:
             verdict = {"status": "veraltet", "goal": GOAL_LABELS[goal], "rate_kg_week": None,
-                       "text": "Die letzte Gewichtsmessung ist mehr als drei Wochen her – "
-                               "für eine Einordnung bitte neu messen."}
+                       "text": "Die letzte Gewichtsmessung ist über acht Wochen her – "
+                               "für eine Einordnung bitte wieder messen."}
         else:
-            def window(key):
-                sm = smoothed_by_key.get(key, [])
-                if not sm:
-                    return []
-                start = sm[-1][0] - timedelta(days=WINDOW_DAYS)
-                return [(d, v) for d, v in sm if d >= start]
-            verdict = _verdict(goal, window("weight_kg"), window("muscle_mass_kg"))
+            verdict = _verdict(goal, windows["weight_kg"], windows.get("muscle_mass_kg", []))
     return {"metrics": metrics, "verdict": verdict}

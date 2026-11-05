@@ -14,21 +14,28 @@ MODEL = os.environ.get("TIPS_MODEL", "claude-sonnet-5-5")
 TIMEOUT = 90
 SECTIONS = {"gut": "Was gut läuft", "schlecht": "Was nicht gut läuft",
             "verbessern": "Was du verbessern kannst"}
-MAX_ITEMS = 3
-MAX_CHARS = 320
+MAX_ITEMS = 2
+MAX_CHARS = 220
 
 SYSTEM = (
-    "Du gibst Tipps ausschließlich zu den Körpermessungen einer Person: Wie entwickeln sich die "
-    "Werte, passt das zum Ziel, wie belastbar sind die Messungen, wie misst man besser (gleiche "
-    "Tageszeit, gleiche Bedingungen, sinnvoller Messabstand, fehlende Werte wie Umfänge). "
-    "Einzelmessungen schwanken; Körperfett und Muskelmasse aus Impedanzwaagen sind nur Tendenzen. "
-    "Du bist vorsichtig und ehrlich. Antworte NUR mit JSON ohne Text davor oder danach: "
+    "Du ordnest die Körpermessungen einer Person ein. Sie misst bewusst selten (höchstens einmal "
+    "pro Woche, oft nur alle paar Wochen). Beurteile nur, was die Zahlen hergeben: Richtung und "
+    "Größe der Veränderung seit der letzten Messung und über den Verlauf, ob Gewicht, Körperfett, "
+    "Muskelmasse und Umfänge zusammenpassen (Gewicht und Taille sinken bei stabiler Muskelmasse = "
+    "gutes Zeichen) und ob sie zum Ziel passt. Körperfett und Muskelmasse aus Impedanzwaagen sind "
+    "ungenau (Muskelmasse etwa ±1 kg, Körperfett etwa ±2 Prozentpunkte): Veränderungen darunter "
+    "sind im Rahmen der Messungenauigkeit und keine Aussage. Bei nur zwei Messungen beschreibst du "
+    "nur, ohne zu werten. "
+    "Gib keine Tipps zum Messen (Uhrzeit, Technik, Häufigkeit) und fordere nie auf, öfter zu "
+    "messen. Gib keine Tipps zu Training, Ernährung, Schlaf, Supplements oder Medikamenten und "
+    "keine Diagnosen. Unter \"verbessern\" steht höchstens ein Hinweis, was die Messwerte selbst "
+    "nahelegen (z. B. dass der Trend passt und nichts nötig ist, oder worauf bei der nächsten "
+    "Messung zu achten ist). Keine Zahlen erfinden. "
+    "Antworte NUR mit JSON ohne Text davor oder danach: "
     '{"gut": ["..."], "schlecht": ["..."], "verbessern": ["..."]}. '
-    f"Regeln: je höchstens {MAX_ITEMS} kurze Sätze auf Deutsch (du-Form), jeder konkret und aus den "
-    "Zahlen begründet. Keine Zahlen erfinden, keine Diagnosen, keine Supplement- oder "
-    "Medikamentenempfehlungen. Keine Tipps zu Training, Ernährung oder Schlaf – nur zu den "
-    "Messwerten und zum Messen selbst. Bei dünner Datenlage ehrlich sagen, dass ein Urteil noch zu "
-    "früh ist. Wenn nichts schlecht läuft, lass die Liste leer."
+    f"Je Liste höchstens {MAX_ITEMS} Einträge, jeder Eintrag ein einziger Satz mit höchstens 25 Wörtern "
+    "auf Deutsch (du-Form), ohne Klammern und Aufzählungen. Lass eine Liste leer, wenn es nichts "
+    "Sinnvolles zu sagen gibt; lieber wenig als Füllsätze."
 )
 
 
@@ -40,13 +47,14 @@ def prompt(profile, trend, latest, labels):
     """Der Text an die KI, oder None, wenn es nichts zu bewerten gibt."""
     lines = []
     for key, m in trend.get("metrics", {}).items():
-        parts = [f"aktuell {latest[key]['value']}, geglättet {m['smoothed']}"]
-        for label, val in (("seit letzter Messung", (m["since_last"] or {}).get("delta")),
-                           ("4 Wochen", m["w4"]), ("12 Wochen", m["w12"])):
-            if val is not None:
-                parts.append(f"{label} {_signed(val)}")
+        parts = [f"aktuell {latest[key]['value']}"]
+        if m["since_last"]:
+            parts.append(f"seit der letzten Messung ({m['since_last']['days']} Tage her) "
+                         f"{_signed(m['since_last']['delta'])}")
+        if m["change"]:
+            parts.append(f"Verlauf über {m['change']['weeks']} Wochen {_signed(m['change']['delta'])}")
         if m["noisy"]:
-            parts.append("Waage ungenau, nur Tendenz")
+            parts.append("Waage ungenau")
         if m["stale"]:
             parts.append("lange nicht gemessen")
         lines.append(f"- {labels[key]}: {', '.join(parts)}")
@@ -56,7 +64,7 @@ def prompt(profile, trend, latest, labels):
     return (f"Ziel: {profile.get('goal') or 'fitness'}; Geschlecht: {profile.get('sex') or 'unbekannt'}; "
             f"Größe: {profile.get('height_cm') or 'unbekannt'} cm.\n"
             + (f"Regelbasierte Einordnung: {verdict['text']}\n" if verdict else "")
-            + "Zahlen (Änderungen als Differenz des geglätteten Werts):\n" + "\n".join(lines))
+            + "Zahlen:\n" + "\n".join(lines))
 
 
 def _cut(text):
