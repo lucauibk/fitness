@@ -248,3 +248,69 @@ def read_measurement(image_b64, media_type):
     except (TypeError, ValueError):
         day = None
     return {"values": values, "date": day, "dropped": dropped}
+
+
+# --------------------------------------------------------- Koerper-Tipps
+ADVICE_SECTIONS = {"gut": "Was gut läuft", "schlecht": "Was nicht gut läuft",
+                   "verbessern": "Was du verbessern kannst"}
+ADVICE_MAX_ITEMS = 3
+ADVICE_MAX_CHARS = 240
+
+
+def _num_text(v):
+    return None if v is None else f"{v:+.1f}".replace(".", ",")
+
+
+def body_advice(profile, trend, latest, labels):
+    """Tipps zur Koerperentwicklung. Verschickt werden nur Ziel, Geschlecht, Groesse und die
+    Trend-Zahlen – keine Namen, keine einzelnen Messtage. Ergebnis:
+    {"gut": [...], "schlecht": [...], "verbessern": [...]} oder {"error": ...}."""
+    lines = []
+    for key, m in trend.get("metrics", {}).items():
+        parts = [f"aktuell {latest[key]['value']}, geglättet {m['smoothed']}"]
+        for label, val in (("seit letzter Messung", (m["since_last"] or {}).get("delta")),
+                           ("4 Wochen", m["w4"]), ("12 Wochen", m["w12"])):
+            if val is not None:
+                parts.append(f"{label} {_num_text(val)}")
+        if m["noisy"]:
+            parts.append("Waage ungenau, nur Tendenz")
+        if m["stale"]:
+            parts.append("lange nicht gemessen")
+        lines.append(f"- {labels[key]}: {', '.join(parts)}")
+    if not lines:
+        return {"error": "Es gibt noch keine Messungen für Tipps."}
+    verdict = trend.get("verdict")
+    prompt = (
+        "Du gibst Tipps ausschließlich zu den Körpermessungen einer Person: Wie entwickeln sich "
+        "die Werte, passt das zum Ziel, wie belastbar sind die Messungen, wie misst man besser "
+        "(gleiche Tageszeit, gleiche Bedingungen, sinnvoller Messabstand, fehlende Werte wie "
+        "Umfänge). Einzelmessungen schwanken; Körperfett und Muskelmasse aus Impedanzwaagen "
+        "sind nur Tendenzen.\n"
+        f"Ziel: {profile.get('goal') or 'fitness'}; Geschlecht: {profile.get('sex') or 'unbekannt'}; "
+        f"Größe: {profile.get('height_cm') or 'unbekannt'} cm.\n"
+        + (f"Regelbasierte Einordnung: {verdict['text']}\n" if verdict else "")
+        + "Zahlen (Änderungen als Differenz des geglätteten Werts):\n" + "\n".join(lines) + "\n"
+        "Antworte NUR mit JSON ohne Text davor oder danach:\n"
+        '{"gut": ["..."], "schlecht": ["..."], "verbessern": ["..."]}\n'
+        f"Regeln: je höchstens {ADVICE_MAX_ITEMS} kurze Sätze auf Deutsch (du-Form), jeder konkret "
+        "und aus den Zahlen begründet. Keine Zahlen erfinden, keine Diagnosen, keine "
+        "Supplement- oder Medikamentenempfehlungen. Keine Tipps zu Training, Ernährung oder "
+        "Schlaf – nur zu den Messwerten und zum Messen selbst. Bei dünner Datenlage ehrlich sagen, dass "
+        "ein Urteil noch zu früh ist. Wenn nichts schlecht läuft, lass die Liste leer."
+    )
+    res = ask(prompt, max_tokens=700)
+    if "error" in res:
+        return res
+    try:
+        data = _json_block(res["text"])
+    except (ValueError, json.JSONDecodeError):
+        return {"error": "Die Tipps konnten nicht gelesen werden – bitte nochmal versuchen."}
+    out = {}
+    for key in ADVICE_SECTIONS:
+        items = data.get(key) if isinstance(data, dict) else None
+        items = items if isinstance(items, list) else []
+        out[key] = [t.strip()[:ADVICE_MAX_CHARS] for t in items
+                    if isinstance(t, str) and t.strip()][:ADVICE_MAX_ITEMS]
+    if not any(out.values()):
+        return {"error": "Die KI hat keine Tipps geliefert."}
+    return out

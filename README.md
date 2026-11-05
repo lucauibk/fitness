@@ -55,7 +55,9 @@ man prüft sie im Formular und speichert erst dann. Das Bild wird nicht gespeich
 
 - Alle Daten liegen in `fitness.db` auf dem Pi.
 - An **Anthropic** (nur mit `ANTHROPIC_API_KEY`, nur auf Knopfdruck): Plan-Check, KI-Verfeinerung
-  (Plan + Eckdaten ohne Namen) und der ViCoach-Screenshot.
+  (Plan + Eckdaten ohne Namen), der ViCoach-Screenshot und die Körper-Tipps (Ziel, Geschlecht, Größe
+  und die Trend-Zahlen aus den Messungen, ohne Namen und ohne einzelne Messtage). Die Tipps entstehen
+  beim ersten Mal auf Knopfdruck und erneuern sich danach bei jeder neuen Messung selbst.
 - An **Anthropic** über Claude Code (nur wenn der Coach-Timer eingerichtet ist, täglich): aktiver Plan,
   Block-Stand, Trainings der letzten sechs Wochen, Check-ins (Schlaf, Stress, Muskelkater), Ziele und
   eingetragene Beschwerden – ohne Namen und Körperdaten.
