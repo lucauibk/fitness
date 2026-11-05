@@ -6,6 +6,7 @@ import { scanBarcode } from "./scanner.js";
 
 let root;
 let data = null;
+let week = null;   // Wochenbilanz, kommt nach dem Tag und darf fehlen (offline)
 let day = null;   // YYYY-MM-DD, null = heute
 let waterExtra = 0;   // optimistisch, bis der Klick bestaetigt oder in den Ausgang gelegt ist
 
@@ -161,6 +162,37 @@ function waterCard(ml, goal) {
   </div>`;
 }
 
+const DAY_TYPE = { training: "Trainingstag", rest: "Ruhetag" };
+
+/** Eine Zeile unter dem Ring: Trainings-/Ruhetag und was noch fehlt. */
+function feedbackLine() {
+  const parts = [DAY_TYPE[data.goals.day_type], ...(data.feedback || []).map((f) => f.text)].filter(Boolean);
+  const warn = (data.feedback || []).some((f) => f.tone === "warn");
+  return parts.length ? `<p class="hint nutri-line${warn ? " warn" : ""}">${esc(parts.join(" · "))}</p>` : "";
+}
+
+const WEEKDAY = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+
+/** Die letzten sieben Tage, eingeklappt: Balken = gegessene kcal, Linie = Tagesziel. */
+function weekCard() {
+  if (!week) return "";
+  const scale = Math.max(...week.days.map((d) => Math.max(d.kcal, d.goal_kcal || 0)), 1) * 1.1;
+  const bars = week.days.map((d) => {
+    const label = WEEKDAY[parseYmd(d.date).getDay()];
+    const goal = d.goal_kcal ? Math.round((d.goal_kcal / scale) * 100) : null;
+    return `<div class="wk-day${d.open ? " is-open" : ""}${d.logged ? "" : " is-empty"}">
+      <div class="wk-bar" title="${esc(`${label}: ${num(d.kcal)} kcal`)}">
+        ${goal !== null ? `<i class="wk-goal" style="bottom:${goal}%"></i>` : ""}
+        <b style="height:${Math.round((d.kcal / scale) * 100)}%"></b></div>
+      <span>${label}${d.training ? ` <i class="wk-dot" aria-label="Trainingstag"></i>` : ""}</span></div>`;
+  }).join("");
+  const summary = week.avg_kcal === null ? "noch keine Bilanz" : `Ø ${num(week.avg_kcal)} kcal`;
+  return `<details class="card nutri-week"><summary class="group-title">Letzte 7 Tage
+      <span class="count-muted">${esc(summary)}</span>${icon("down", "chev")}</summary>
+    <div class="wk-chart" role="img" aria-label="${esc(week.text[0])}">${bars}</div>
+    ${week.text.map((t) => `<p class="hint">${esc(t)}</p>`).join("")}</details>`;
+}
+
 function render() {
   const g = data.goals.goals || {};
   const t = data.totals;
@@ -178,6 +210,7 @@ function render() {
       ${ring(t.kcal + pendKcal, g.kcal ? g.kcal + (data.burned_kcal || 0) : g.kcal)}
       <div class="nutri-stat"><b>${num(data.burned_kcal || 0)}</b><span>Verbrannt</span></div>
     </div>
+    ${feedbackLine()}
     ${t.kcal ? donutCard(t, g, dayDetails()) : ""}
     ${!g.kcal ? `<p class="callout">${icon("warn")} Für ein Kalorienziel fehlen noch: ${esc((data.goals.missing || []).join(", "))}.
       <a href="#profil">Im Profil ergänzen</a></p>` : ""}
@@ -207,6 +240,7 @@ function render() {
           <button type="button" class="link-btn copy-meal" data-saved-meal="${key}">${icon("food")} Gespeicherte Mahlzeit</button></div>`}
       </div>`;
     }).join("")}
+    ${weekCard()}
     <p class="hint pad source-note">Nährwerte: Bundeslebensmittelschlüssel (BLS) 4.0, Max Rubner-Institut, CC BY 4.0 · Markenprodukte: Open Food Facts, ODbL</p>`;
 }
 
@@ -318,8 +352,14 @@ async function openSavedMeals(meal) {
 
 export async function load() {
   if (!data) root.innerHTML = skeleton(5);
-  data = await api(`nutrition/day?date=${day || todayIso()}`);
+  const when = day || todayIso();
+  data = await api(`nutrition/day?date=${when}`);
   render();
+  api(`nutrition/week?date=${when}`).then((w) => {
+    if (data?.date !== when) return;      // inzwischen anderer Tag
+    week = w;
+    render();
+  }).catch(() => { week = null; });
 }
 
 // ------------------------------------------------------- Hinzufügen
@@ -375,7 +415,7 @@ function highlight(text, q) {
   return `${esc(text.slice(0, at))}<mark>${esc(text.slice(at, at + word.length))}</mark>${esc(text.slice(at + word.length))}`;
 }
 
-function foodRow(f, i, q) {
+function foodRow(f, i, q, again = false) {
   // Schon mal gegessen: die zuletzt genommene Menge ist, was man mit einem Tipp uebernimmt –
   // also deren kcal als Hauptzahl, nicht mal pro Portion und mal pro 100 g.
   if (f.last_grams) {
@@ -383,7 +423,9 @@ function foodRow(f, i, q) {
     return `<div class="row-item food-row" role="button" tabindex="0" data-pick="${i}">
       <div class="row-main"><div class="row-title">${highlight(f.name, q)}</div>
         <div class="row-meta">${meta.map((m) => `<span>${m}</span>`).join("")}</div></div>
-      <span class="row-aside food-kcal"><b>${num(kcalFor(f, f.last_grams))} kcal</b><small>${portionsText({ ...f, grams: f.last_grams })}${num(f.last_grams)} g wie zuletzt</small></span></div>`;
+      <span class="row-aside food-kcal"><b>${num(kcalFor(f, f.last_grams))} kcal</b><small>${portionsText({ ...f, grams: f.last_grams })}${num(f.last_grams)} g wie zuletzt</small></span>
+      ${again ? `<button type="button" class="icon-btn tonal-icon again-btn" data-repeat="${i}"
+        aria-label="${esc(f.name)}, ${num(f.last_grams)} g wie zuletzt direkt eintragen">${icon("plus")}</button>` : ""}</div>`;
   }
   // Erste natuerliche Einheit als Hauptzahl: "1 Stück (mittel) = 87 kcal" sagt mehr als "58 / 100 g"
   const u = unitsOf(f)[0];
@@ -485,7 +527,7 @@ function openAdd(meal, opts = {}) {
     const from = st.items.length;
     st.items.push(...items);
     return `<h3 class="form-section">${title}</h3>
-      ${items.length ? `<div class="list">${items.map((f, i) => foodRow(f, from + i, st.query)).join("")}</div>` : empty}`;
+      ${items.length ? `<div class="list">${items.map((f, i) => foodRow(f, from + i, st.query, !picking)).join("")}</div>` : empty}`;
   }
 
   function paintList() {
@@ -634,6 +676,27 @@ function openAdd(meal, opts = {}) {
     });
   }
 
+  /** Mit einem Tipp noch mal dasselbe in derselben Menge wie zuletzt – ohne Mengenfenster. */
+  const added = new Set();
+  async function logAgain(btn) {
+    const f = st.items[Number(btn.dataset.repeat)];
+    if (!f?.id || !(f.last_grams > 0)) return;
+    if (added.has(f.id)) return toast(`${f.name} ist schon eingetragen – zum Ändern im Tagebuch öffnen.`);
+    await busy(btn, async () => {
+      try {
+        const res = await outbox.send({ path: "food-log", body: {
+          profile_id: getProfile(), food_id: f.id, grams: f.last_grams, meal: st.meal, date: entryDay(data?.date),
+          client_id: outbox.uuid(), preview: { name: f.name, kcal: kcalFor(f, f.last_grams) } } });
+        added.add(f.id);
+        btn.innerHTML = icon("check");
+        btn.classList.add("done");
+        toast(res.queued ? "Gespeichert – wird gesendet, sobald wieder Verbindung da ist"
+          : `${f.name} · ${num(f.last_grams)} g eingetragen`);
+        window.dispatchEvent(new CustomEvent("data-changed"));
+      } catch (e) { toast(e.message, { error: true }); }
+    });
+  }
+
   async function byBarcode(code) {
     try {
       const res = await api(`foods/barcode/${code}`, { timeout: OFF_TIMEOUT });
@@ -703,6 +766,8 @@ function openAdd(meal, opts = {}) {
 
   sheet.addEventListener("click", async (ev) => {
     const t = (s) => ev.target.closest(s);
+    const repeat = t("[data-repeat]");
+    if (repeat) return logAgain(repeat);
     const p = t("[data-pick]");
     if (p) return pick(st.items[Number(p.dataset.pick)]);
     if (t("[data-back]")) { st.food = null; return paintSearch(); }

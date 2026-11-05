@@ -1077,3 +1077,18 @@ h1, h2, .page-title, .group-title { font-weight: 800; letter-spacing: 0.01em; }
 .ai-item.off { opacity: .5; }
 .ai-item .toggle small { color: var(--muted); font-weight: 400; }
 .ai-kcal { margin: 0; align-self: flex-end; padding-bottom: 12px; font-weight: 650; }
+
+/* ============================================================ Ernährung: Rückmeldung */
+.nutri-line { margin: calc(var(--s2) * -1) 0 var(--s3); text-align: center; }
+.nutri-line.warn { color: var(--urgent); }
+.nutri-week { margin-top: var(--s3); }
+.wk-chart { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--s2); margin: var(--s3) 0; }
+.wk-day { display: grid; gap: 4px; text-align: center; font-size: var(--fs-xs); color: var(--muted); }
+.wk-bar { position: relative; height: 72px; display: flex; align-items: flex-end; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
+.wk-bar b { display: block; width: 100%; background: var(--accent); border-radius: 6px 6px 0 0; }
+.wk-day.is-open .wk-bar b { opacity: .45; }
+.wk-day.is-empty .wk-bar b { background: transparent; }
+.wk-goal { position: absolute; left: 0; right: 0; height: 0; border-top: 2px dashed var(--muted); opacity: .7; }
+.wk-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+.again-btn { flex: none; margin-left: var(--s2); }
+.again-btn.done { color: var(--accent); }

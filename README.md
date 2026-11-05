@@ -10,7 +10,7 @@ sichtbar, Einträge werden lokal gesammelt und nachgesendet, sobald wieder Netz 
 |---|---|
 | Heute | Tages-Serie, Check-in (Schlaf, Energie, Stress, Muskelkater) → Readiness, an die Erholung angepasstes Training, Mobility-Routine, Kalorien |
 | Training | Einheit (mit Pausen-Timer, Bildschirm bleibt an, Bewertung beim Beenden) · Plan (Splits, Assistent, Plan-Check) · Übungen (Anleitung, Muskel-Grafik, Video-Suche) · Cardio |
-| Ernährung | Kalorien/Makros gegen das Ziel, Mahlzeiten, Suche und Barcode über Open Food Facts, eigene Lebensmittel |
+| Ernährung | Kalorien/Makros gegen das Ziel (Trainings- und Ruhetag getrennt), Rückmeldung zum Tag (was noch fehlt) und zur Woche, Mahlzeiten, Wiedereintragen mit einem Tipp, Suche und Barcode über Open Food Facts, eigene Lebensmittel |
 | Fortschritt | Übersicht (Bestleistungen, Volumen) · Körper (Gewicht, Körperfett, Maße, ViCoach) · Erfolge (Serien, Abzeichen) · Verlauf |
 | Profil | Daten, Ernährungsziel, Plan-Assistent |
 
@@ -60,6 +60,9 @@ Aufbau wie bei Kalorienrechnern (z. B. ESN), der Rechenweg steht im Profil unter
 - **Gesamtumsatz:** Grundumsatz × Alltags-PAL (ohne Sport: wenig 1,3 · mittel 1,5 · hoch 1,7, unbekannt 1,4)
   plus Krafttraining als eigener Posten (Einheiten pro Woche × Dauer, MET 5, netto). 1 oder 6 Einheiten ergeben
   also unterschiedliche Werte.
+- **Trainings- und Ruhetag:** An geplanten oder gemachten Trainingstagen kommt der volle Mehrverbrauch der Einheit
+  dazu, an Ruhetagen nicht; im Wochenmittel bleibt es beim selben Wert. Ohne Trainingsplan gilt das Wochenmittel.
+- **Wochenbilanz:** Schnitt nur aus abgeschlossenen Tagen mit Einträgen (ein leerer Tag ist nicht 0 kcal).
 - **Ziel:** Abnehmen ≈ 0,5 % Körpergewicht pro Woche (−300 bis −500 kcal), Aufbau +10 % (+200 bis +500 kcal),
   Kraft +150, Fitness ±0. Nie unter dem Grundumsatz.
 - **Eiweiß:** 1,6 bis 2,2 g pro kg Körpergewicht je nach Ziel, mit Körperfett auf die fettfreie Masse bezogen,
