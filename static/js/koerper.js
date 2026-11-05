@@ -25,13 +25,13 @@ function sinceLast(key) {
   return d === undefined || Math.abs(d) < 0.1 ? "" : ` · ${signed(d, key)}`;
 }
 
-// Einordnung: Urteil zum Gewichtstrend (Regel) plus KI-Tipps. Die Tipps entstehen beim ersten Mal auf
-// Knopfdruck und erneuern sich danach, sobald eine neue Messung da ist (Signatur ändert sich).
+// Einordnung: Urteil zum Gewichtstrend (Regel) plus KI-Tipps. Die Tipps entstehen nur auf Knopfdruck.
+// Gemerkt wird mit einer Signatur der Messwerte: nach einer neuen Messung gelten sie als überholt
+// und verschwinden, bis die Person sie neu anfordert.
 const TIP_ICON = { gut: "check", schlecht: "warn", verbessern: "spark" };
 const tipsKey = () => `bodytips.${getProfile()}`;
 const tipsSignature = () => JSON.stringify(Object.entries(data.latest).map(([k, v]) => [k, v.date, v.value]));
 let tipsBusy = false;
-let tipsFailedSig = null;   // nach einem Fehler nicht in Schleife neu versuchen, bis wieder neuer Kontext kommt
 
 function currentTips() {
   const saved = prefs.get(tipsKey());
@@ -61,22 +61,13 @@ async function fetchTips() {
   render();
   try {
     const tips = await api("measurements/advice", { method: "POST", body: {}, timeout: 65000 });
-    tipsFailedSig = null;
     if (!prefs.set(tipsKey(), { sig, tips })) toast("Die Einordnung wird nicht gemerkt (Speicher voll oder privater Modus).");
   } catch (e) {
-    tipsFailedSig = sig;
     toast(e.offline ? "Dafür braucht es eine Verbindung." : e.message, { error: true });
   } finally {
     tipsBusy = false;
     render();
   }
-}
-
-/** Hat die Person schon einmal Tipps erstellt und passen sie nicht mehr zu den Messungen? */
-function tipsOutdated() {
-  const saved = prefs.get(tipsKey());
-  return Boolean(data.tips_available && saved && Object.keys(data.latest).length
-    && saved.sig !== tipsSignature() && tipsFailedSig !== tipsSignature());
 }
 
 function tile(key) {
@@ -123,7 +114,6 @@ export async function load() {
   if (!data) root.innerHTML = skeleton(4);
   data = await api("measurements");
   render();
-  if (tipsOutdated()) fetchTips();
 }
 
 // ------------------------------------------------------------- Formular
