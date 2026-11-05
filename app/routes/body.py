@@ -6,7 +6,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import activity, ai, body
+from .. import activity, ai, body, db
 from ..common import FIELD_NAMES, current_profile, owned
 from .daily import _day
 
@@ -47,6 +47,8 @@ class ScanIn(BaseModel):
 @router.get("/measurements")
 def list_measurements(profile_id: int = Depends(current_profile)):
     out = body.history(profile_id)
+    goal = (db.get_row("profiles", profile_id) or {}).get("goal")
+    out["trend"] = body.trend(out["series"], goal)
     out["ai_available"] = ai.available()
     return out
 
@@ -65,6 +67,22 @@ def add_measurement(data: MeasurementIn):
     row, created = body.save(profile_id, payload)
     return {"measurement": row, "created": created,
             "milestones": activity.new_milestones(before, profile_id) if created else []}
+
+
+@router.post("/measurements/advice")
+def advice(profile_id: int = Depends(current_profile)):
+    """KI-Tipps zur Entwicklung – nur auf Knopfdruck, nur Trend-Zahlen und Eckdaten."""
+    if not ai.available():
+        raise HTTPException(400, "Für Tipps braucht es einen KI-Schlüssel (ANTHROPIC_API_KEY).")
+    profile = db.get_row("profiles", profile_id) or {}
+    hist = body.history(profile_id)
+    if not hist["latest"]:
+        raise HTTPException(400, "Trag zuerst eine Messung ein.")
+    res = ai.body_advice(profile, body.trend(hist["series"], profile.get("goal")),
+                         hist["latest"], body.LABELS)
+    if "error" in res:
+        raise HTTPException(422, res["error"])
+    return res
 
 
 @router.delete("/measurements/{mid}")
