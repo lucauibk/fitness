@@ -8,7 +8,7 @@
  * Server legt zu derselben client_id nur einen Datensatz an. Ein Eintrag verlaesst den
  * Ausgang erst nach einer bestaetigten Antwort.
  */
-import { api, prefs, toast } from "./util.js";
+import { api, getProfile, prefs, toast } from "./util.js";
 
 const KEY = "outbox";
 let sending = false;
@@ -135,9 +135,12 @@ const relDay = (iso) => {
 };
 
 /** Eintraege eines Typs, die noch im Ausgang liegen – die Oberflaeche zeigt sie
- *  trotzdem an, damit nichts verloren wirkt. */
+ *  trotzdem an, damit nichts verloren wirkt. Nur die des gewaehlten Profils: gesendet wird
+ *  zwar alles (profile_id steht im Eintrag), angezeigt aber nicht beim anderen Profil. */
 export function pending(path) {
-  return list().filter((e) => e.path === path).map((e) => ({
+  const pid = getProfile();
+  return list().filter((e) => e.path === path
+    && (e.body?.profile_id == null || Number(e.body.profile_id) === pid)).map((e) => ({
     ...e.body,
     id: `pending-${e.body.client_id}`,
     pending: true,
