@@ -1,5 +1,5 @@
-"""Taeglicher Coach-Lauf: pro Profil Plan + letzte Trainings an Claude Code geben und die
-Vorschlaege als Hinweise in der App ablegen. Aendert keine Plaene.
+"""Taeglicher Coach-Lauf: pro Profil Plan + letzte Trainings an Claude Code geben und
+hoechstens eine Nachricht in den Coach-Chat schreiben. Aendert keine Plaene.
 
     PYTHONPATH=. .venv/bin/python scripts/coach_daily.py [--dry-run]
 
@@ -13,7 +13,7 @@ import re
 import subprocess
 import sys
 
-from app import claude_cli, coach, db
+from app import claude_cli, coach, coach_chat, db
 
 log = logging.getLogger("coach")
 MODEL = os.environ.get("COACH_MODEL", "claude-opus-5-5")
@@ -22,8 +22,8 @@ TIMEOUT = 300
 
 def main(dry_run=False):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    if not db.one("SELECT name FROM sqlite_master WHERE type='table' AND name='coach_notes'"):
-        log.error("Tabelle coach_notes fehlt – die App einmal starten, sie legt sie an.")
+    if not db.one("SELECT name FROM sqlite_master WHERE type='table' AND name='coach_messages'"):
+        log.error("Tabelle coach_messages fehlt – die App einmal starten, sie legt sie an.")
         return 1
     failed = 0
     for p in db.rows("SELECT id FROM profiles ORDER BY id"):
@@ -34,7 +34,7 @@ def main(dry_run=False):
             continue
         try:
             raw = claude_cli.ask_with_retry(coach.prompt(ctx), coach.SYSTEM, MODEL, TIMEOUT)
-            result = coach.parse(raw, pid)
+            result = coach.parse(raw)
         except (RuntimeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired) as e:
             log.error("Profil %s: %s", pid, e)
             failed += 1
@@ -42,13 +42,16 @@ def main(dry_run=False):
         if dry_run:
             analyse = re.search(r"<analyse>(.*?)</analyse>", raw, re.S)
             print(f"--- Profil {pid}\n{analyse.group(1).strip() if analyse else '(keine Analyse)'}")
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print(f"Impuls: {result['impuls']}\nNachricht: {result['message'] or '(keine)'}")
+            print(f"Vorschläge: {coach_chat.validate_actions(result['aktionen'], pid)}")
             continue
-        coach.resolve(pid, result["resolved"])
-        coach.expire(pid)
-        coach.store(pid, result["notes"])
-        log.info("Profil %s: %d Hinweis(e) abgelegt, %d erledigt", pid,
-                 len(result["notes"]), len(result["resolved"]))
+        if result["impuls"]:
+            coach_chat.set_impulse(pid, result["impuls"])
+        if result["message"]:
+            coach_chat.add_message(pid, "coach", result["message"], source="daily",
+                                   actions=coach_chat.validate_actions(result["aktionen"], pid))
+        log.info("Profil %s: Impuls %s, %s", pid, "ja" if result["impuls"] else "fehlt",
+                 "Nachricht geschrieben" if result["message"] else "nichts Neues")
     return 1 if failed else 0
 
 

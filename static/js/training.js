@@ -4,6 +4,7 @@
 import { $, $$, api, armDelete, closeSheet, empty, esc, reviewHtml, watchCoach, getProfile,
   icon, openSheet, prefs, setsSummary, skeleton, toast } from "./util.js";
 import * as outbox from "./outbox.js";
+import { openCoach } from "./coach.js";
 import { openExercise } from "./uebungen.js";
 
 let root;
@@ -284,6 +285,7 @@ function renderDraft(draft) {
     <div class="btn-row wide sticky-actions">
       <button type="button" class="btn danger ghost" data-cancel>Verwerfen</button>
       <span class="grow"></span>
+      <button type="button" class="coach-fab" data-coach-session aria-label="Coach fragen" title="Coach fragen">${icon("chat")}</button>
       <button type="button" class="btn primary" data-finish>${icon("check")} Einheit beenden</button>
     </div>`;
   if (!timer) {
@@ -500,15 +502,99 @@ async function openSwap(exIndex) {
     if (!t) return;
     const alt = alts.find((a) => a.id === Number(t.dataset.pickAlt));
     closeSheet();
-    update((d) => {
-      const e = d.exercises[exIndex];
-      Object.assign(e, { exercise_id: alt.id, name: alt.name, unit: alt.unit,
-        pattern: alt.pattern, kind: alt.kind, last: [], adjusted: null });
-      e.sets = e.sets.map((s, i) => ({ set_no: i + 1, reps: null, weight: null, rpe: null,
-        warmup: s.warmup, done: false }));
-    });
+    update((d) => swapInDraft(d.exercises[exIndex], alt));
     toast(`${alt.name} statt vorheriger Übung`);
   });
+}
+
+/** Uebung in der laufenden Einheit tauschen: neue Uebung, Saetze leer (das alte Gewicht passt nicht). */
+function swapInDraft(e, alt) {
+  Object.assign(e, { exercise_id: alt.id, name: alt.name, unit: alt.unit,
+    pattern: alt.pattern, kind: alt.kind, last: [], adjusted: null, estimate: false });
+  e.sets = e.sets.map((s, i) => ({ set_no: i + 1, reps: null, weight: null, rpe: null,
+    warmup: s.warmup, done: false }));
+}
+
+// ------------------------------------------------------- Coach im Training
+/** Was der Coach von der Einheit wissen muss – Namen und letztes Mal holt der Server selbst. */
+function sessionSnapshot(d) {
+  return {
+    title: d.title || null, started_at: d.started_at, block: d.block, notes: d.notes || null,
+    current: focusIndex(d),
+    exercises: d.exercises.map((e) => ({
+      exercise_id: e.exercise_id, reps_min: e.reps_min ?? null, reps_max: e.reps_max ?? null,
+      sets: e.sets.map((s) => ({ reps: s.reps ?? null, weight: s.weight ?? null, rpe: s.rpe ?? null,
+        done: Boolean(s.done), warmup: Boolean(s.warmup) })),
+    })),
+  };
+}
+
+const doneSets = (e) => e.sets.filter((s) => s.done).length;
+
+/** Offene Arbeitssaetze nach dem Vorschlag: Anzahl, Gewicht, Wiederholungen. Abgehakte bleiben. */
+function adjustSets(e, a) {
+  if (a.sets != null) {
+    const work = e.sets.filter((s) => !s.warmup);
+    if (a.sets > work.length) {
+      const tpl = work.at(-1) || {};
+      for (let n = work.length; n < a.sets; n += 1) {
+        e.sets.push({ reps: tpl.reps ?? null, weight: tpl.weight ?? null, rpe: null, done: false });
+      }
+    } else {
+      let remove = work.length - a.sets;
+      for (let i = e.sets.length - 1; i >= 0 && remove > 0; i -= 1) {
+        if (!e.sets[i].warmup && !e.sets[i].done) { e.sets.splice(i, 1); remove -= 1; }
+      }
+    }
+  }
+  for (const s of e.sets) {
+    if (s.done || s.warmup) continue;
+    if (a.weight != null) s.weight = a.weight;
+    if (a.reps != null) s.reps = a.reps;
+  }
+  e.sets.forEach((x, i) => { x.set_no = i + 1; });
+}
+
+/** Verbindung zwischen Coach-Chat und Entwurf: der Server kennt die Einheit nicht, Vorschlaege
+ *  fuer "nur heute" wendet deshalb das Geraet an – mit Rueckgaengig, solange nichts abgehakt wurde. */
+const sessionBridge = {
+  snapshot: () => sessionSnapshot(getDraft()),
+  since: () => getDraft()?.started_at,
+  check(a) {
+    const e = getDraft()?.exercises[a.index];
+    if (!e) throw new Error("Die Einheit läuft nicht mehr.");
+    if (e.exercise_id !== a.from_id) throw new Error(`An der Stelle steht nicht mehr ${a.from}.`);
+  },
+  apply(a, key) {
+    update((d) => {
+      const e = d.exercises[a.index];
+      d.coachUndo = { ...(d.coachUndo || {}), [key]: { index: a.index, before: structuredClone(e), done: doneSets(e) } };
+      if (a.type === "session_swap") {
+        swapInDraft(e, { id: a.to_id, name: a.to, unit: a.unit, pattern: a.pattern, kind: a.kind });
+        d.coachUndo[key].done = 0;
+      } else adjustSets(e, a);
+    });
+  },
+  canUndo: (key) => Boolean(getDraft()?.coachUndo?.[key]),
+  checkUndo(key) {
+    const u = getDraft()?.coachUndo?.[key];
+    const e = u && getDraft().exercises[u.index];
+    if (!e) throw new Error("Das lässt sich nicht mehr zurücknehmen.");
+    if (doneSets(e) !== u.done) throw new Error("Seitdem wurden Sätze abgehakt – bitte direkt in der Übung ändern.");
+  },
+  undo(key) {
+    update((d) => {
+      const u = d.coachUndo?.[key];
+      if (!u) return;
+      d.exercises[u.index] = u.before;
+      delete d.coachUndo[key];
+    });
+  },
+};
+
+function openSessionCoach() {
+  if (!getDraft()) return;
+  openCoach({ session: sessionBridge });
 }
 
 /** Nach der zuletzt fertigen Uebung die naechste offene aufklappen und hinscrollen. */
@@ -846,6 +932,7 @@ export async function mount(el) {
     // data-cancel ist zweistufig (armDelete) und wird einmal pro renderDraft() registriert,
     // nicht hier im delegierten Handler; Entfernen, Scheiben, Tauschen stecken im Menue.
     if (t("[data-add-ex]")) return addExercise();
+    if (t("[data-coach-session]")) return openSessionCoach();
     const fin = t("[data-finish]");
     if (fin) return confirmFinish(fin);
   });

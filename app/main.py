@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-from . import (activity, ai, analysis, checker, coach, daily_view, db, export,  # noqa: E402
+from . import (activity, ai, analysis, checker, daily_view, db, export,  # noqa: E402
                readiness, stats, workout_review)
 from .common import FIELD_NAMES, NOT_NULL, _data, _found, current_profile, owned  # noqa: E402,F401
 from .planner import generate  # noqa: E402
@@ -58,9 +58,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Fitness", lifespan=lifespan)
 
 from .routes import body as body_routes, daily, library, nutrition as nutrition_routes, planner as planner_routes  # noqa: E402
+from .routes import coach as coach_routes, rewards as rewards_routes  # noqa: E402
 
 for _router in (daily.router, library.router, nutrition_routes.router, body_routes.router,
-                planner_routes.router):
+                planner_routes.router, rewards_routes.router, coach_routes.router):
     app.include_router(_router)
 
 # ------------------------------------------------------- Host-Pruefung
@@ -185,6 +186,7 @@ class ProfileIn(BaseModel):
     carbs_goal: Optional[int] = Field(None, ge=0, le=1500)
     fat_goal: Optional[int] = Field(None, ge=0, le=500)
     water_goal_ml: Optional[int] = Field(None, ge=500, le=8000)
+    motivation: Optional[str] = Field(None, max_length=300)
 
 
 class ExerciseIn(BaseModel):
@@ -482,18 +484,6 @@ def api_delete_split_exercise(item_id: int, profile_id: int = Depends(current_pr
 @app.get("/api/today")
 def api_today(profile_id: int = Depends(current_profile)):
     return daily_view.build(profile_id)
-
-
-@app.get("/api/coach-notes")
-def api_coach_notes(profile_id: int = Depends(current_profile)):
-    return coach.open_notes(profile_id)
-
-
-@app.post("/api/coach-notes/{note_id}/dismiss")
-def api_coach_dismiss(note_id: int, profile_id: int = Depends(current_profile)):
-    owned("coach_notes", note_id, profile_id, "Dieser Hinweis")
-    coach.dismiss(note_id)
-    return {"ok": True}
 
 
 @app.get("/api/day/{day_id}")

@@ -584,6 +584,14 @@ button.ex-head {
   backdrop-filter: blur(8px);
 }
 .sticky-actions .btn.danger { flex: none; }
+/* Coach waehrend der Einheit: rundes Symbol in der Aktionsleiste (schwebend wuerde es die
+   Abhak-Felder der Saetze verdecken) */
+.coach-fab {
+  flex: none; width: var(--tap); height: var(--tap); border: 0; border-radius: 50%;
+  display: grid; place-items: center; background: var(--accent-soft); color: var(--accent);
+}
+.coach-fab svg { width: 22px; height: 22px; }
+.coach-fab:active { transform: scale(0.94); }
 
 /* Auswertungen */
 .bars { display: grid; gap: 6px; margin-top: var(--s2); }
@@ -737,6 +745,10 @@ button.chip { border: 0; font-family: inherit; }
 
 .mini-card { display: flex; align-items: center; gap: var(--s3); color: inherit; text-decoration: none; cursor: pointer; }
 .mini-card .hint { margin: 0; }
+/* Shopping-Topf: Foto vom Wunschteil statt Symbol */
+.topf-thumb { width: 32px; height: 32px; flex: none; border-radius: 10px; object-fit: cover; background: var(--surface-2); }
+.topf-thumb.lg, .row-icon.lg { width: 56px; height: 56px; border-radius: var(--r2); }
+.topf-card .progress.sm { margin-top: 8px; }
 /* Ernaehrung auf "Heute": Link-Bereich plus Wasserzeile in einer Karte */
 .nutri-mini { display: grid; gap: var(--s3); }
 .water-line { display: flex; align-items: center; gap: var(--s2); padding-top: var(--s3); border-top: 1px solid var(--line); font-size: var(--fs-sm); }
@@ -980,14 +992,88 @@ h1, h2, .page-title, .group-title { font-weight: 800; letter-spacing: 0.01em; }
 .donut-legend i { width: 10px; height: 10px; border-radius: 50%; }
 .donut-legend small { grid-column: 2 / -1; color: var(--faint); margin-top: -8px; font-size: var(--fs-xs); }
 
+/* Naehrwerte im Detail (Akkordion): Tag, Mahlzeit, Eintrag */
+.nutri-details { margin-top: var(--s3); border-top: 1px solid var(--line); }
+.nutri-details > summary {
+  display: flex; align-items: center; gap: var(--s2); min-height: var(--tap); cursor: pointer; list-style: none;
+  color: var(--accent); font-size: var(--fs-sm); font-weight: 600;
+}
+.nutri-details > summary::-webkit-details-marker { display: none; }
+.nutri-details > summary .chev { margin-left: auto; transition: transform 0.2s; }
+.nutri-details[open] > summary .chev { transform: rotate(180deg); }
+.meal .nutri-details { margin-top: var(--s1); }
+.nutri-rows { display: grid; gap: 2px; padding-bottom: var(--s2); }
+/* feste Spalten: alle Balken gleich lang und untereinander */
+.nutri-row { display: grid; grid-template-columns: 8.2em 1fr 9.5em; align-items: center; gap: var(--s2);
+  min-height: 30px; font-size: var(--fs-sm); }
+.nutri-row.sub > span:first-child { padding-left: var(--s3); color: var(--muted); }
+.nutri-row .bar { height: 6px; }
+.nutri-row .macro-val { text-align: right; white-space: nowrap; }
+.nutri-row .macro-val small { color: var(--faint); }
+.nutri-row.over .bar i { background: var(--soon); }
+.nutri-row.over .macro-val { color: var(--soon); }
+.nutri-row.reached .bar i { background: var(--ok); }
+
 /* ------------------------------------------- Plan-Block */
 .block-card { margin-bottom: var(--s3); }
 .block-card .weekbars { margin: var(--s3) 0; }
 .quiet-events .hint { margin: var(--s1) 0 0; }
-.coach-note { display: flex; align-items: flex-start; gap: var(--s2); margin-top: var(--s2); }
-.coach-note + .coach-note { border-top: 1px solid var(--line, rgba(127,127,127,.2)); padding-top: var(--s2); }
-.coach-note-title { margin: 0; font-weight: 600; }
-.coach-note-title small { font-weight: 400; color: var(--muted, inherit); }
-.coach-note .hint { margin: var(--s1) 0 0; }
 .struct-day { margin: var(--s3) 0; }
 .struct-day .row-title small { color: var(--muted, inherit); font-weight: 400; }
+
+/* ======================================================= Coach-Chat */
+.coach-last p, .coach-last ul, .coach-last ol { display: inline; margin: 0; padding: 0; }
+.coach-last li { display: inline; }
+.coach-last li + li::before, .coach-last p + p::before { content: " · "; }
+.coach-last { margin: 2px 0 0; line-height: 1.45; }   /* Impuls ist auf 160 Zeichen begrenzt – nicht abschneiden */
+.coach-unread { margin: 6px 0 0; }
+.sheet.chat-sheet { height: 92dvh; }
+/* Im Training: niedriger, damit die Einheit dahinter sichtbar bleibt */
+.sheet.chat-sheet.compact { height: 72dvh; }
+.chat-sheet.compact .bubble { font-size: var(--fs-sm); }
+.chat-sheet .sheet-body { flex: 1; display: flex; flex-direction: column; padding: 0; }
+.chat-sheet .sheet-head h2 { display: flex; align-items: center; gap: var(--s2); }
+.chat-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3) var(--s4); overscroll-behavior: contain; }
+.bubble { max-width: 85%; padding: 10px 14px; border-radius: 18px; line-height: 1.45; overflow-wrap: anywhere; }
+.bubble-text p { margin: 0; }
+.bubble-text p + p, .bubble-text p + ul, .bubble-text p + ol, .bubble-text ul + p, .bubble-text ol + p { margin-top: 8px; }
+.bubble-text ul, .bubble-text ol { margin: 0; padding-left: 1.2em; }
+.bubble-text li + li { margin-top: 3px; }
+.bubble-text b { font-weight: 650; }
+.chat-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.bubble.has-actions { max-width: 100%; width: 100%; }
+.chat-action { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 12px; background: var(--surface); }
+.chat-action small { display: block; margin: 0; }
+.chat-action .swap-line { overflow-wrap: normal; word-break: normal; hyphens: auto; }
+.chat-action-row { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.chat-action s { color: var(--muted); }
+.chat-action.skipped, .chat-action.undone { opacity: .6; }
+.bubble small { display: block; margin-top: 4px; font-size: var(--fs-xs); opacity: .65; }
+.bubble.coach { align-self: flex-start; background: var(--surface-2); border-bottom-left-radius: 6px; }
+.bubble.mine { align-self: flex-end; background: var(--accent); color: var(--on-accent); border-bottom-right-radius: 6px; }
+.bubble.failed { color: var(--urgent); background: color-mix(in srgb, var(--urgent) 10%, transparent); }
+.chat-empty { margin: auto 0; display: flex; flex-direction: column; gap: var(--s3); }
+.chat-empty .chips { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.chat-form { display: flex; align-items: flex-end; gap: var(--s2); width: 100%; }
+.chat-form textarea { flex: 1; resize: none; min-height: 44px; max-height: 140px; border-radius: 22px; padding: 11px 16px; font: inherit; }
+.chat-form .send { background: var(--accent); color: var(--on-accent); border-radius: 50%; flex: none; }
+.typing { display: inline-flex; gap: 4px; padding: 4px 0; }
+.typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); animation: typing 1.2s infinite ease-in-out; }
+.typing i:nth-child(2) { animation-delay: .15s; }
+.typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes typing { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .typing i { animation: none; } }
+
+/* ======================================================= Ernährung: Einheiten, Favoriten */
+.amount-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+.fav-btn.on { color: var(--soon); }
+.fav-btn.on { --star-fill: currentColor; }   /* Symbol im <use>: Fuellung ueber die Variable */
+.unit-chips { margin-bottom: var(--s2); }
+.form-section .icon { width: 16px; height: 16px; vertical-align: -2px; color: var(--soon); }
+.source-note { font-size: var(--fs-xs); text-align: center; }
+.ai-photo { max-width: 100%; max-height: 220px; border-radius: var(--r2); object-fit: cover; }
+.ai-items { display: flex; flex-direction: column; gap: var(--s2); }
+.ai-item { margin: 0; display: flex; flex-direction: column; gap: var(--s2); }
+.ai-item.off { opacity: .5; }
+.ai-item .toggle small { color: var(--muted); font-weight: 400; }
+.ai-kcal { margin: 0; align-self: flex-end; padding-bottom: 12px; font-weight: 650; }

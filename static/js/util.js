@@ -117,6 +117,72 @@ export const skeleton = (rows = 3) => `<div class="skeleton">${
 // --------------------------------------------------------- Profile
 export const safeColor = (c) => (/^#[0-9a-f]{3,8}$/i.test(c || "") ? c : "var(--faint)");
 
+// Profilfarbe als Akzent der ganzen App. Das Design ist dunkel: eine dunkle Wunschfarbe
+// (z. B. #3a63d8) waere als Text oder Linie kaum lesbar. Deshalb wird nur die Helligkeit
+// angehoben, bis der Kontrast zur Kartenfarbe WCAG-AA (4,5:1) erreicht – Farbton und
+// Saettigung bleiben, die Farbe bleibt also erkennbar.
+const SURFACE = [26, 26, 28];   // --surface #1a1a1c
+const DARK = [11, 11, 12];      // --bg #0b0b0c, Schrift auf hellem Akzent
+
+const hexRgb = (hex) => {
+  let h = hex.slice(1);
+  if (h.length === 3) h = [...h].map((c) => c + c).join("");
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+};
+const luminance = (rgb) => {
+  const [r, g, b] = rgb.map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+export const contrast = (a, b) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+function rgbHsl([r, g, b]) {
+  const [rr, gg, bb] = [r / 255, g / 255, b / 255];
+  const max = Math.max(rr, gg, bb), min = Math.min(rr, gg, bb), l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  const h = max === rr ? (gg - bb) / d + (gg < bb ? 6 : 0) : max === gg ? (bb - rr) / d + 2 : (rr - gg) / d + 4;
+  return [h / 6, s, l];
+}
+function hslRgb([h, s, l]) {
+  if (!s) return [l, l, l].map((v) => Math.round(v * 255));
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  const f = (t) => {
+    t = (t + 1) % 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  return [f(h + 1 / 3), f(h), f(h - 1 / 3)].map((v) => Math.round(v * 255));
+}
+const toHex = (rgb) => `#${rgb.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+
+/** {accent, soft, on, toastAction} fuer eine Profilfarbe – oder null bei ungueltiger Farbe. */
+export function accentTokens(hex) {
+  if (!/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex || "")) return null;
+  let rgb = hexRgb(hex);
+  const [h, s, l0] = rgbHsl(rgb);
+  for (let l = l0; contrast(rgb, SURFACE) < 4.5 && l <= 1; l += 0.02) rgb = hslRgb([h, s, Math.min(l, 1)]);
+  const on = contrast(rgb, DARK) >= contrast(rgb, [255, 255, 255]) ? toHex(DARK) : "#ffffff";
+  const light = hslRgb([h, s, Math.min(1, rgbHsl(rgb)[2] + 0.15)]);
+  return { accent: toHex(rgb), soft: `rgb(${rgb.join(" ")} / 0.14)`, on, toastAction: toHex(light) };
+}
+
+/** Akzent der App auf die Profilfarbe setzen; ohne gueltige Farbe gilt das Gruen aus style.css. */
+export function applyAccent(hex) {
+  const root = document.documentElement.style;
+  const t = accentTokens(hex);
+  const vars = { "--accent": t?.accent, "--accent-soft": t?.soft, "--on-accent": t?.on,
+    "--ok": t?.accent, "--on-ok": t?.on, "--toast-action": t?.toastAction };
+  for (const [k, v] of Object.entries(vars)) {
+    if (v) root.setProperty(k, v);
+    else root.removeProperty(k);
+  }
+}
+
 export const GROUPS = { brust: "Brust", ruecken: "Rücken", beine: "Beine",
   schultern: "Schultern", arme: "Arme", rumpf: "Rumpf" };
 

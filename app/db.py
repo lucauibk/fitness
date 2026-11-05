@@ -119,19 +119,29 @@ CREATE TABLE IF NOT EXISTS foods (
     serving_g REAL,
     serving_label TEXT,                                        -- z. B. "1 Riegel (40 g)"
     pack_g REAL,                                               -- Packungsgroesse
-    source TEXT DEFAULT 'eigen',                               -- off | eigen
-    created_at TEXT
+    source TEXT DEFAULT 'eigen',                               -- off | eigen | bls | rezept
+    created_at TEXT,
+    bls_code TEXT,                                             -- Bundeslebensmittelschluessel
+    fiber REAL, sugar REAL,                                    -- je 100 g (BLS, sonst meist leer)
+    search TEXT,                                               -- Vergleichsform fuer die Suche
+    recipe TEXT                                                -- JSON bei source='rezept' (app/recipes.py)
 );
 CREATE TABLE IF NOT EXISTS food_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     profile_id INTEGER NOT NULL,
     date TEXT NOT NULL,
     meal TEXT NOT NULL,                  -- fruehstueck | mittag | abend | snack
-    food_id INTEGER,
+    food_id INTEGER,                     -- NULL + grams 0 = Schnelleintrag (nur Kalorien/Makros)
     name TEXT,                           -- Kopie, falls das Lebensmittel spaeter verschwindet
     grams REAL NOT NULL,
     kcal REAL, protein REAL, carbs REAL, fat REAL,   -- fuer diese Menge, eingefroren
     client_id TEXT UNIQUE
+);
+CREATE TABLE IF NOT EXISTS food_favorites (
+    profile_id INTEGER NOT NULL,
+    food_id INTEGER NOT NULL,
+    created_at TEXT,
+    PRIMARY KEY (profile_id, food_id)
 );
 CREATE TABLE IF NOT EXISTS water_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -183,6 +193,33 @@ CREATE TABLE IF NOT EXISTS saved_meals (
 );
 -- Hinweise des taeglichen Coach-Laufs (scripts/coach_daily.py). Nur Text: Der Lauf
 -- aendert nie den Plan, die App zeigt die Hinweise an und laesst sie wegklicken.
+CREATE TABLE IF NOT EXISTS wishlist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    price REAL NOT NULL,
+    link TEXT,
+    image TEXT,                          -- verkleinertes JPEG als data:-URL
+    position INTEGER DEFAULT 0,
+    created_at TEXT,
+    bought_at TEXT                       -- gesetzt = aus dem Shopping-Topf gekauft
+);
+CREATE TABLE IF NOT EXISTS coach_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    role TEXT NOT NULL,                  -- user | coach
+    text TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'chat', -- chat | daily (Morgen-Coach) | session (aus der laufenden Einheit)
+    status TEXT NOT NULL DEFAULT 'ok',   -- ok | error (Antwort kam nicht zustande)
+    created_at TEXT NOT NULL,
+    actions TEXT                         -- JSON: Vorschlaege mit Knopf (Uebung ersetzen), siehe coach_chat
+);
+CREATE TABLE IF NOT EXISTS coach_impulses (
+    profile_id INTEGER NOT NULL,
+    date TEXT NOT NULL,                  -- ein Impuls pro Tag fuer die Startseite (Morgen-Coach)
+    text TEXT NOT NULL,
+    PRIMARY KEY (profile_id, date)
+);
 CREATE TABLE IF NOT EXISTS coach_notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     profile_id INTEGER NOT NULL,
@@ -203,10 +240,12 @@ CREATE TABLE IF NOT EXISTS workout_reviews (
     model TEXT,
     updated_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_coach_messages_profile ON coach_messages(profile_id, id);
 CREATE INDEX IF NOT EXISTS idx_coach_notes_profile ON coach_notes(profile_id, status);
 CREATE INDEX IF NOT EXISTS idx_food_log_day ON food_log(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_water_log_day ON water_log(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_cardio_day ON cardio(profile_id, date);
+CREATE INDEX IF NOT EXISTS idx_wishlist_profile ON wishlist(profile_id, bought_at);
 CREATE INDEX IF NOT EXISTS idx_body_day ON body_measurements(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_sets_workout ON sets(workout_id);
 CREATE INDEX IF NOT EXISTS idx_sets_exercise ON sets(exercise_id);
@@ -233,7 +272,15 @@ MIGRATIONS = {
                  # 1 = Erfahrung wurde von der App aus den Einheiten abgeleitet (darf sich weiter aendern)
                  "experience_auto": "INTEGER",
                  # freie Wochentage ("2,3,4,5,6"); train_weekdays sind die tatsaechlich geplanten
-                 "available_weekdays": "TEXT"},
+                 "available_weekdays": "TEXT",
+                 # Shopping-Topf (app/rewards.py): Betrag je Einheit (NULL = aus), Stand bis zur
+                 # letzten Betragsaenderung und die letzte Einheit, die darin schon steckt
+                 "reward_per_workout": "REAL", "reward_carry": "REAL DEFAULT 0",
+                 "reward_after_id": "INTEGER DEFAULT 0",
+                 # Coach-Chat: letzte gelesene Nachricht (fuer den "neu"-Punkt auf "Heute")
+                 "coach_seen_id": "INTEGER DEFAULT 0",
+                 # Freitext "was mich motiviert" – liest nur der Coach (Chat und Morgen-Coach)
+                 "motivation": "TEXT"},
     # Empfohlene Satzpause je Uebung
     "split_exercises": {"rest_seconds": "INTEGER", "base_sets": "INTEGER",
                         # Obergrenze der Blockwochen (Zeitbudget der Einheit); NULL = keine
@@ -250,8 +297,16 @@ MIGRATIONS = {
                   # Auswahl-Eigenschaften fuer den Plan-Ersteller (app/planner/catalog_data.py)
                   "equipment_type": "TEXT", "difficulty": "INTEGER", "sfr": "INTEGER",
                   "contraindications": "TEXT", "lengthened": "INTEGER"},
+    "coach_messages": {"actions": "TEXT"},
     # Portion mit Beschriftung und Packungsgroesse fuer die Mengeneingabe
-    "foods": {"serving_label": "TEXT", "pack_g": "REAL"},
+    "foods": {"serving_label": "TEXT", "pack_g": "REAL",
+              # Grundstock aus dem BLS (app/food_catalog.py) und vorberechnete Suchform
+              "bls_code": "TEXT", "fiber": "REAL", "sugar": "REAL", "search": "TEXT",
+              "recipe": "TEXT",
+              # Naehrwerte im Detail (Akkordion in der Ernaehrung)
+              "sat_fat": "REAL", "salt": "REAL"},
+    # wie kcal je Eintrag eingefroren; NULL = Wert unbekannt (nicht 0)
+    "food_log": {"fiber": "REAL", "sugar": "REAL", "sat_fat": "REAL", "salt": "REAL"},
 }
 
 
@@ -481,6 +536,11 @@ def init():
         _catalog_v2(c)
         from .exercise_info import apply as _exercise_info
         _exercise_info(c)
+        # Eindeutig je BLS-Code (NULL fuer alle anderen erlaubt) – Grundlage fuer das Upsert
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_foods_bls ON foods(bls_code)")
+        from .food_catalog import apply as _food_catalog, backfill_log as _backfill_log
+        _food_catalog(c)
+        _backfill_log(c)
         from .planner.catalog import apply as _planner_catalog
         _planner_catalog(c)
     with sqlite3.connect(DB_PATH, timeout=30) as c:
@@ -528,7 +588,7 @@ WRITABLE = {
     "profiles": ("name", "color", "birth_year", "sex", "height_cm", "goal", "experience", "experience_auto", "available_weekdays",
                  "days_per_week", "session_minutes", "limitations", "train_weekdays", "focus",
                  "activity_level", "kcal_goal", "protein_goal", "carbs_goal", "fat_goal",
-                 "nutrition_auto", "water_goal_ml"),
+                 "nutrition_auto", "water_goal_ml", "motivation"),
     "exercises": ("name", "muscle_group", "unit", "archived", "pattern", "kind",
                   "instructions", "mistakes", "muscles_primary", "muscles_secondary",
                   "equipment", "video_query"),
@@ -538,9 +598,10 @@ WRITABLE = {
                "notes", "client_id"),
     "mobility_log": ("profile_id", "date", "routine", "client_id"),
     "foods": ("barcode", "name", "brand", "kcal", "protein", "carbs", "fat", "serving_g",
-              "serving_label", "pack_g", "source", "created_at"),
+              "serving_label", "pack_g", "source", "created_at", "fiber", "sugar", "search", "recipe",
+              "sat_fat", "salt"),
     "food_log": ("profile_id", "date", "meal", "food_id", "name", "grams", "kcal", "protein",
-                 "carbs", "fat", "client_id"),
+                 "carbs", "fat", "fiber", "sugar", "sat_fat", "salt", "client_id"),
     "water_log": ("profile_id", "date", "ml", "client_id"),
     "saved_meals": ("profile_id", "name", "items"),
     "blocks": ("profile_id", "split_id", "start_date", "weeks", "goal", "experience", "params", "active"),
@@ -556,6 +617,7 @@ WRITABLE = {
                         "rest_seconds", "notes", "base_sets", "peak_sets", "generated"),
     "workouts": ("profile_id", "split_day_id", "title", "started_at", "finished_at", "notes"),
     "bodyweight": ("profile_id", "date", "kg"),
+    "wishlist": ("profile_id", "name", "price", "link", "image", "position", "created_at", "bought_at"),
 }
 
 
