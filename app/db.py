@@ -629,6 +629,22 @@ def get_row(table, row_id):
     return one(f"SELECT * FROM {table} WHERE id=?", (row_id,))
 
 
+def rows_by_ids(table, ids, chunk=500):
+    """Mehrere Zeilen nach id in einer Verbindung statt get_row je id: {id: Zeile}.
+    In Bloecken zu 500, damit die SQLite-Grenze fuer Platzhalter nie greift.
+    Fehlende ids fehlen einfach im Ergebnis."""
+    ids = list(dict.fromkeys(ids))
+    out = {}
+    if not ids:
+        return out
+    with connect() as c:
+        for i in range(0, len(ids), chunk):
+            part = ids[i:i + chunk]
+            for r in c.execute(f"SELECT * FROM {table} WHERE id IN ({','.join('?' * len(part))})", part):
+                out[r["id"]] = dict(r)
+    return out
+
+
 def insert_row(table, data):
     data = {k: v for k, v in data.items() if k in WRITABLE[table]}
     with connect() as c:

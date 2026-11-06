@@ -23,8 +23,9 @@ def compute(items, portions, cooked_g=None):
     totals = {k: 0.0 for k in NUTRIENTS}
     unknown = set()     # Detail-Wert fehlt bei einer Zutat: fuers Rezept unbekannt statt zu niedrig
     raw_g, lines = 0.0, []
+    foods = db.rows_by_ids("foods", [it["food_id"] for it in items])
     for it in items:
-        food = db.get_row("foods", it["food_id"])
+        food = foods.get(it["food_id"])
         if not food:
             raise RecipeError("Eine Zutat gibt es nicht (mehr).")
         g = float(it["grams"])

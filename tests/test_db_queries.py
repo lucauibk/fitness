@@ -212,3 +212,54 @@ def test_for_exercise_kontext_ohne_uebung_laedt_nach(profile_id):
     ctx = progression.context(profile_id, exs[:1])
     assert (progression.for_exercise(profile_id, exs[1], 8, 10, ctx=ctx)
             == progression.for_exercise(profile_id, exs[1], 8, 10))
+
+
+# ------------------------------------------- Lebensmittel nach id gebuendelt laden
+
+def _foods(anzahl):
+    return [db.insert_row("foods", {"name": f"Zutat {i}", "kcal": 100 + i, "protein": 5, "carbs": 10,
+                                    "fat": 2, "source": "eigen"}) for i in range(anzahl)]
+
+
+def test_rows_by_ids_eine_verbindung_auch_ueber_blockgrenze(zaehler):
+    foods = _foods(7)
+    ids = [f["id"] for f in foods]
+    zaehler["reset"]()
+    got = db.rows_by_ids("foods", ids + [ids[0], 10 ** 9], chunk=3)   # doppelt + unbekannt
+    assert zaehler["verbindungen"] == 1
+    assert zaehler["selects"] == 3            # 7 ids in Bloecken zu 3
+    assert got == {f["id"]: f for f in foods}
+    assert db.rows_by_ids("foods", []) == {}
+
+
+def test_gespeicherte_mahlzeiten_ohne_abfrage_je_zutat(profile_id, zaehler):
+    from app.routes import nutrition as routes
+
+    foods = _foods(6)
+    for n in range(5):
+        routes.save_meal(routes.SavedMealIn(profile_id=profile_id, name=f"Mahlzeit {n}", items=[
+            routes.MealItem(food_id=f["id"], grams=50 + 10 * n) for f in foods]))
+    weg = db.insert_row("foods", {"name": "Geloescht", "kcal": 1, "source": "eigen"})
+    routes.save_meal(routes.SavedMealIn(profile_id=profile_id, name="Nur Geloeschtes",
+                                        items=[routes.MealItem(food_id=weg["id"], grams=10)]))
+    db.delete_row("foods", weg["id"])
+    zaehler["reset"]()
+    meals = routes.list_meals(profile_id)
+    # vorher: 1 + 5 Mahlzeiten x 6 Zutaten + 1 = 32 Verbindungen
+    assert zaehler["verbindungen"] == 2
+    assert [m["name"] for m in meals] == [f"Mahlzeit {n}" for n in range(5)]   # leere faellt heraus
+    m0 = meals[0]["items"][0]
+    assert m0["name"] == "Zutat 0" and m0["grams"] == 50 and m0["kcal"] == 50
+    assert meals[4]["kcal"] == round(sum((100 + i) * 0.9 for i in range(6)))
+
+
+def test_rezept_zutaten_in_einer_abfrage(zaehler):
+    from app import recipes
+
+    foods = _foods(8)
+    zaehler["reset"]()
+    out = recipes.compute([{"food_id": f["id"], "grams": 100} for f in foods], portions=2)
+    assert zaehler["verbindungen"] == 1
+    assert out["kcal"] == round(sum(100 + i for i in range(8)) / 8, 1)
+    with pytest.raises(recipes.RecipeError):
+        recipes.compute([{"food_id": 10 ** 9, "grams": 100}], portions=1)
