@@ -6,6 +6,7 @@ import { $, $$, api, armDelete, closeSheet, empty, esc, reviewHtml, watchCoach, 
 import * as outbox from "./outbox.js";
 import { openCoach } from "./coach.js";
 import { openExercise } from "./uebungen.js";
+import { nextLabel, nextSet } from "./naechster.js";
 
 let root;
 let today = null;     // /api/today fuer den Startbildschirm
@@ -709,7 +710,8 @@ function restBar() {
     bar.innerHTML = `<span class="rest-label">Pause</span><b data-rest-time></b>
       <button type="button" class="btn small ghost" data-rest="-15">−15 s</button>
       <button type="button" class="btn small ghost" data-rest="15">+15 s</button>
-      <button type="button" class="btn small tonal" data-rest="skip">Weiter</button>`;
+      <button type="button" class="btn small tonal" data-rest="skip">Weiter</button>
+      <small class="rest-next" data-rest-next hidden></small>`;
     bar.addEventListener("click", (ev) => {
       const b = ev.target.closest("[data-rest]");
       if (!b) return;
@@ -772,15 +774,31 @@ function tick() {
   bar.querySelector("[data-rest-time]").textContent =
     `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   bar.hidden = false;
+  showNext(bar, r.from);
   document.body.classList.add("resting");
 }
 
-function startRest(seconds) {
+/** Unter der Zeit steht, was nach der Pause kommt – Uebung, Satz, Ziel. So muss man in der
+ *  Pause nicht scrollen, um die naechste Karte zu finden. Jedes Mal aus dem Entwurf gelesen,
+ *  damit eine in der Pause geaenderte Zahl gleich stimmt. */
+function showNext(bar, from) {
+  const el = bar.querySelector("[data-rest-next]");
+  const label = nextLabel(nextSet(getDraft(), from));
+  const text = label ? `Als Nächstes: ${label}` : "";
+  if (el.textContent !== text) {
+    el.textContent = text;
+    el.hidden = !text;
+  }
+  // Die Leiste wird mit der Zeile hoeher – Aktionsleiste und Innenabstand ruecken mit (--rest-h)
+  if (!bar.hidden) document.body.style.setProperty("--rest-h", `${bar.offsetHeight}px`);
+}
+
+function startRest(seconds, from = null) {
   unlockAudio();   // muss synchron in der Nutzer-Geste passieren, die die Pause ausloest
   if (typeof Notification !== "undefined" && Notification.permission === "default") {
     Notification.requestPermission().catch(() => {});
   }
-  prefs.set("rest", { until: Date.now() + seconds * 1000 });
+  prefs.set("rest", { until: Date.now() + seconds * 1000, from });
   clearInterval(restTick);
   restTick = setInterval(tick, 500);
   tick();
@@ -793,6 +811,7 @@ function stopRest() {
   const bar = document.getElementById("restBar");
   if (bar) bar.hidden = true;
   document.body.classList.remove("resting");
+  document.body.style.removeProperty("--rest-h");
 }
 
 // Laeuft nach einem Neuladen weiter
@@ -874,7 +893,7 @@ export async function mount(el) {
       const allDone = d && doneCount(d) === totalCount(d);
       if (res?.s.done && !allDone) {
         const rest = res.ex.rest || (res.ex.kind === "compound" ? REST.compound : REST.isolation);
-        startRest(rest);
+        startRest(rest, i);
       } else if (allDone) {
         stopRest();   // die Pause vom vorletzten Satz lief sonst weiter
       }

@@ -677,6 +677,11 @@ button.chip { border: 0; font-family: inherit; }
 .rest-bar b { font-size: var(--fs-lg); font-variant-numeric: tabular-nums; margin-right: auto; }
 .rest-label { font-size: var(--fs-sm); opacity: .75; }
 .rest-bar .btn.ghost { color: var(--surface); }
+/* Was nach der Pause kommt: eigene Zeile unter Zeit und Knoepfen, lange Namen werden gekuerzt */
+.rest-next {
+  flex-basis: 100%; min-width: 0; font-size: var(--fs-sm); opacity: .85;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 @media (min-width: 900px) { .rest-bar { left: auto; width: 420px; } }
 
 /* ======================================================= Kennzahlen */

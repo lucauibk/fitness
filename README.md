@@ -9,7 +9,7 @@ sichtbar, Einträge werden lokal gesammelt und nachgesendet, sobald wieder Netz 
 | Tab | Inhalt |
 |---|---|
 | Heute | Tages-Serie, Check-in (Schlaf, Energie, Stress, Muskelkater) → Readiness, an die Erholung angepasstes Training, Mobility-Routine, Kalorien |
-| Training | Einheit (mit Pausen-Timer, Bildschirm bleibt an, Bewertung beim Beenden) · Plan (Splits, Assistent, Plan-Check) · Übungen (Anleitung, Muskel-Grafik, Video-Suche) · Cardio |
+| Training | Einheit (mit Pausen-Timer, der den nächsten Satz zeigt, Bildschirm bleibt an, Bewertung beim Beenden) · Plan (Splits, Assistent, Plan-Check) · Übungen (Anleitung, Muskel-Grafik, Video-Suche) · Cardio |
 | Ernährung | Kalorien/Makros gegen das Ziel (Trainings- und Ruhetag getrennt), Rückmeldung zum Tag (was noch fehlt) und zur Woche, Mahlzeiten, Wiedereintragen mit einem Tipp, Suche und Barcode über Open Food Facts, eigene Lebensmittel |
 | Fortschritt | Übersicht (Bestleistungen, Volumen) · Körper (Gewicht, Körperfett, Maße, ViCoach) · Erfolge (Serien, Abzeichen) · Verlauf |
 | Profil | Daten, Ernährungsziel, Plan-Assistent |
