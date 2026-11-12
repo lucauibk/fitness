@@ -78,10 +78,7 @@ def _local(q, profile_id):
     # spart das den Grossteil der Zeit gegenueber SELECT * fuer alles.
     ids = [r["id"] for r in db.rows("SELECT id, search, name, brand FROM foods")
            if food_catalog.matches(r["search"] or food_catalog.search_text(r), q, vs)]
-    found = []
-    for i in range(0, len(ids), 500):
-        chunk = ids[i:i + 500]
-        found += db.rows(f"SELECT * FROM foods WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+    found = list(db.rows_by_ids("foods", ids).values())
     uses = {r["food_id"]: r["n"] for r in db.rows(
         "SELECT food_id, COUNT(*) AS n FROM food_log WHERE profile_id=? GROUP BY food_id",
         (profile_id,))}
@@ -434,10 +431,14 @@ class SavedMealIn(BaseModel):
     items: list[MealItem] = Field(..., min_length=1, max_length=40)
 
 
-def _saved_out(row):
+def _saved_out(row, foods=None):
+    """foods: {id: Lebensmittel} schon geladen (Liste aller Mahlzeiten), sonst hier in einer Abfrage."""
+    raw = json.loads(row["items"])
+    if foods is None:
+        foods = db.rows_by_ids("foods", [it["food_id"] for it in raw])
     items = []
-    for it in json.loads(row["items"]):
-        food = db.get_row("foods", it["food_id"])
+    for it in raw:
+        food = foods.get(it["food_id"])
         if food:   # geloeschte Lebensmittel fallen still heraus
             items.append({**it, "name": food["name"], **nutrition.portion(food, it["grams"])})
     return {"id": row["id"], "name": row["name"], "items": items,
@@ -447,15 +448,17 @@ def _saved_out(row):
 @router.get("/meals")
 def list_meals(profile_id: int = Depends(current_profile)):
     rows = db.rows("SELECT * FROM saved_meals WHERE profile_id=? ORDER BY name COLLATE NOCASE", (profile_id,))
-    return [m for m in map(_saved_out, rows) if m["items"]]
+    # Alle Zutaten aller Mahlzeiten auf einmal statt einer Abfrage je Zutat
+    foods = db.rows_by_ids("foods", [it["food_id"] for r in rows for it in json.loads(r["items"])])
+    return [m for m in (_saved_out(r, foods) for r in rows) if m["items"]]
 
 
 @router.post("/meals")
 def save_meal(body: SavedMealIn):
     profile_id = current_profile(body.profile_id)
-    for it in body.items:
-        if not db.get_row("foods", it.food_id):
-            raise HTTPException(400, "Ein Lebensmittel gibt es nicht (mehr).")
+    known = db.rows_by_ids("foods", [it.food_id for it in body.items])
+    if any(it.food_id not in known for it in body.items):
+        raise HTTPException(400, "Ein Lebensmittel gibt es nicht (mehr).")
     row = db.insert_row("saved_meals", {"profile_id": profile_id, "name": body.name.strip(),
                                         "items": json.dumps([i.model_dump() for i in body.items])})
     return _saved_out(row)
