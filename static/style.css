@@ -777,6 +777,10 @@ button.chip { border: 0; font-family: inherit; }
 .legend.primary { background: var(--accent); }
 .legend.secondary { background: color-mix(in srgb, var(--accent) 35%, var(--surface-2)); }
 .steps-list { margin: var(--s2) 0; padding-left: 1.4em; display: grid; gap: 6px; }
+/* Anleitung in der aufgeklappten Uebungskarte: dieselbe Grafik wie im Sheet, nur kompakter */
+.ex-guide { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--line); font-size: var(--fs-sm); }
+.ex-guide .mm-fig svg { width: 72px; }
+.ex-guide .form-section { margin-block: var(--s3) var(--s1); }
 .warn-list li::marker { color: var(--urgent); }
 
 /* ========================================================= Ernährung */

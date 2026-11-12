@@ -59,32 +59,49 @@ export async function load() {
   render();
 }
 
+/** Übung mit Anleitung und Muskelnamen holen (immer frisch: Bestleistung und Verlauf ändern sich).
+ *  Der Stand wird gemerkt – die laufende Einheit zeigt die Anleitung dauerhaft in der Karte und
+ *  baut sich bei jedem Satz neu auf, da darf nicht jedes Mal ein Request fliegen. */
+const details = new Map();
+export const cachedExercise = (id) => details.get(id) || null;
+
+export async function loadExercise(id) {
+  // Muskelnamen laden, falls die Bibliothek noch nie offen war (sonst stehen dort nur Schlüssel).
+  const [ex] = await Promise.all([api(`exercises/${id}`), Object.keys(muscles).length ? null
+    : api("muscles").then((m) => { muscles = m; }).catch(() => {})]);
+  details.set(id, ex);
+  return ex;
+}
+
+/** Muskel-Grafik mit Legende, Ausführung und typischen Fehlern – im Sheet und in der Einheit. */
+export function guideHtml(ex, { editHint = false } = {}) {
+  const names = (list) => list.map((m) => muscles[m] || m).join(", ");
+  return `${ex.muscles_primary.length ? `${muscleMap(ex.muscles_primary, ex.muscles_secondary)}
+      <p class="hint center"><span class="legend primary"></span> ${esc(names(ex.muscles_primary))}
+        ${ex.muscles_secondary.length ? ` · <span class="legend secondary"></span> ${esc(names(ex.muscles_secondary))}` : ""}</p>` : ""}
+    ${ex.instructions.length ? `<h3 class="form-section">Ausführung</h3>
+      <ol class="steps-list">${ex.instructions.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` : ""}
+    ${ex.mistakes.length ? `<h3 class="form-section">Typische Fehler</h3>
+      <ul class="plain warn-list">${ex.mistakes.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}
+    ${!ex.instructions.length && !ex.mistakes.length ? `<p class="hint">Für diese Übung gibt es noch keine Anleitung${editHint ? " – über „Bearbeiten“ kannst du eine eintragen" : ""}.</p>` : ""}`;
+}
+
 /** Details einer Übung als Sheet. Auch aus der laufenden Einheit (Übungsmenü → „Anleitung“):
  *  dort ohne „Bearbeiten“ – mitten im Satz will man nachlesen, nicht den Katalog pflegen. */
 export async function openExercise(id, { session = false } = {}) {
   let ex;
   try {
-    // Muskelnamen laden, falls die Bibliothek noch nie offen war (sonst stehen dort nur Schlüssel).
-    [ex] = await Promise.all([api(`exercises/${id}`), Object.keys(muscles).length ? null
-      : api("muscles").then((m) => { muscles = m; }).catch(() => {})]);
+    ex = await loadExercise(id);
   } catch (e) {
     return toast(e.offline ? "Die Anleitung ist offline noch nicht verfügbar." : e.message, { error: true });
   }
-  const names = (list) => list.map((m) => muscles[m] || m).join(", ");
   const hist = ex.history || [];
   const sheet = openSheet({
     title: esc(ex.name),
     wide: true,
-    body: `${ex.muscles_primary.length ? `${muscleMap(ex.muscles_primary, ex.muscles_secondary)}
-      <p class="hint center"><span class="legend primary"></span> ${esc(names(ex.muscles_primary))}
-        ${ex.muscles_secondary.length ? ` · <span class="legend secondary"></span> ${esc(names(ex.muscles_secondary))}` : ""}</p>` : ""}
+    body: `${guideHtml(ex, { editHint: !session })}
       <div class="row-meta">${ex.equipment ? `<span>${icon("dumbbell")} ${esc(ex.equipment)}</span>` : ""}
         <span>${esc(GROUPS[ex.muscle_group] || "")}</span></div>
-      ${ex.instructions.length ? `<h3 class="form-section">Ausführung</h3>
-        <ol class="steps-list">${ex.instructions.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` : ""}
-      ${ex.mistakes.length ? `<h3 class="form-section">Typische Fehler</h3>
-        <ul class="plain warn-list">${ex.mistakes.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}
-      ${!ex.instructions.length && !ex.mistakes.length ? `<p class="hint">Für diese Übung gibt es noch keine Anleitung – über „Bearbeiten“ kannst du eine eintragen.</p>` : ""}
       <div class="btn-row"><a class="btn tonal" href="${esc(ex.video_url)}" target="_blank" rel="noopener">
         ${icon("play")} Video ansehen</a></div>
       ${ex.best ? `<h3 class="form-section">Deine Bestleistung</h3>

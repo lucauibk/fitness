@@ -5,7 +5,7 @@ import { $, $$, api, armDelete, closeSheet, empty, esc, reviewHtml, watchCoach, 
   icon, openSheet, prefs, setsSummary, skeleton, toast } from "./util.js";
 import * as outbox from "./outbox.js";
 import { openCoach } from "./coach.js";
-import { openExercise } from "./uebungen.js";
+import { cachedExercise, guideHtml, loadExercise, openExercise } from "./uebungen.js";
 import { nextLabel, nextSet } from "./naechster.js";
 
 let root;
@@ -169,10 +169,32 @@ function exerciseCard(ex, index, open) {
       <button type="button" class="btn small ghost" data-add-set="${index}">${icon("plus")} Satz</button>
       <span class="grow"></span>
       <button type="button" class="btn small ghost" data-ex-menu="${index}" aria-label="Weitere Aktionen für ${esc(ex.name)}">⋯ Mehr</button>
-    </div>` : ""}
+    </div>
+    ${guidePanel(ex)}` : ""}
     ${ex.estimate && !ex.calibrated && done >= 1 && !complete ? calibRow(ex, index) : ""}
     ${complete ? rpeRow(ex, index) : ""}
   </div>`;
+}
+
+/** Anleitung und Muskel-Grafik der aufgeklappten Uebung – immer sichtbar, solange sie ausgewaehlt ist.
+ *  Aus dem Speicher, wenn schon geladen; sonst Platzhalter, den fillGuides() nach dem Laden fuellt,
+ *  ohne die Seite neu zu bauen (das wuerde ein gerade bearbeitetes Feld den Fokus kosten). */
+function guidePanel(ex) {
+  if (!ex.exercise_id) return "";
+  const cached = cachedExercise(ex.exercise_id);
+  return `<section class="ex-guide" data-guide="${ex.exercise_id}" aria-label="Anleitung: ${esc(ex.name)}">${
+    cached ? guideHtml(cached) : `<p class="hint">Anleitung wird geladen …</p>`}</section>`;
+}
+
+/** Fehlende Anleitungen der aufgeklappten Karten nachladen und einsetzen. */
+function fillGuides() {
+  for (const el of $$("[data-guide]", root)) {
+    const id = Number(el.dataset.guide);
+    if (cachedExercise(id)) continue;
+    const put = (html) => { for (const t of $$(`[data-guide="${id}"]`, root)) t.innerHTML = html; };
+    loadExercise(id).then((ex) => put(guideHtml(ex)))
+      .catch((e) => put(`<p class="hint">${e.offline ? "Die Anleitung ist offline noch nicht verfügbar." : esc(e.message)}</p>`));
+  }
 }
 
 /** Seltene Aktionen einer Uebung – vorher fuenf Knoepfe unter jeder Karte. */
@@ -289,6 +311,7 @@ function renderDraft(draft) {
       <button type="button" class="coach-fab" data-coach-session aria-label="Coach fragen" title="Coach fragen">${icon("chat")}</button>
       <button type="button" class="btn primary" data-finish>${icon("check")} Einheit beenden</button>
     </div>`;
+  fillGuides();
   if (!timer) {
     timer = setInterval(() => {
       const el = $("[data-elapsed]", root);
