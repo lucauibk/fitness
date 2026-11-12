@@ -5,7 +5,7 @@ import { $, $$, api, armDelete, closeSheet, empty, esc, reviewHtml, watchCoach, 
   icon, openSheet, prefs, setsSummary, skeleton, toast } from "./util.js";
 import * as outbox from "./outbox.js";
 import { openCoach } from "./coach.js";
-import { cachedExercise, guideHtml, loadExercise, openExercise } from "./uebungen.js";
+import { cachedExercise, figureHtml, loadExercise, openExercise } from "./uebungen.js";
 import { nextLabel, nextSet } from "./naechster.js";
 
 let root;
@@ -176,24 +176,24 @@ function exerciseCard(ex, index, open) {
   </div>`;
 }
 
-/** Anleitung und Muskel-Grafik der aufgeklappten Uebung – immer sichtbar, solange sie ausgewaehlt ist.
+/** Bewegungs-Animation und Muskel-Grafik der aufgeklappten Uebung (kein Text) – immer sichtbar, solange sie ausgewaehlt ist.
  *  Aus dem Speicher, wenn schon geladen; sonst Platzhalter, den fillGuides() nach dem Laden fuellt,
  *  ohne die Seite neu zu bauen (das wuerde ein gerade bearbeitetes Feld den Fokus kosten). */
 function guidePanel(ex) {
   if (!ex.exercise_id) return "";
   const cached = cachedExercise(ex.exercise_id);
-  return `<section class="ex-guide" data-guide="${ex.exercise_id}" aria-label="Anleitung: ${esc(ex.name)}">${
-    cached ? guideHtml(cached) : `<p class="hint">Anleitung wird geladen …</p>`}</section>`;
+  return `<section class="ex-guide" data-guide="${ex.exercise_id}" aria-label="Bewegung und Muskeln: ${esc(ex.name)}">${
+    cached ? figureHtml(cached) : `<p class="hint">Bild wird geladen …</p>`}</section>`;
 }
 
-/** Fehlende Anleitungen der aufgeklappten Karten nachladen und einsetzen. */
+/** Fehlende Bilder der aufgeklappten Karten nachladen und einsetzen. */
 function fillGuides() {
   for (const el of $$("[data-guide]", root)) {
     const id = Number(el.dataset.guide);
     if (cachedExercise(id)) continue;
     const put = (html) => { for (const t of $$(`[data-guide="${id}"]`, root)) t.innerHTML = html; };
-    loadExercise(id).then((ex) => put(guideHtml(ex)))
-      .catch((e) => put(`<p class="hint">${e.offline ? "Die Anleitung ist offline noch nicht verfügbar." : esc(e.message)}</p>`));
+    loadExercise(id).then((ex) => put(figureHtml(ex)))
+      .catch((e) => put(`<p class="hint">${e.offline ? "Das Bild ist offline noch nicht verfügbar." : esc(e.message)}</p>`));
   }
 }
 

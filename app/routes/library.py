@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 
 from .. import db, stats
 from ..common import _found, current_profile
+from ..exercise_images import images_for
 from ..exercise_info import MUSCLES
 
 router = APIRouter(prefix="/api")
@@ -22,6 +23,7 @@ def exercise_detail(exercise_id: int, profile_id: int = Depends(current_profile)
     ex = _found(db.get_row("exercises", exercise_id))
     ex["instructions"] = [s for s in (ex.get("instructions") or "").split("\n") if s.strip()]
     ex["mistakes"] = [s for s in (ex.get("mistakes") or "").split("\n") if s.strip()]
+    ex["images"] = images_for(ex["name"])
     ex["muscles_primary"] = _split(ex.get("muscles_primary"))
     ex["muscles_secondary"] = _split(ex.get("muscles_secondary"))
     ex["video_url"] = ("https://www.youtube.com/results?search_query="

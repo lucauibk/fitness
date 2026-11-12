@@ -777,10 +777,16 @@ button.chip { border: 0; font-family: inherit; }
 .legend.primary { background: var(--accent); }
 .legend.secondary { background: color-mix(in srgb, var(--accent) 35%, var(--surface-2)); }
 .steps-list { margin: var(--s2) 0; padding-left: 1.4em; display: grid; gap: 6px; }
-/* Anleitung in der aufgeklappten Uebungskarte: dieselbe Grafik wie im Sheet, nur kompakter */
+/* Bewegung und Muskeln in der aufgeklappten Uebungskarte: nur Bilder */
 .ex-guide { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--line); font-size: var(--fs-sm); }
 .ex-guide .mm-fig svg { width: 72px; }
-.ex-guide .form-section { margin-block: var(--s3) var(--s1); }
+/* Start- und Endposition im Wechsel: das zweite Bild blendet ueber dem ersten ein und aus */
+.ex-anim { position: relative; aspect-ratio: 3 / 2; max-width: 360px; margin: 0 auto var(--s2); overflow: hidden;
+  border-radius: var(--r2, 12px); background: var(--surface-2); }
+.ex-anim img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.ex-anim img + img { animation: ex-flip 2.6s ease-in-out infinite; }
+@keyframes ex-flip { 0%, 30% { opacity: 0; } 45%, 80% { opacity: 1; } 95%, 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ex-anim img + img { animation: none; opacity: 0; } }
 .warn-list li::marker { color: var(--urgent); }
 
 /* ========================================================= Ernährung */

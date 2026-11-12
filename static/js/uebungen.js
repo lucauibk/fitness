@@ -73,12 +73,21 @@ export async function loadExercise(id) {
   return ex;
 }
 
-/** Muskel-Grafik mit Legende, Ausführung und typischen Fehlern – im Sheet und in der Einheit. */
-export function guideHtml(ex, { editHint = false } = {}) {
+/** Bewegung als Animation (Start- und Endposition im Wechsel) plus Muskel-Grafik mit Legende.
+ *  Nur Bilder, kein Text: das ist, was die laufende Einheit in der Karte zeigt. */
+export function figureHtml(ex) {
   const names = (list) => list.map((m) => muscles[m] || m).join(", ");
-  return `${ex.muscles_primary.length ? `${muscleMap(ex.muscles_primary, ex.muscles_secondary)}
+  const anim = ex.images?.length === 2 ? `<div class="ex-anim" role="img" aria-label="Ablauf: ${esc(ex.name)}">
+      <img src="${esc(ex.images[0])}" alt="" decoding="async"><img src="${esc(ex.images[1])}" alt="" decoding="async"></div>` : "";
+  const map = ex.muscles_primary.length ? `${muscleMap(ex.muscles_primary, ex.muscles_secondary)}
       <p class="hint center"><span class="legend primary"></span> ${esc(names(ex.muscles_primary))}
-        ${ex.muscles_secondary.length ? ` · <span class="legend secondary"></span> ${esc(names(ex.muscles_secondary))}` : ""}</p>` : ""}
+        ${ex.muscles_secondary.length ? ` · <span class="legend secondary"></span> ${esc(names(ex.muscles_secondary))}` : ""}</p>` : "";
+  return anim + map;
+}
+
+/** Bilder plus Ausführung und typische Fehler – das Sheet mit der vollen Anleitung. */
+export function guideHtml(ex, { editHint = false } = {}) {
+  return `${figureHtml(ex)}
     ${ex.instructions.length ? `<h3 class="form-section">Ausführung</h3>
       <ol class="steps-list">${ex.instructions.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` : ""}
     ${ex.mistakes.length ? `<h3 class="form-section">Typische Fehler</h3>

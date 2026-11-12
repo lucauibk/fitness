@@ -172,3 +172,10 @@ Handy die Adresse öffnen und „Zum Home-Bildschirm hinzufügen" – eigenes Ic
   fehlendem Netz lokal gesammelt (`client_id` macht das Nachsenden doppelfest) und beim
   nächsten `online`-Ereignis oder Seitenaufruf der Reihe nach gesendet.
 - `static/sw.js` – Service Worker, Netz zuerst, sonst letzter bekannter Stand.
+
+## Bilder
+
+Die Bewegungs-Bilder unter `static/img/ex/` (Start- und Endposition je Übung, die Karte blendet sie im
+Wechsel) stammen aus der [free-exercise-db](https://github.com/yuhonas/free-exercise-db) (Unlicense,
+gemeinfrei), auf 480 px als WebP verkleinert. Die Zuordnung Übungsname → Datei steht in
+`app/exercise_images.py`; Übungen ohne Eintrag zeigen nur die Muskel-Grafik.
