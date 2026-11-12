@@ -356,7 +356,7 @@ function warmOfflineCache() {
       if (!active) return;
       const detail = await (await fetch(`/api/splits/${active.id}?${q}`)).json();
       const ids = [...new Set(detail.days.flatMap((d) => d.exercises.map((e) => e.exercise_id)))];
-      // Auch die Bewegungs-Bilder vorladen, sonst bleibt die Karte im Gym ohne Netz leer
+      // Auch die Bewegungs-Bilder vorladen, sonst bleibt der aufgeklappte Bereich im Gym ohne Netz leer
       ids.forEach((id, i) => setTimeout(async () => {
         try {
           const ex = await (await fetch(`/api/exercises/${id}?${q}`)).json();

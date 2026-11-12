@@ -534,8 +534,6 @@ def init():
         _migrate(c)
         _seed(c)
         _catalog_v2(c)
-        from .exercise_info import apply as _exercise_info
-        _exercise_info(c)
         # Eindeutig je BLS-Code (NULL fuer alle anderen erlaubt) – Grundlage fuer das Upsert
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_foods_bls ON foods(bls_code)")
         from .food_catalog import apply as _food_catalog, backfill_log as _backfill_log
@@ -543,6 +541,10 @@ def init():
         _backfill_log(c)
         from .planner.catalog import apply as _planner_catalog
         _planner_catalog(c)
+        # Nach dem Planner-Katalog: der legt den Grossteil der Uebungen erst an, die Muskeln
+        # und Anleitungen dazu muessen schon beim ersten Start da sein, nicht erst beim naechsten.
+        from .exercise_info import apply as _exercise_info
+        _exercise_info(c)
     with sqlite3.connect(DB_PATH, timeout=30) as c:
         # WAL: Lesen blockiert nicht, waehrend geschrieben wird – wichtig, wenn zwei
         # Leute gleichzeitig eine Einheit hochladen.

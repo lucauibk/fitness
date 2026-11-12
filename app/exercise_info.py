@@ -312,6 +312,78 @@ INFO = {
 }
 
 
+# Nur Muskeln (ohne Anleitung) fuer die Katalog-Uebungen, die keinen INFO-Eintrag haben –
+# die Muskel-Grafik soll bei jeder Uebung da sein. Name: (Hauptmuskeln, Hilfsmuskeln)
+MUSKELN = {
+    "Schrägbankdrücken Langhantel": ("brust", "schulter_vorne,trizeps"),
+    "Flachbankdrücken Kurzhantel": ("brust", "schulter_vorne,trizeps"),
+    "Brustpresse schräg": ("brust", "schulter_vorne,trizeps"),
+    "Kabel-Brustpresse": ("brust", "schulter_vorne,trizeps"),
+    "Smith-Schrägbankdrücken": ("brust", "schulter_vorne,trizeps"),
+    "Kabel-Fliegende von unten": ("brust", "schulter_vorne"),
+    "Kabel-Fliegende einarmig": ("brust", "schulter_vorne"),
+    "Kurzhantel-Fliegende": ("brust", "schulter_vorne"),
+    "Klimmzüge assistiert (Maschine)": ("latissimus", "bizeps,oberer_ruecken"),
+    "Latzug Untergriff": ("latissimus", "bizeps"),
+    "Latzug einarmig": ("latissimus", "bizeps"),
+    "Latzug Maschine": ("latissimus", "bizeps,oberer_ruecken"),
+    "Kabel-Pullover": ("latissimus", "trizeps"),
+    "T-Bar-Rudern": ("oberer_ruecken", "latissimus,bizeps,schulter_hinten"),
+    "Smith-Rudern": ("oberer_ruecken", "latissimus,bizeps"),
+    "Rudern Kabel einarmig": ("latissimus", "oberer_ruecken,bizeps"),
+    "Brustgestütztes Rudern": ("oberer_ruecken", "latissimus,schulter_hinten,bizeps"),
+    "Kurzhantelrudern einarmig": ("latissimus", "oberer_ruecken,bizeps"),
+    "Inverted Row": ("oberer_ruecken", "latissimus,bizeps"),
+    "Schulterpresse Maschine": ("schulter_vorne", "schulter_seite,trizeps"),
+    "Smith-Schulterdrücken": ("schulter_vorne", "schulter_seite,trizeps"),
+    "Arnold Press": ("schulter_vorne", "schulter_seite,trizeps"),
+    "Seitheben Maschine": ("schulter_seite", ""),
+    "Seitheben einarmig Kabel": ("schulter_seite", ""),
+    "Reverse Fly Kurzhantel": ("schulter_hinten", "oberer_ruecken"),
+    "Reverse Fly Kabel": ("schulter_hinten", "oberer_ruecken"),
+    "Frontkniebeuge": ("quadrizeps", "gesaess"),
+    "Smith-Kniebeuge": ("quadrizeps", "gesaess"),
+    "Hackenschmidt-Kniebeuge": ("quadrizeps", "gesaess"),
+    "Pendulum Squat": ("quadrizeps", "gesaess"),
+    "Goblet Squat": ("quadrizeps", "gesaess"),
+    "Trap-Bar-Kreuzheben": ("quadrizeps,gesaess", "beinbeuger,unterer_ruecken"),
+    "Rumänisches Kreuzheben Kurzhantel": ("beinbeuger,gesaess", "unterer_ruecken"),
+    "Good Morning": ("beinbeuger,unterer_ruecken", "gesaess"),
+    "Kabel-Pull-Through": ("gesaess", "beinbeuger,unterer_ruecken"),
+    "Reverse Lunge": ("quadrizeps,gesaess", "beinbeuger"),
+    "Step-ups": ("quadrizeps,gesaess", "waden"),
+    "Smith Split Squat": ("quadrizeps,gesaess", "adduktoren"),
+    "Beinstrecker einbeinig": ("quadrizeps", ""),
+    "Beinbeuger einbeinig": ("beinbeuger", "waden"),
+    "Nordic Curl": ("beinbeuger", "gesaess,waden"),
+    "Hip Thrust Maschine": ("gesaess", "beinbeuger"),
+    "Glute Bridge": ("gesaess", "beinbeuger"),
+    "Abduktoren-Maschine": ("gesaess", ""),
+    "Wadenheben an der Beinpresse": ("waden", ""),
+    "Wadenheben einbeinig": ("waden", ""),
+    "Kabelcurls": ("bizeps", "unterarm"),
+    "Scott-Curls Maschine": ("bizeps", "unterarm"),
+    "Schrägbank-Curls": ("bizeps", "unterarm"),
+    "Konzentrationscurls": ("bizeps", "unterarm"),
+    "Trizepsdrücken Seil": ("trizeps", ""),
+    "Trizeps über Kopf Kurzhantel": ("trizeps", ""),
+    "Skull Crusher": ("trizeps", ""),
+    "Dips Maschine": ("trizeps", "brust,schulter_vorne"),
+    "Kickbacks Kurzhantel": ("trizeps", "schulter_hinten"),
+    "Seitlicher Unterarmstütz": ("seitl_bauch", "bauch,gesaess"),
+    "Reverse Crunch": ("bauch", "seitl_bauch"),
+    "Knieheben hängend": ("bauch", "seitl_bauch,unterarm"),
+    "Bauchmaschine": ("bauch", ""),
+    "Ab Wheel": ("bauch", "seitl_bauch,latissimus,schulter_vorne"),
+}
+
+# Eigene Uebungen ohne Muskelangabe: Hauptmuskel der Gruppe (Gruppen wie in db.py)
+GROUP_MUSCLES = {
+    "brust": "brust", "ruecken": "latissimus", "beine": "quadrizeps", "schultern": "schulter_seite",
+    "arme": "bizeps", "rumpf": "bauch",
+}
+
+
 def apply(c):
     """In leere Felder schreiben. Laeuft bei jedem Start, aendert aber nie Eingetragenes."""
     for name, (equipment, primary, secondary, steps, mistakes) in INFO.items():
@@ -324,3 +396,8 @@ def apply(c):
             " equipment = COALESCE(equipment, ?)"
             " WHERE name = ?",
             ("\n".join(steps), "\n".join(mistakes), primary, secondary or None, equipment, name))
+    for name, (primary, secondary) in MUSKELN.items():
+        c.execute(
+            "UPDATE exercises SET muscles_primary = COALESCE(muscles_primary, ?),"
+            " muscles_secondary = COALESCE(muscles_secondary, ?) WHERE name = ?",
+            (primary, secondary or None, name))

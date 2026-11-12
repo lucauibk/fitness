@@ -176,24 +176,24 @@ function exerciseCard(ex, index, open) {
   </div>`;
 }
 
-/** Bewegungs-Animation und Muskel-Grafik der aufgeklappten Uebung (kein Text) – immer sichtbar, solange sie ausgewaehlt ist.
+/** Muskel-Grafik der aufgeklappten Uebung (kein Text) – immer sichtbar, solange sie ausgewaehlt ist.
  *  Aus dem Speicher, wenn schon geladen; sonst Platzhalter, den fillGuides() nach dem Laden fuellt,
  *  ohne die Seite neu zu bauen (das wuerde ein gerade bearbeitetes Feld den Fokus kosten). */
 function guidePanel(ex) {
   if (!ex.exercise_id) return "";
   const cached = cachedExercise(ex.exercise_id);
-  return `<section class="ex-guide" data-guide="${ex.exercise_id}" aria-label="Bewegung und Muskeln: ${esc(ex.name)}">${
-    cached ? figureHtml(cached) : `<p class="hint">Bild wird geladen …</p>`}</section>`;
+  return `<section class="ex-guide" data-guide="${ex.exercise_id}" aria-label="Muskeln: ${esc(ex.name)}">${
+    cached ? figureHtml(cached) : `<p class="hint">Muskel-Grafik wird geladen …</p>`}</section>`;
 }
 
-/** Fehlende Bilder der aufgeklappten Karten nachladen und einsetzen. */
+/** Fehlende Grafiken der aufgeklappten Karten nachladen und einsetzen. */
 function fillGuides() {
   for (const el of $$("[data-guide]", root)) {
     const id = Number(el.dataset.guide);
     if (cachedExercise(id)) continue;
     const put = (html) => { for (const t of $$(`[data-guide="${id}"]`, root)) t.innerHTML = html; };
     loadExercise(id).then((ex) => put(figureHtml(ex)))
-      .catch((e) => put(`<p class="hint">${e.offline ? "Das Bild ist offline noch nicht verfügbar." : esc(e.message)}</p>`));
+      .catch((e) => put(`<p class="hint">${e.offline ? "Die Muskel-Grafik ist offline noch nicht verfügbar." : esc(e.message)}</p>`));
   }
 }
 

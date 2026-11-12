@@ -73,19 +73,30 @@ export async function loadExercise(id) {
   return ex;
 }
 
-/** Bewegung als Animation (Start- und Endposition im Wechsel) plus Muskel-Grafik mit Legende.
- *  Nur Bilder, kein Text: das ist, was die laufende Einheit in der Karte zeigt. */
-export function figureHtml(ex) {
+/** Muskel-Grafik (Körper vorne und hinten, angesprochene Muskeln rot) mit Legende. */
+function muscleFigure(ex) {
+  if (!ex.muscles_primary.length) return "";
   const names = (list) => list.map((m) => muscles[m] || m).join(", ");
-  const anim = ex.images?.length === 2 ? `<div class="ex-anim" role="img" aria-label="Ablauf: ${esc(ex.name)}">
-      <img src="${esc(ex.images[0])}" alt="" decoding="async"><img src="${esc(ex.images[1])}" alt="" decoding="async"></div>` : "";
-  const map = ex.muscles_primary.length ? `${muscleMap(ex.muscles_primary, ex.muscles_secondary)}
-      <p class="hint center"><span class="legend primary"></span> ${esc(names(ex.muscles_primary))}
-        ${ex.muscles_secondary.length ? ` · <span class="legend secondary"></span> ${esc(names(ex.muscles_secondary))}` : ""}</p>` : "";
-  return anim + map;
+  return `${muscleMap(ex.muscles_primary, ex.muscles_secondary)}
+    <p class="hint center"><span class="legend primary"></span> ${esc(names(ex.muscles_primary))}
+      ${ex.muscles_secondary.length ? ` · <span class="legend secondary"></span> ${esc(names(ex.muscles_secondary))}` : ""}</p>`;
 }
 
-/** Bilder plus Ausführung und typische Fehler – das Sheet mit der vollen Anleitung. */
+/** Bewegung als Animation (Start- und Endposition im Wechsel) – zugeklappt, damit sie nicht dauernd
+ *  ins Auge faellt. Die Bilder laden erst beim Aufklappen (loading="lazy" im geschlossenen details). */
+function moves(ex) {
+  if (ex.images?.length !== 2) return "";
+  return `<details class="ex-moves"><summary>Bewegung ansehen ${icon("down", "chev")}</summary>
+    <div class="ex-anim" role="img" aria-label="Ablauf: ${esc(ex.name)}">
+      <img src="${esc(ex.images[0])}" alt="" loading="lazy" decoding="async"><img src="${esc(ex.images[1])}" alt="" loading="lazy" decoding="async"></div></details>`;
+}
+
+/** Was die laufende Einheit in der Karte zeigt: die Muskeln immer, die Bewegung zum Aufklappen. Kein Text. */
+export function figureHtml(ex) {
+  return muscleFigure(ex) + moves(ex);
+}
+
+/** Wie figureHtml, plus Ausführung und typische Fehler – das Sheet mit der vollen Anleitung. */
 export function guideHtml(ex, { editHint = false } = {}) {
   return `${figureHtml(ex)}
     ${ex.instructions.length ? `<h3 class="form-section">Ausführung</h3>

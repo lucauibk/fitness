@@ -175,7 +175,9 @@ Handy die Adresse öffnen und „Zum Home-Bildschirm hinzufügen" – eigenes Ic
 
 ## Bilder
 
-Die Bewegungs-Bilder unter `static/img/ex/` (Start- und Endposition je Übung, die Karte blendet sie im
-Wechsel) stammen aus der [free-exercise-db](https://github.com/yuhonas/free-exercise-db) (Unlicense,
-gemeinfrei), auf 480 px als WebP verkleinert. Die Zuordnung Übungsname → Datei steht in
-`app/exercise_images.py`; Übungen ohne Eintrag zeigen nur die Muskel-Grafik.
+Die Muskel-Grafik (Körper vorne/hinten, angesprochene Muskeln rot) steht in der aufgeklappten Übung
+immer da; Daten in `app/exercise_info.py`. Darunter lassen sich die Bewegungs-Bilder aufklappen
+(Start- und Endposition im Wechsel). Sie liegen unter `static/img/ex/` und stammen aus der
+[free-exercise-db](https://github.com/yuhonas/free-exercise-db) (Unlicense, gemeinfrei), auf 480 px
+als WebP verkleinert. Die Zuordnung Übungsname → Datei steht in `app/exercise_images.py`; Übungen ohne
+Eintrag zeigen nur die Muskel-Grafik.
