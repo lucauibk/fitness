@@ -293,9 +293,13 @@ def context(profile_id, exercise_ids):
     last = db.one("SELECT COALESCE(started_at, finished_at) AS at FROM workouts WHERE profile_id=?"
                   " ORDER BY COALESCE(started_at, finished_at) DESC LIMIT 1", (profile_id,))
     last_day = stats._local_date((last or {}).get("at"))
+    history = sessions_by_exercise(profile_id, ids)
+    # Startgewichte fuer Uebungen ohne Verlauf gleich mit, gebuendelt statt je Uebung
+    from . import cold_start
+    starts = cold_start.starting_weights(profile_id, [ex for ex in ids if not history[ex]])
     return {"exercises": exercises, "experience": experience,
             "last_workout": last_day.isoformat() if last_day else None,
-            "history": sessions_by_exercise(profile_id, ids)}
+            "history": history, "starts": starts}
 
 
 def for_exercise(profile_id, exercise_id, lo, hi, target_sets=None, rir=2, deload=False, ctx=None):
@@ -307,8 +311,7 @@ def for_exercise(profile_id, exercise_id, lo, hi, target_sets=None, rir=2, deloa
     history = ctx["history"][exercise_id]
     start = None
     if not history:
-        from . import cold_start
-        kg, why = cold_start.starting_weight(profile_id, exercise_id)
+        kg, why = ctx["starts"][exercise_id]
         start = (kg, why) if kg else None
     return recommend(history, lo, hi, target_sets, ex.get("equipment_type"), ex.get("pattern"), rir,
                      deload, ctx["experience"], start, last_workout=ctx["last_workout"])
