@@ -70,3 +70,31 @@ def test_heavy_day_before_yesterday_still_locks_the_same_muscles(profile_id):
     day, fixed, note = stats.schedule_day(profile_id, split, MONDAY + timedelta(days=2))
     assert note == "erholung"                       # lange Einheit: 48 h Sperre
 
+
+
+def test_long_sunday_session_blocks_makeup_on_tuesday(profile_id):
+    """Nach einer langen Einheit (>= 15 Saetze) zwei Tage Pause – auch ueber die Wochengrenze:
+    eine lange Bein-Einheit am Sonntag sperrt das Nachholen des Bein-Tags am Dienstag."""
+    split, ids = _split(profile_id, [("UK A", 0, ["beine"]), ("OK", 3, ["brust"]), ("UK B", 6, ["beine"])])
+    sunday = MONDAY - timedelta(days=1)
+    at = datetime(sunday.year, sunday.month, sunday.day, 18, 0).isoformat()
+    w = db.insert_row("workouts", {"profile_id": profile_id, "split_day_id": ids["UK B"],
+                                   "started_at": at, "finished_at": at})
+    ex = db.one("SELECT id FROM exercises WHERE muscle_group='beine' LIMIT 1")
+    with db.connect() as c:
+        c.executemany("INSERT INTO sets (workout_id, exercise_id, set_no, reps, weight, warmup)"
+                      " VALUES (?,?,?,10,50,0)", [(w["id"], ex["id"], n + 1) for n in range(15)])
+    # Montag (UK A) ausgelassen; Dienstag ist kein Trainingstag -> UK A waere nachzuholen,
+    # aber die Beine sind von Sonntags langer Einheit noch nicht erholt
+    day, fixed, note = stats.schedule_day(profile_id, split, MONDAY + timedelta(days=1))
+    assert note == "erholung" and not fixed
+    # Am Mittwoch (drei Tage nach Sonntag) darf nachgeholt werden
+    day, fixed, note = stats.schedule_day(profile_id, split, MONDAY + timedelta(days=2))
+    assert (day["label"], note) == ("UK A", "nachgeholt")
+
+
+def test_sunday_session_does_not_count_for_this_week(profile_id):
+    """Die Sonntagseinheit der Vorwoche hakt in der neuen Woche keinen Termin ab."""
+    split, ids = _split(profile_id, [("UK A", 0, ["beine"]), ("OK", 3, ["brust"]), ("UK B", 6, ["beine"])])
+    _trained(profile_id, ids["UK B"], MONDAY - timedelta(days=1))
+    assert stats.week_status(profile_id, split, MONDAY)["erledigt"] == 0
