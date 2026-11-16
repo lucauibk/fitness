@@ -8,7 +8,7 @@ import json
 import re
 from datetime import date, timedelta
 
-from . import analysis, coach_patterns, db, stats
+from . import analysis, body, coach_patterns, db, stats
 from .planner import blocks, explain
 
 MAX_TEXT = 600
@@ -102,6 +102,10 @@ In Blockwoche 1 oder bei weniger als 3 Einheiten sind Trends nicht belastbar: da
   ohne Signale). Keine medizinischen Ratschläge; bei Schmerzen an Arzt oder Physio verweisen.
 - Nicht wiederholen: kein Thema (z. B. "RPE bei Übung X"), das in "letzte_impulse", \
   "letzte_nachrichten" oder "weggeklickt" schon vorkam – "weggeklickt" wollte die Person nicht.
+- "koerper" ist ein geglätteter Trend über mehrere Wochen (null = keine Messungen). Nutz ihn nur \
+  für Motivation und Einordnung zum Ziel, wenn "status" passt, neutral oder gegenlaeufig ist; bei \
+  zu_wenig oder veraltet sagst du dazu nichts. Widersprich dem "urteil" nie. Werte mit \
+  "ungenau_bia" sind Rauschen, bewerte sie nicht. Keine Diäten- oder Kalorienvorgaben daraus.
 - Ernährung nur bewerten, wenn "ernaehrung.tage_mit_eintrag" mindestens {min_nutrition} ist; \
   sonst höchstens zum Eintragen ermuntern, nie "du isst zu wenig/zu viel".
 - Höchstens {max_text} Zeichen, per Du, wie eine kurze Messenger-Nachricht. Kurze Absätze mit \
@@ -176,7 +180,7 @@ def _checkins(profile_id, since):
 
 
 def context(profile_id):
-    """Alles, was der Coach sehen soll – ohne Namen und Koerperdaten der Person."""
+    """Alles, was der Coach sehen soll – ohne Namen; Koerperdaten nur als zusammengefasster Trend."""
     split = db.active_split(profile_id)
     if not split or not split["days"]:
         return None
@@ -213,6 +217,7 @@ def context(profile_id):
         },
         "app_aenderungen": explain.recent(profile_id, 10),
         "faellige_steigerungen": stats.ready_to_raise(profile_id),
+        "koerper": body.summary(profile_id, profile.get("goal")),
         "trainings": workouts,
         "tage_seit_letzter_einheit": (today - date.fromisoformat(last)).days if last else None,
         "checkins": _checkins(profile_id, today - timedelta(days=CHECKIN_DAYS)),
