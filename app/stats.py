@@ -253,9 +253,9 @@ def _big_groups(day):
     return {e.get("muscle_group") for e in day.get("exercises", [])} & RECOVERY_GROUPS
 
 
-def _week_sessions(profile_id, on_date):
-    """Einheiten mit Plan-Tag von Montag bis on_date (Ortszeit): [{split_day_id, date, n_sets}]."""
-    monday = on_date - timedelta(days=on_date.weekday())
+def _week_sessions(profile_id, on_date, since=None):
+    """Einheiten mit Plan-Tag von Montag (bzw. `since`) bis on_date (Ortszeit): [{split_day_id, date, n_sets}]."""
+    monday = since or on_date - timedelta(days=on_date.weekday())
     out = []
     for r in db.rows("SELECT w.split_day_id, COALESCE(w.started_at, w.finished_at) AS at,"
                      " (SELECT COUNT(*) FROM sets s WHERE s.workout_id = w.id AND s.warmup=0) AS n_sets"
@@ -307,7 +307,8 @@ def schedule_day(profile_id, split, on_date):
         return rotation_day(profile_id, split), False, None
     yesterday = on_date - timedelta(days=1)
     yesterday_ids = set()
-    for r in _week_sessions(profile_id, on_date):
+    # Die Erholungs-Sperre schaut zwei Tage zurueck – auch ueber den Montag hinweg (lange Einheit am Sonntag)
+    for r in _week_sessions(profile_id, on_date, since=on_date - timedelta(days=2)):
         # Erholungs-Sperre: gestern immer, vorgestern nach einer langen Einheit (>= 15 Saetze) – ~48 h
         if r["date"] == yesterday or (r["date"] == on_date - timedelta(days=2) and r["n_sets"] >= 15):
             yesterday_ids.add(r["split_day_id"])
