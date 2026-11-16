@@ -42,36 +42,65 @@ def prior_e1rm(profile, bodyweight, pattern, equipment):
 
 def starting_weight(profile_id, exercise_id):
     """Vorsichtiges Startgewicht fuer eine Uebung ohne Verlauf. -> (kg | None, Begruendung)"""
-    ex = db.one("SELECT pattern, equipment_type FROM exercises WHERE id=?", (exercise_id,))
+    return starting_weights(profile_id, [exercise_id])[exercise_id]
+
+
+def starting_weights(profile_id, exercise_ids):
+    """Wie starting_weight(), aber fuer viele Uebungen auf einmal: {exercise_id: (kg | None, Begruendung)}.
+    Feste Zahl an Abfragen statt drei plus eine je Uebung desselben Musters – ein frischer Plan oder
+    ein neuer Block hat viele Uebungen ohne Verlauf, und "Heute"/"Fortschritt" rechnen sie alle."""
+    ids = list(dict.fromkeys(exercise_ids))
+    out = {ex_id: (None, None) for ex_id in ids}
+    if not ids:
+        return out
+    exercises = {r["id"]: r for r in db.rows(
+        f"SELECT id, pattern, equipment_type FROM exercises WHERE id IN ({','.join('?' * len(ids))})", ids)}
+    wanted = {ex_id: ex for ex_id, ex in exercises.items() if ex["equipment_type"] != "bodyweight"}
+    if not wanted:
+        return out
     profile = db.get_row("profiles", profile_id) or {}
-    if not ex or ex["equipment_type"] == "bodyweight":
-        return None, None
-    # Hat die Person eine andere Uebung desselben Musters schon trainiert, ist das die bessere Basis.
-    e1rm = _from_same_pattern(profile_id, ex["pattern"], ex["equipment_type"], exercise_id)
-    source = "aus deiner ähnlichen Übung"
-    if not e1rm:
-        e1rm = prior_e1rm(profile, bodyweight_of(profile_id, profile), ex["pattern"], ex["equipment_type"])
-        source = "Schätzung aus Körpergewicht"
-    if not e1rm:
-        return None, None
-    novice = (profile.get("experience") or "einsteiger") == "einsteiger"
-    raw = e1rm * (0.5 if novice else 0.6)
-    step = progression.step_for(ex["equipment_type"], ex["pattern"], raw)
-    kg = max(progression.floor_for(ex["equipment_type"], step, ex["pattern"]),
-             progression._round_to(raw, step if step <= 2.5 else 2.5))
-    return kg, f"{source} – wird nach zwei Einheiten genauer (±25 %)"
+    best = _best_by_pattern(profile_id, {ex["pattern"] for ex in wanted.values()})
+    bodyweight = None
+    for ex_id, ex in wanted.items():
+        # Hat die Person eine andere Uebung desselben Musters schon trainiert, ist das die bessere Basis.
+        e1rm = _from_same_pattern(best.get(ex["pattern"], []), ex["equipment_type"], ex_id)
+        source = "aus deiner ähnlichen Übung"
+        if not e1rm:
+            if bodyweight is None:
+                bodyweight = bodyweight_of(profile_id, profile)
+            e1rm = prior_e1rm(profile, bodyweight, ex["pattern"], ex["equipment_type"])
+            source = "Schätzung aus Körpergewicht"
+        if not e1rm:
+            continue
+        novice = (profile.get("experience") or "einsteiger") == "einsteiger"
+        raw = e1rm * (0.5 if novice else 0.6)
+        step = progression.step_for(ex["equipment_type"], ex["pattern"], raw)
+        kg = max(progression.floor_for(ex["equipment_type"], step, ex["pattern"]),
+                 progression._round_to(raw, step if step <= 2.5 else 2.5))
+        out[ex_id] = (kg, f"{source} – wird nach zwei Einheiten genauer (±25 %)")
+    return out
 
 
-def _from_same_pattern(profile_id, pattern, equipment, exercise_id):
-    others = db.rows("SELECT id, equipment_type FROM exercises WHERE pattern=? AND id<>? AND archived=0",
-                     (pattern, exercise_id))
-    estimates = []
+def _best_by_pattern(profile_id, patterns):
+    """Je Bewegungsmuster die aktuellen e1RM-Schaetzungen aller trainierten Uebungen:
+    {pattern: [(exercise_id, equipment_type, e1rm)]} – zwei Abfragen fuer alle Muster zusammen."""
+    patterns = [p for p in patterns if p]
+    if not patterns:
+        return {}
+    others = db.rows(f"SELECT id, pattern, equipment_type FROM exercises"
+                     f" WHERE pattern IN ({','.join('?' * len(patterns))}) AND archived=0", patterns)
+    hist = progression.sessions_by_exercise(profile_id, [o["id"] for o in others], limit=12)
+    out = {}
     for o in others:
-        est = progression.estimate(progression.sessions(profile_id, o["id"], limit=12))
-        best = est[0] if est else None
-        if best:
-            ratio = EQUIPMENT_FACTOR.get(equipment, 1.0) / EQUIPMENT_FACTOR.get(o["equipment_type"], 1.0)
-            estimates.append(best * ratio)
+        est = progression.estimate(hist[o["id"]])
+        if est and est[0]:
+            out.setdefault(o["pattern"], []).append((o["id"], o["equipment_type"], est[0]))
+    return out
+
+
+def _from_same_pattern(trained, equipment, exercise_id):
+    estimates = [e1rm * EQUIPMENT_FACTOR.get(equipment, 1.0) / EQUIPMENT_FACTOR.get(other_equipment, 1.0)
+                 for other_id, other_equipment, e1rm in trained if other_id != exercise_id]
     return max(estimates) if estimates else None
 
 
@@ -104,9 +133,12 @@ def infer_experience(profile_id):
         return None, None
     bw = bodyweight_of(profile_id, profile)
     ratios = []
-    for ex in db.rows("SELECT id, name, pattern, equipment_type FROM exercises WHERE archived=0"
-                      " AND pattern IN ('squat','hinge','h_push','v_pull','h_pull','v_push')"):
-        est = progression.estimate(progression.sessions(profile_id, ex["id"], limit=12))
+    lifts = db.rows("SELECT id, name, pattern, equipment_type FROM exercises WHERE archived=0"
+                    " AND pattern IN ('squat','hinge','h_push','v_pull','h_pull','v_push')")
+    # Verlauf aller Grunduebungen in einer Abfrage statt einer je Uebung (laeuft bei jedem "Heute")
+    hist = progression.sessions_by_exercise(profile_id, [ex["id"] for ex in lifts], limit=12)
+    for ex in lifts:
+        est = progression.estimate(hist[ex["id"]])
         e1 = est[0] if est else None
         base = prior_e1rm(profile, bw, ex["pattern"], ex["equipment_type"])
         if e1 and base:
