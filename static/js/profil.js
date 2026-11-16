@@ -35,7 +35,11 @@ function breakdownHint(c) {
     Eine Schätzung: Nach 2–3 Wochen am Gewichtsverlauf prüfen und bei Bedarf nachjustieren.</p>`;
 }
 
+const FASTING = { "14:10": "14:10 (14 h fasten, 10 h essen)", "16:8": "16:8 (16 h fasten, 8 h essen)",
+  "18:6": "18:6 (18 h fasten, 6 h essen)", custom: "Eigene Stundenzahl" };
+
 function nutritionCard() {
+  const p = data.profile;
   const n = data.nutrition;
   const g = n.goals || {};
   const c = n.computed;
@@ -69,6 +73,21 @@ function nutritionCard() {
         <span></span>Trinkziel automatisch berechnen</label></div>
       <label class="field" data-water-manual ${w.auto ? "hidden" : ""}>Trinkziel (ml)
         <input name="water_goal_ml" type="number" inputmode="numeric" min="500" max="8000" step="50" value="${w.goal ?? ""}"></label>
+      <p class="eyebrow">Intervallfasten</p>
+      <label class="field">Fastenart
+        <select name="fasting_kind">
+          <option value="">Aus</option>
+          ${Object.entries(FASTING).map(([k, l]) => `<option value="${k}"${p.fasting_kind === k ? " selected" : ""}>${l}</option>`).join("")}
+        </select>
+      </label>
+      <label class="field" data-fast-hours ${p.fasting_kind === "custom" ? "" : "hidden"}>Stunden ohne Essen
+        <input name="fasting_hours" type="number" inputmode="decimal" min="1" max="48" step="0.5" value="${p.fasting_hours ?? ""}"></label>
+      <div data-fast-warning ${p.fasting_kind ? "hidden" : ""}>
+        <p class="callout">${icon("warn")} Nicht geeignet bei Schwangerschaft, Essstörungen oder Diabetes mit Medikamenten.
+          Im Zweifel ärztlich abklären.</p>
+        <div class="toggles"><label class="toggle"><input type="checkbox" name="fasting_ack">
+          <span></span>Hinweis gelesen</label></div>
+      </div>
       <div class="btn-row"><button type="submit" class="btn">Ziel speichern</button></div>
     </form>
   </div>`;
@@ -162,9 +181,22 @@ function render() {
   nf.water_auto.addEventListener("change", () => {
     nf.querySelectorAll("[data-water-manual]").forEach((el) => { el.hidden = nf.water_auto.checked; });
   });
+  const wasFasting = Boolean(data.profile.fasting_kind);
+  nf.fasting_kind.addEventListener("change", () => {
+    nf.querySelector("[data-fast-hours]").hidden = nf.fasting_kind.value !== "custom";
+    // Den Hinweis muss bestaetigen, wer das Fasten neu einschaltet
+    nf.querySelector("[data-fast-warning]").hidden = !nf.fasting_kind.value || wasFasting;
+  });
   submitOnce(nf, async () => {
     try {
       const body = formData(nf);
+      if (body.fasting_kind && !wasFasting && !body.fasting_ack) {
+        return formError(nf, new Error("Bitte den Hinweis zum Intervallfasten bestätigen."));
+      }
+      delete body.fasting_ack;
+      body.fasting_kind = body.fasting_kind || null;
+      if (body.fasting_kind !== "custom") delete body.fasting_hours;
+      else if (body.fasting_hours == null) return formError(nf, new Error("Bitte die Stundenzahl fürs Fasten eintragen."));
       if (body.nutrition_auto) ["kcal_goal", "protein_goal", "carbs_goal", "fat_goal"].forEach((k) => delete body[k]);
       if (body.water_auto) body.water_goal_ml = null;
       else if (body.water_goal_ml == null) return formError(nf, new Error("Trinkziel: bitte einen Wert eintragen."));

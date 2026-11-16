@@ -63,6 +63,7 @@ const LABELS = {
   checkin: ["Check-in", "Check-ins"], "mobility/log": ["Mobility", "Mobility-Einheiten"],
   "water-log": ["Wasser-Eintrag", "Wasser-Einträge"], "food-log": ["Essens-Eintrag", "Essens-Einträge"],
   bodyweight: ["Gewicht", "Gewichtseinträge"], measurements: ["Messung", "Messungen"],
+  "fasting/start": ["Fasten-Start", "Fasten-Starts"], "fasting/stop": ["Fasten-Ende", "Fasten-Enden"],
 };
 export function label(path, n = 1) {
   const [one, many] = LABELS[path] || ["Eintrag", "Einträge"];

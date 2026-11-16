@@ -1110,6 +1110,13 @@ h1, h2, .page-title, .group-title { font-weight: 800; letter-spacing: 0.01em; }
 .wk-day.is-open .wk-bar b { opacity: .45; }
 .wk-day.is-empty .wk-bar b { background: transparent; }
 .wk-goal { position: absolute; left: 0; right: 0; height: 0; border-top: 2px dashed var(--muted); opacity: .7; }
+.fast-card .card-title { display: flex; align-items: center; gap: 6px; }
+.fast-card .card-title .icon { width: 18px; height: 18px; color: var(--accent); }
+.fast-card .count-muted { margin-left: auto; }
+.fast-main { display: flex; align-items: center; gap: var(--s4); }
+.fast-info { display: grid; gap: 2px; }
+.fast-info span { color: var(--muted); font-size: var(--fs-sm); }
+.fast-hist { grid-template-columns: repeat(auto-fit, minmax(18px, 1fr)); }
 .wk-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
 .again-btn { flex: none; margin-left: var(--s2); }
 .again-btn.done { color: var(--accent); }
