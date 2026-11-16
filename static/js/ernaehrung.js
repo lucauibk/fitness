@@ -8,6 +8,8 @@ let root;
 let data = null;
 let week = null;   // Wochenbilanz, kommt nach dem Tag und darf fehlen (offline)
 let day = null;   // YYYY-MM-DD, null = heute
+let fast = null;   // Intervallfasten (GET /api/fasting); darf fehlen (offline, Fasten aus)
+let fastTimer = null;
 let waterExtra = 0;   // optimistisch, bis der Klick bestaetigt oder in den Ausgang gelegt ist
 
 // Der Pi wartet bei Open Food Facts bis zu 12 s je Abruf (app/nutrition.py) – das
@@ -193,6 +195,160 @@ function weekCard() {
     ${week.text.map((t) => `<p class="hint">${esc(t)}</p>`).join("")}</details>`;
 }
 
+// ------------------------------------------------------------- Fasten
+const clock = (d) => d.toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" });
+const hoursText = (h) => { const m = Math.max(0, Math.round(h * 60)); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`; };
+
+/** Laufendes Fasten: Stand vom Server, korrigiert um das, was noch im Ausgang liegt (offline
+ *  gestartet oder beendet). Der Timer rechnet aus der Startzeit, nicht aus einem Zaehler. */
+function runningFast() {
+  const stopped = new Set(outbox.pending("fasting/stop").map((e) => e.client_id));
+  const srv = fast?.running;
+  if (srv) return stopped.has(srv.client_id) ? null : srv;
+  const start = outbox.pending("fasting/start").filter((e) => !stopped.has(e.client_id)).pop();
+  return start ? { client_id: start.client_id, started_at: start.started_at, target_hours: fast?.target_hours || 16 } : null;
+}
+
+/** Ende des letzten Fastens (auch ein noch nicht gesendetes) – Beginn des Essensfensters. */
+function lastFastEnd() {
+  const queued = outbox.pending("fasting/stop").map((e) => e.ended_at).filter(Boolean).sort().pop();
+  return queued || fast?.last_ended_at || null;
+}
+
+function fastRing(hours, target) {
+  const r = 52, c = 2 * Math.PI * r, pct = Math.min(hours / target, 1);
+  return `<svg class="ring-svg" viewBox="0 0 120 120" width="132" height="132" role="img"
+      aria-label="${hoursText(hours)} von ${num(target, 1)} Stunden gefastet">
+    <circle cx="60" cy="60" r="${r}" class="ring-track"/>
+    ${pct > 0 ? `<circle cx="60" cy="60" r="${r}" class="ring-fill" stroke-dasharray="${(pct * c).toFixed(1)} ${c.toFixed(1)}"
+      transform="rotate(-90 60 60)"/>` : ""}
+    <text x="60" y="56" text-anchor="middle" class="ring-value">${hoursText(hours)}</text>
+    <text x="60" y="74" text-anchor="middle" class="ring-label">von ${num(target, 1)} h</text>
+  </svg>`;
+}
+
+function fastHistory() {
+  const items = [...(fast.history || [])].reverse();
+  if (!items.length) return "";
+  const scale = Math.max(...items.map((h) => Math.max(h.hours, h.target_hours)), 1) * 1.1;
+  const bars = items.map((h) => `<div class="wk-day${h.hit ? "" : " is-open"}">
+      <div class="wk-bar" title="${esc(`${hoursText(h.hours)} h von ${num(h.target_hours, 1)} h`)}">
+        <i class="wk-goal" style="bottom:${Math.round((h.target_hours / scale) * 100)}%"></i>
+        <b style="height:${Math.round((h.hours / scale) * 100)}%"></b></div>
+      <span>${WEEKDAY[parseYmd(h.day).getDay()]}</span></div>`).join("");
+  const hits = items.filter((h) => h.hit).length;
+  return `<div class="wk-chart fast-hist" role="img" aria-label="${hits} von ${items.length} Fasten mit erreichtem Ziel">${bars}</div>
+    <p class="hint">${hits} von ${items.length} Zielen erreicht${fast.streak ? ` · Serie: ${fast.streak} ${fast.streak === 1 ? "Tag" : "Tage"}` : ""}</p>`;
+}
+
+/** Fasten-Karte: nur wenn eine Fastenart gewaehlt ist (oder noch eins laeuft) und der Tag heute ist. */
+function fastCard() {
+  if (!fast || data.date !== todayIso()) return "";
+  const run = runningFast();
+  if (!fast.kind && !run) return "";
+  const target = run?.target_hours || fast.target_hours || 16;
+  let body;
+  if (run) {
+    const start = new Date(run.started_at);
+    const hours = (Date.now() - start) / 3600000;
+    const endAt = new Date(start.getTime() + target * 3600000);
+    body = `<div class="fast-main">${fastRing(hours, target)}
+      <div class="fast-info"><b>${hours >= target ? "Ziel erreicht" : `Ende um ${clock(endAt)}`}</b>
+        <span>seit ${clock(start)}</span></div></div>
+      <div class="btn-row">
+        <button type="button" class="btn primary" data-fast-stop><span>${icon("check")}</span> Fasten beenden</button>
+        ${fast.running && !outbox.pending("fasting/stop").length ? `<button type="button" class="btn ghost" data-fast-edit>Startzeit ändern</button>` : ""}
+      </div>`;
+  } else {
+    const end = lastFastEnd();
+    const left = end ? (new Date(end).getTime() + (24 - target) * 3600000 - Date.now()) / 3600000 : null;
+    const window = left === null ? "Noch kein Fasten aufgezeichnet."
+      : left > 0 ? `Essensfenster noch ${hoursText(left)} h offen.` : "Das Essensfenster ist vorbei – Zeit zum Fasten.";
+    body = `<p class="hint" data-fast-window>${esc(window)}</p>
+      <div class="btn-row"><button type="button" class="btn primary" data-fast-start>Fasten starten</button></div>`;
+  }
+  return `<div class="card fast-card" data-fast-card>
+    <div class="card-title">${icon("clock")} Fasten <span class="count-muted">${esc(fast.kind === "custom" ? `${num(fast.target_hours, 1)} h` : fast.kind || "")}</span></div>
+    ${body}
+    ${fast.hint ? `<p class="hint">${esc(fast.hint)}</p>` : ""}
+    ${fastHistory()}</div>`;
+}
+
+/** Nur die Fasten-Karte neu zeichnen (Timer) – die ganze Seite neu aufzubauen wuerde Eingaben stoeren. */
+function tickFast() {
+  const card = root?.querySelector("[data-fast-card]");
+  if (!card || document.hidden || !data) return;
+  const html = fastCard();
+  if (html) card.outerHTML = html;
+}
+
+async function loadFast() {
+  try { fast = await api("fasting"); } catch { /* offline oder Fasten nicht erreichbar: Karte bleibt aus */ }
+  if (data) render();
+}
+
+/** Uhrzeit aus einem time-Feld als ISO: spaeter als jetzt heisst gestern (ueber Mitternacht gefastet). */
+function timeToIso(value) {
+  const [h, m] = value.split(":").map(Number);
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  if (d.getTime() > Date.now() + 60000) d.setDate(d.getDate() - 1);
+  return d.toISOString();
+}
+
+function openFastStart() {
+  const now = clock(new Date());
+  openSheet({ title: "Fasten starten", body: `<form id="fastForm">
+      <label class="field"><span>Startzeit</span>
+        <input type="time" name="time" value="${now}" required></label>
+      <p class="hint">Jetzt, oder die Uhrzeit, ab der du nichts mehr gegessen hast.</p></form>`,
+    footer: `<button class="btn primary" type="submit" form="fastForm">Starten</button>` });
+  const form = $("#fastForm");
+  submitOnce(form, async () => {
+    try {
+      const res = await outbox.send({ path: "fasting/start", body: {
+        profile_id: getProfile(), client_id: outbox.uuid(), started_at: timeToIso(formData(form).time) } });
+      closeSheet();
+      if (res.queued) toast("Fasten gestartet – wird gesendet, sobald wieder Verbindung da ist");
+      await loadFast();
+    } catch (e) {
+      formError(form, e);
+      if (e.status === 409) loadFast();   // zweites Geraet hat schon gestartet
+    }
+  });
+}
+
+async function stopFast() {
+  const run = runningFast();
+  if (!run) return;
+  try {
+    const res = await outbox.send({ path: "fasting/stop", body: {
+      profile_id: getProfile(), client_id: run.client_id, ended_at: new Date().toISOString() } });
+    if (res.queued) toast("Fasten beendet – wird gesendet, sobald wieder Verbindung da ist");
+    await loadFast();
+  } catch (e) {
+    toast(e.message, { error: true });
+    loadFast();
+  }
+}
+
+function openFastEdit() {
+  const run = fast?.running;
+  if (!run) return;
+  openSheet({ title: "Startzeit ändern", body: `<form id="fastForm">
+      <label class="field"><span>Startzeit</span>
+        <input type="time" name="time" value="${clock(new Date(run.started_at))}" required></label></form>`,
+    footer: `<button class="btn primary" type="submit" form="fastForm">Speichern</button>` });
+  const form = $("#fastForm");
+  submitOnce(form, async () => {
+    try {
+      await api(`fasting/${run.id}`, { method: "PATCH", body: { started_at: timeToIso(formData(form).time) } });
+      closeSheet();
+      await loadFast();
+    } catch (e) { formError(form, e); }
+  });
+}
+
 function render() {
   const g = data.goals.goals || {};
   const t = data.totals;
@@ -215,6 +371,7 @@ function render() {
     ${!g.kcal ? `<p class="callout">${icon("warn")} Für ein Kalorienziel fehlen noch: ${esc((data.goals.missing || []).join(", "))}.
       <a href="#profil">Im Profil ergänzen</a></p>` : ""}
     ${waterCard(data.water_ml + pendingWater() + waterExtra, data.water_goal)}
+    ${fastCard()}
     ${Object.entries(data.meals).map(([key, m]) => {
       const extra = pend.filter((e) => e.meal === key);
       const visible = m.entries.filter((e) => !isPendingDelete(`food-log/${e.id}`));
@@ -355,6 +512,7 @@ export async function load() {
   const when = day || todayIso();
   data = await api(`nutrition/day?date=${when}`);
   render();
+  loadFast();
   api(`nutrition/week?date=${when}`).then((w) => {
     if (data?.date !== when) return;      // inzwischen anderer Tag
     week = w;
@@ -1143,7 +1301,32 @@ export async function mount(el) {
     if (entry) openEntry(Number(entry.dataset.entry));
     const water = ev.target.closest("[data-water]");
     if (water) return addWater(Number(water.dataset.water));
+    if (ev.target.closest("[data-fast-start]")) return openFastStart();
+    if (ev.target.closest("[data-fast-edit]")) return openFastEdit();
+    const stop = ev.target.closest("[data-fast-stop]");
+    if (stop) return confirmStop(stop);
   });
+  // Zeit laeuft weiter, ohne dass die Seite neu geladen wird. Ein Timer, auch nach erneutem mount().
+  clearInterval(fastTimer);
+  fastTimer = setInterval(tickFast, 30000);
+  document.addEventListener("visibilitychange", tickFast);
+  window.addEventListener("outbox-changed", () => { if (data) tickFast(); });
+}
+
+/** Beenden mit zweitem Tipp gegen Fehltipper – offline laesst sich ein Fasten nicht mehr korrigieren. */
+function confirmStop(button) {
+  if (button.dataset.armed) return stopFast();
+  button.dataset.armed = "1";
+  const label = button.lastChild;
+  const old = label.textContent;
+  label.textContent = " Wirklich beenden?";
+  button.classList.add("armed");
+  setTimeout(() => {
+    if (!button.isConnected) return;
+    delete button.dataset.armed;
+    button.classList.remove("armed");
+    label.textContent = old;
+  }, 3000);
 }
 
 async function addWater(ml) {

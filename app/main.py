@@ -187,6 +187,8 @@ class ProfileIn(BaseModel):
     fat_goal: Optional[int] = Field(None, ge=0, le=500)
     water_goal_ml: Optional[int] = Field(None, ge=500, le=8000)
     motivation: Optional[str] = Field(None, max_length=300)
+    fasting_kind: Optional[Literal["14:10", "16:8", "18:6", "custom"]] = None
+    fasting_hours: Optional[float] = Field(None, ge=1, le=48, allow_inf_nan=False)
 
 
 class ExerciseIn(BaseModel):
@@ -266,6 +268,12 @@ def _profile_in(data):
     return data
 
 
+def _check_fasting(data, current):
+    """Eigene Fastenart braucht eine Stundenzahl (neu mitgeschickt oder schon gespeichert)."""
+    if data.get("fasting_kind") == "custom" and not (data.get("fasting_hours") or current.get("fasting_hours")):
+        raise HTTPException(400, "Eigene Fastenart: bitte die Stundenzahl angeben.")
+
+
 @app.get("/api/profiles")
 def api_profiles():
     return [db.profile_out(p) for p in db.list_rows("profiles")]
@@ -292,6 +300,7 @@ def api_profile(profile_id: int):
 def api_update_profile(profile_id: int, body: ProfileIn):
     _found(db.get_row("profiles", profile_id))
     data = _profile_in(_data(body))
+    _check_fasting(data, db.get_row("profiles", profile_id))
     if "experience" in data and data["experience"] != db.get_row("profiles", profile_id).get("experience"):
         data["experience_auto"] = None      # von Hand geaendert: die App stuft nicht mehr selbst um
     return db.profile_out(_found(db.update_row("profiles", profile_id, data)))

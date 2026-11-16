@@ -3,12 +3,14 @@ import base64
 import binascii
 import json
 import re
+import sqlite3
+from datetime import datetime, timezone
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from .. import db, food_ai, food_catalog, nutrition, portions, recipes
+from .. import db, fasting, food_ai, food_catalog, nutrition, portions, recipes
 from ..common import FIELD_NAMES, _found, current_profile, insert_once, owned
 from .daily import _day
 
@@ -17,7 +19,9 @@ FIELD_NAMES.update({"grams": "Menge", "meal": "Mahlzeit", "food_id": "Lebensmitt
                     "protein": "Eiweiß", "carbs": "Kohlenhydrate", "fat": "Fett",
                     "barcode": "Barcode", "brand": "Marke", "serving_g": "Portion",
                     "activity_level": "Aktivität", "kcal_goal": "Kalorienziel", "ml": "Menge",
-                    "water_goal_ml": "Trinkziel"})
+                    "water_goal_ml": "Trinkziel", "started_at": "Startzeit",
+                    "ended_at": "Endzeit", "fasting_kind": "Fastenart",
+                    "fasting_hours": "Fastenstunden"})
 Meal = Literal["fruehstueck", "mittag", "abend", "snack"]
 Nutrient = Field(None, ge=0, le=100, allow_inf_nan=False)
 
@@ -66,6 +70,115 @@ def add_water(body: WaterIn):
         "profile_id": profile_id, "date": _day(body.date), "ml": body.ml,
         "client_id": body.client_id})
     return {"entry": row, "created": created}
+
+
+# --------------------------------------------------------------- Fasten
+class FastStart(BaseModel):
+    profile_id: int
+    client_id: str = Field(..., min_length=1, max_length=60)
+    started_at: Optional[str] = Field(None, max_length=40)
+
+
+class FastStop(BaseModel):
+    profile_id: int
+    client_id: str = Field(..., min_length=1, max_length=60)   # client_id des Starts
+    ended_at: Optional[str] = Field(None, max_length=40)
+
+
+class FastPatch(BaseModel):
+    started_at: Optional[str] = Field(None, max_length=40)
+    ended_at: Optional[str] = Field(None, max_length=40)
+
+
+def _ts(value, what):
+    """Zeitstempel aus dem Client pruefen: lesbar und nicht in der Zukunft (falsche Geraeteuhr)."""
+    try:
+        dt = fasting.parse_ts(value)
+    except (ValueError, TypeError):
+        raise HTTPException(400, f"{what}: ungültige Zeit.") from None
+    if dt > datetime.now(timezone.utc) + fasting.CLOCK_SKEW:
+        raise HTTPException(400, f"{what} liegt in der Zukunft.")
+    return dt
+
+
+def _check_span(start, end):
+    if end <= start:
+        raise HTTPException(400, "Das Ende muss nach dem Start liegen.")
+    if end - start > fasting.MAX_PAST:
+        raise HTTPException(400, "Ein Fasten dauert höchstens 72 Stunden.")
+
+
+@router.get("/fasting")
+def get_fasting(profile_id: int = Depends(current_profile)):
+    return fasting.overview(profile_id, _profile(profile_id))
+
+
+@router.post("/fasting/start")
+def start_fast(body: FastStart):
+    profile_id = current_profile(body.profile_id)
+    # Nachsenden aus dem Ausgang: gleicher Start = vorhandene Zeile, nie eine zweite
+    have = db.one("SELECT * FROM fasts WHERE client_id=?", (body.client_id,))
+    if have:
+        if have["profile_id"] != profile_id:
+            raise HTTPException(403, "Eintrag gehört zu einem anderen Profil.")
+        return {"fast": have, "created": False}
+    target = fasting.target_hours(_profile(profile_id))
+    if not target:
+        raise HTTPException(400, "Intervallfasten ist im Profil nicht eingeschaltet.")
+    now = datetime.now(timezone.utc)
+    started = _ts(body.started_at, "Startzeit") if body.started_at else now
+    if now - started > fasting.MAX_PAST:
+        raise HTTPException(400, "Die Startzeit liegt mehr als 72 Stunden zurück.")
+    if fasting.running(profile_id):
+        raise HTTPException(409, "Es läuft schon ein Fasten.")
+    kind = _profile(profile_id)["fasting_kind"]
+    try:
+        row = db.insert_row("fasts", {
+            "profile_id": profile_id, "started_at": fasting.iso(started),
+            "target_hours": target, "kind": kind, "client_id": body.client_id})
+    except sqlite3.IntegrityError:      # zweites Geraet war schneller (idx_fasts_running)
+        raise HTTPException(409, "Es läuft schon ein Fasten.") from None
+    return {"fast": row, "created": True}
+
+
+@router.post("/fasting/stop")
+def stop_fast(body: FastStop):
+    profile_id = current_profile(body.profile_id)
+    row = db.one("SELECT * FROM fasts WHERE client_id=?", (body.client_id,))
+    # 404 (kein 5xx): ein Stopp ohne Start darf den Ausgang nicht blockieren
+    if not row or row["profile_id"] != profile_id:
+        raise HTTPException(404, "Dieses Fasten gibt es nicht.")
+    if row["ended_at"]:
+        return {"fast": row, "created": False}
+    ended = _ts(body.ended_at, "Endzeit") if body.ended_at else datetime.now(timezone.utc)
+    _check_span(fasting.parse_ts(row["started_at"]), ended)
+    return {"fast": db.update_row("fasts", row["id"], {"ended_at": fasting.iso(ended)}),
+            "created": True}
+
+
+@router.patch("/fasting/{fast_id}")
+def patch_fast(fast_id: int, body: FastPatch, profile_id: int = Depends(current_profile)):
+    row = owned("fasts", fast_id, profile_id, "Dieses Fasten")
+    data = body.model_dump(exclude_unset=True)
+    if data.get("started_at") is None and "started_at" in data:
+        raise HTTPException(400, "Die Startzeit darf nicht leer sein.")
+    start = _ts(data["started_at"], "Startzeit") if "started_at" in data \
+        else fasting.parse_ts(row["started_at"])
+    end_raw = data["ended_at"] if "ended_at" in data else row["ended_at"]
+    end = _ts(end_raw, "Endzeit") if end_raw else None
+    if end:
+        _check_span(start, end)
+    elif datetime.now(timezone.utc) - start > fasting.MAX_PAST:
+        raise HTTPException(400, "Die Startzeit liegt mehr als 72 Stunden zurück.")
+    return {"fast": db.update_row("fasts", fast_id, {
+        "started_at": fasting.iso(start), "ended_at": fasting.iso(end) if end else None})}
+
+
+@router.delete("/fasting/{fast_id}")
+def delete_fast(fast_id: int, profile_id: int = Depends(current_profile)):
+    owned("fasts", fast_id, profile_id, "Dieses Fasten")
+    db.delete_row("fasts", fast_id)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------- Lebensmittel

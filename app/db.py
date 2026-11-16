@@ -150,6 +150,16 @@ CREATE TABLE IF NOT EXISTS water_log (
     ml INTEGER NOT NULL,                 -- positiv = getrunken, negativ = Korrektur
     client_id TEXT UNIQUE
 );
+-- Intervallfasten (app/fasting.py). Zeiten in UTC; Stopp referenziert den Start ueber dessen client_id.
+CREATE TABLE IF NOT EXISTS fasts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,                       -- NULL = laeuft
+    target_hours REAL NOT NULL,          -- beim Start eingefroren
+    kind TEXT NOT NULL,
+    client_id TEXT UNIQUE
+);
 CREATE TABLE IF NOT EXISTS body_measurements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     profile_id INTEGER NOT NULL,
@@ -244,6 +254,9 @@ CREATE INDEX IF NOT EXISTS idx_coach_messages_profile ON coach_messages(profile_
 CREATE INDEX IF NOT EXISTS idx_coach_notes_profile ON coach_notes(profile_id, status);
 CREATE INDEX IF NOT EXISTS idx_food_log_day ON food_log(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_water_log_day ON water_log(profile_id, date);
+CREATE INDEX IF NOT EXISTS idx_fasts_profile ON fasts(profile_id, started_at);
+-- hoechstens ein laufendes Fasten je Profil, auch bei parallelen Requests von zwei Geraeten
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fasts_running ON fasts(profile_id) WHERE ended_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_cardio_day ON cardio(profile_id, date);
 CREATE INDEX IF NOT EXISTS idx_wishlist_profile ON wishlist(profile_id, bought_at);
 CREATE INDEX IF NOT EXISTS idx_body_day ON body_measurements(profile_id, date);
@@ -280,7 +293,9 @@ MIGRATIONS = {
                  # Coach-Chat: letzte gelesene Nachricht (fuer den "neu"-Punkt auf "Heute")
                  "coach_seen_id": "INTEGER DEFAULT 0",
                  # Freitext "was mich motiviert" – liest nur der Coach (Chat und Morgen-Coach)
-                 "motivation": "TEXT"},
+                 "motivation": "TEXT",
+                 # Intervallfasten: NULL = aus; fasting_hours nur bei "custom"
+                 "fasting_kind": "TEXT", "fasting_hours": "REAL"},
     # Empfohlene Satzpause je Uebung
     "split_exercises": {"rest_seconds": "INTEGER", "base_sets": "INTEGER",
                         # Obergrenze der Blockwochen (Zeitbudget der Einheit); NULL = keine
@@ -590,7 +605,7 @@ WRITABLE = {
     "profiles": ("name", "color", "birth_year", "sex", "height_cm", "goal", "experience", "experience_auto", "available_weekdays",
                  "days_per_week", "session_minutes", "limitations", "train_weekdays", "focus",
                  "activity_level", "kcal_goal", "protein_goal", "carbs_goal", "fat_goal",
-                 "nutrition_auto", "water_goal_ml", "motivation"),
+                 "nutrition_auto", "water_goal_ml", "motivation", "fasting_kind", "fasting_hours"),
     "exercises": ("name", "muscle_group", "unit", "archived", "pattern", "kind",
                   "instructions", "mistakes", "muscles_primary", "muscles_secondary",
                   "equipment", "video_query"),
@@ -605,6 +620,7 @@ WRITABLE = {
     "food_log": ("profile_id", "date", "meal", "food_id", "name", "grams", "kcal", "protein",
                  "carbs", "fat", "fiber", "sugar", "sat_fat", "salt", "client_id"),
     "water_log": ("profile_id", "date", "ml", "client_id"),
+    "fasts": ("profile_id", "started_at", "ended_at", "target_hours", "kind", "client_id"),
     "saved_meals": ("profile_id", "name", "items"),
     "blocks": ("profile_id", "split_id", "start_date", "weeks", "goal", "experience", "params", "active"),
     "plan_events": ("profile_id", "split_id", "exercise_id", "date", "kind", "text"),
