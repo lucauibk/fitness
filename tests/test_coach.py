@@ -169,3 +169,39 @@ def test_datum_in_ortszeit(monkeypatch):
     from app import stats
     monkeypatch.setattr(stats, "tz", lambda: ZoneInfo("Europe/Vienna"))
     assert coach._date("2026-10-14T23:30:00+00:00") == "2026-10-15"
+
+
+def _messungen(profile_id, weights=(86.0, 85.6, 85.3, 85.0, 84.7)):
+    from datetime import date
+
+    from app import body
+    db.update_row("profiles", profile_id, {"goal": "abnehmen", "name": f"Geheim-{profile_id}"})
+    for i, kg in enumerate(weights):
+        body.save(profile_id, {"date": (date.today() - timedelta(days=7 * (len(weights) - 1 - i))).isoformat(),
+                               "weight_kg": kg, "waist_cm": 90 - i})
+
+
+def test_context_enthaelt_koerper_trend_ohne_rohwerte_und_namen(profile_id):
+    _, _, split = _plan(profile_id)
+    blocks.create(profile_id, split, "abnehmen", "fortgeschritten")
+    _messungen(profile_id)
+    ctx = coach.context(profile_id)
+    k = ctx["koerper"]
+    assert k["status"] == "passt" and k["ziel"] == "Abnehmen" and k["kg_pro_woche"] < 0
+    assert k["veraenderung"]["gewicht_kg"]["wochen"] == 4
+    assert k["veraenderung"]["taille_cm"]["aenderung"] < 0
+    text = json.dumps(ctx, ensure_ascii=False)
+    assert f"Geheim-{profile_id}" not in text
+    for raw in ("86.0", "85.6", "84.7", "85.3"):      # keine einzelnen Messwerte
+        assert raw not in json.dumps(k)
+    assert '"koerper"' in coach.prompt(ctx)
+
+
+def test_context_ohne_messung_hat_koerper_none(profile_id):
+    _, _, split = _plan(profile_id)
+    blocks.create(profile_id, split, "aufbau", "fortgeschritten")
+    assert coach.context(profile_id)["koerper"] is None
+
+
+def test_prompt_erklaert_den_koerper_trend():
+    assert '"koerper"' in coach.PROMPT and "ungenau_bia" in coach.PROMPT

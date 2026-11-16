@@ -250,3 +250,23 @@ def trend(series, goal, today=None):
         else:
             verdict = _verdict(goal, windows["weight_kg"], windows.get("muscle_mass_kg", []))
     return {"metrics": metrics, "verdict": verdict}
+
+
+# Was der taegliche Coach von den Messungen sieht: nur das Urteil und die Veraenderung ueber das
+# Fenster – nie einzelne Messtage oder Rohwerte (README, Datenschutz).
+SUMMARY_KEYS = {"weight_kg": "gewicht_kg", "body_fat_pct": "koerperfett_pct",
+                "muscle_mass_kg": "muskelmasse_kg", "waist_cm": "taille_cm", "hip_cm": "huefte_cm"}
+
+
+def summary(profile_id, goal):
+    """Zusammengefasste Trends fuer den Coach, None ohne Gewichtsmessung."""
+    t = trend(history(profile_id)["series"], goal)
+    verdict = t["verdict"]
+    if not verdict:
+        return None
+    changes = {name: {"aenderung": m["change"]["delta"], "wochen": m["change"]["weeks"],
+                      "ungenau_bia": m["noisy"]}
+               for key, name in SUMMARY_KEYS.items()
+               if (m := t["metrics"].get(key)) and m["change"] and not m["stale"]}
+    return {"urteil": verdict["text"], "status": verdict["status"], "ziel": verdict["goal"],
+            "kg_pro_woche": verdict["rate_kg_week"], "veraenderung": changes}

@@ -80,7 +80,8 @@ Alle Werte sind Schätzungen. Nach 2 bis 3 Wochen am Gewichtsverlauf prüfen und
   (Ziel, Geschlecht, Größe und die Trend-Zahlen aus den Messungen, ohne Namen und ohne einzelne Messtage).
 - An **Anthropic** über Claude Code (nur wenn der Coach-Timer eingerichtet ist, täglich): aktiver Plan,
   Block-Stand, Trainings der letzten sechs Wochen, Check-ins (Schlaf, Stress, Muskelkater), Ziele und
-  eingetragene Beschwerden – ohne Namen und Körperdaten.
+  eingetragene Beschwerden und der zusammengefasste Körper-Trend (Urteil zum Ziel, kg pro Woche,
+  Veränderung über das Fenster) – ohne Namen, ohne Rohwerte und ohne einzelne Messtage.
 - An **Open Food Facts**: nur Suchbegriff bzw. Barcode.
 
 ## Start (lokal)
@@ -121,7 +122,7 @@ Hinweis eine nächste Handlung und schlägt nichts vor, was die App ohnehin selb
 Block, Gewichtssteigerung, Entlastung, Wochen-Check). Was weggeklickt wurde, bringt er nicht wieder;
 überholte Hinweise räumt er selbst ab, offene verschwinden nach 14 Tagen. Der Coach **ändert nichts**: Claude läuft
 ohne Werkzeuge (`--tools ""`) und liefert nur Text, `app/coach.py` schreibt ausschließlich in
-`coach_notes`. An Claude gehen Plan, Sätze und Ziele, aber kein Name und keine Körperdaten.
+`coach_notes`. An Claude gehen Plan, Sätze, Ziele und der zusammengefasste Körper-Trend, aber kein Name, keine Rohwerte und keine einzelnen Messtage.
 
 Einrichten (einmalig auf dem Pi): Claude Code installieren
 (`curl -fsSL https://claude.ai/install.sh | bash`), `claude setup-token` ausführen und den Token als
