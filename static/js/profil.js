@@ -1,5 +1,5 @@
-/** Profil: persönliche Angaben und der Einstieg in den Plan-Assistenten. */
-import { $, api, closeSheet, esc, formData, formError, getProfile, hasDirtyForm, icon, openSheet, safeColor, skeleton,
+/** Profil: Kopf, Ziele (Training, Ernährung) und eine Liste; Formulare nur in Sheets. */
+import { $, actionMenu, api, closeSheet, esc, formData, formError, getProfile, icon, openSheet, prefs, safeColor, skeletonCards,
   submitOnce, toast, WEEKDAYS, parseYmd, ymd } from "./util.js";
 import { openTopf } from "./topf.js";
 import { openWizard, GOALS, EXPERIENCE, FOCUS, hasWizardDraft } from "./wizard.js";
@@ -91,18 +91,6 @@ function nutritionCard() {
 }
 
 const fastLabel = (p) => (p.fasting_kind === "custom" ? `${comma(p.fasting_hours)} h ohne Essen` : p.fasting_kind);
-
-function fastingCard() {
-  const p = data.profile;
-  return `<div class="card">
-    <div class="card-head">${icon("clock")}<span class="card-title">Intervallfasten</span>
-      <span class="aside">${p.fasting_kind ? esc(fastLabel(p)) : "aus"}</span></div>
-    <p class="hint">${p.fasting_kind ? "Fasten und Essensfenster findest du im Tab Ernährung. Die Fastenart kannst du jederzeit neu wählen."
-      : "Ein Assistent fragt kurz nach und schlägt dir eine Fastenart vor – oder rät ab, wenn Fasten für dich nicht passt."}</p>
-    <div class="btn-row"><button type="button" class="btn primary" data-fast-assistant>Welche Fastenart passt zu mir?</button>
-      ${p.fasting_kind ? `<button type="button" class="btn ghost" data-fast-off>Fasten ausschalten</button>` : ""}</div>
-  </div>`;
-}
 
 // ------------------------------------------------- Ernährungsziel-Assistent
 // Daten -> Aktivität -> Ziel -> Tempo (nur Abnehmen/Aufbau) -> Ergebnis. Gerechnet wird auf dem Server
@@ -293,31 +281,26 @@ function openGoalAssistant() {
   paint();
 }
 
+const row = (ic, title, meta, attr) => `<div class="row-item" role="button" tabindex="0" ${attr}>
+  <span class="row-icon">${icon(ic)}</span>
+  <div class="row-main"><div class="row-title">${title}</div><div class="row-meta"><span>${meta}</span></div></div>
+  ${icon("right", "chev")}</div>`;
+
+/** Profilseite in drei Teilen: Kopf, Ziele (Training, Ernährung) und eine Liste. Formulare gibt es nur
+ *  noch in Sheets – die Seite selbst hat kein Speichern mehr. */
 function render() {
   const { profile: p, weight } = data;
   const year = new Date().getFullYear();
-  const draft = hasWizardDraft();
-  // Grosser Einstieg nur, solange es noch keinen Plan gibt – danach reicht eine Zeile
-  // unter dem Trainingsziel (der Assistent steckt auch unter Training → Plan).
+  const n = data.nutrition;
+  const g = n.goals || {};
   root.innerHTML = `
-    ${data.hasPlan ? "" : `<div class="card hero">
-      <p class="eyebrow">Plan-Assistent</p>
-      <h3 class="hero-title">Plan erstellen lassen</h3>
-      <p class="hint">Nur die Trainingstage pro Woche wählen – den Rest stellt die App passend ein
-        und passt ihn nach jeder Einheit an.</p>
-      <div class="btn-row">
-        <button type="button" class="btn primary" data-wizard>${icon("spark")} Neuen Plan erstellen</button>
-      </div>
-    </div>`}
-
     <div class="card profile-head">
       <div class="profile-id">
         <span class="avatar" style="--c:${safeColor(p.color)}" aria-hidden="true">${esc((p.name || "?").trim().charAt(0).toUpperCase())}</span>
         <div class="grow"><h2 class="profile-name">${esc(p.name)}</h2>
-          <p class="hint">${esc(summary(p))}</p></div>
+          <p class="hint">${p.goal ? esc(GOALS[p.goal].label) : "Ziel offen"}${p.experience ? ` · ${esc(EXPERIENCE[p.experience].label)}` : ""}</p></div>
+        <button type="button" class="icon-btn" data-edit-data aria-label="Meine Daten bearbeiten">${icon("edit")}</button>
       </div>
-      ${data.hasPlan ? `<div class="btn-row"><button type="button" class="btn small tonal" data-wizard>${icon("spark")}
-        Neuen Plan erstellen</button></div>` : ""}
       <div class="stats profil-stats">
         ${fact(p.height_cm ? `${String(p.height_cm).replace(".", ",")} cm` : "–", "Größe")}
         ${fact(p.birth_year ? `${year - p.birth_year} J.` : "–", "Alter")}
@@ -326,72 +309,84 @@ function render() {
       </div>
     </div>
 
-    ${nutritionCard()}
-    ${fastingCard()}
-
+    <h3 class="section-title">Ziele</h3>
     <div class="list profil-list">
-      <div class="row-item" role="button" tabindex="0" data-topf>
-        <span class="row-icon">${icon("bag")}</span>
-        <div class="row-main"><div class="row-title">Shopping-Topf</div>
-          <div class="row-meta"><span>${p.reward_per_workout ? `${String(p.reward_per_workout).replace(".", ",")} € pro Training · Wunschliste öffnen`
-            : "Jedes Training bringt Geld für deine Wunschliste."}</span></div></div>
-        ${icon("right", "chev")}
-      </div>
-      <div class="row-item" role="button" tabindex="0" data-profiles>
-        <span class="row-icon">${icon("user")}</span>
-        <div class="row-main"><div class="row-title">Profile verwalten</div>
-          <div class="row-meta"><span>Name, Farbe und weitere Profile – auch oben rechts über den Namen</span></div></div>
-        ${icon("right", "chev")}
-      </div>
+      ${data.hasPlan
+        ? row("dumbbell", "Training", esc(summary(p)), "data-wizard")
+        : row("spark", "Training: Plan erstellen lassen", "Nur die Trainingstage wählen – den Rest stellt die App passend ein.", "data-wizard")}
+      ${row("food", "Ernährung", g.kcal ? `${num(g.kcal)} kcal · Eiweiß ${g.protein ?? "–"} g${n.water?.goal ? ` · Trinken ${liters(n.water.goal)} L` : ""}`
+        : "Noch kein Ziel – der Assistent rechnet es aus.", "data-nutrition")}
     </div>
 
-    <div class="card">
-      <div class="card-head">${icon("user")}<span class="card-title">Deine Daten</span></div>
-      <form id="profilForm" class="form">
-        <label class="field">Name<input name="name" maxlength="40" required value="${esc(p.name)}"></label>
-        <div class="field-row">
-          <label class="field">Geburtsjahr<input name="birth_year" type="number" inputmode="numeric"
-            min="1920" max="${year - 6}" value="${p.birth_year ?? ""}" placeholder="optional"></label>
-          <label class="field">Größe (cm)<input name="height_cm" type="number" inputmode="decimal"
-            min="100" max="250" step="0.5" value="${p.height_cm ?? ""}" placeholder="optional"></label>
-        </div>
-        <label class="field">Geschlecht
-          <select name="sex">
-            ${option("", "keine Angabe", p.sex || "")}
-            ${option("weiblich", "weiblich", p.sex)}
-            ${option("männlich", "männlich", p.sex)}
-            ${option("divers", "divers", p.sex)}
-          </select>
-        </label>
-        <p class="form-section">Für Coach und Plan</p>
-        <label class="field">Was dich motiviert – warum du trainierst
-          <textarea name="motivation" rows="3" maxlength="300"
-            placeholder="optional, z. B. Ziel-Outfit, mehr Energie im Alltag, Rücken stärken">${esc(p.motivation || "")}</textarea>
-          <span class="hint">Das liest nur dein Coach – er bezieht sich darauf statt auf Druck.</span>
-        </label>
-        <label class="field">Einschränkungen oder Verletzungen
-          <textarea name="limitations" rows="2" maxlength="500"
-            placeholder="optional, z. B. Knie links, keine Überkopf-Übungen">${esc(p.limitations || "")}</textarea>
-          <span class="hint">Stichwörter wie Knie, Rücken, Schulter oder Ellbogen berücksichtigt der
-            Assistent direkt bei der Übungswahl; alles andere nur die KI-Verfeinerung.</span>
-        </label>
-        <div class="btn-row wide"><button type="submit" class="btn primary">Speichern</button></div>
-      </form>
-    </div>
-
-    <div class="card">
-      <div class="card-head">${icon("download")}<span class="card-title">Daten exportieren</span></div>
-      <p class="hint">Als CSV für Excel oder Numbers – nur die Daten dieses Profils.</p>
-      <div class="chips export-chips">${[["saetze", "Sätze"], ["cardio", "Cardio"], ["koerper", "Körper"], ["ernaehrung", "Ernährung"]]
-        .map(([k, l]) => `<a class="btn small tonal" href="/api/export/${k}.csv?profile=${getProfile()}" download>${icon("download")} ${l}</a>`).join("")}</div>
+    <h3 class="section-title">Mehr</h3>
+    <div class="list profil-list">
+      ${row("clock", "Intervallfasten", p.fasting_kind ? `${esc(fastLabel(p))} · Timer im Tab Ernährung` : "aus", "data-fasting")}
+      ${row("bag", "Shopping-Topf", p.reward_per_workout ? `${String(p.reward_per_workout).replace(".", ",")} € pro Training · Wunschliste`
+        : "Jedes Training bringt Geld für deine Wunschliste.", "data-topf")}
+      ${row("user", "Profile wechseln und verwalten", "Name, Farbe, weitere Profile", "data-profiles")}
+      ${row("download", "Daten exportieren", "CSV für Excel oder Numbers", "data-export")}
     </div>`;
+}
 
-  const nf = $("#nutriForm", root);
+/** "Deine Daten" als Sheet statt als Formular am Seitenende. */
+function openDataSheet() {
+  const p = data.profile;
+  const year = new Date().getFullYear();
+  const sheet = openSheet({ title: "Meine Daten", body: `<form id="profilForm" class="form">
+      <label class="field">Name<input name="name" maxlength="40" required value="${esc(p.name)}"></label>
+      <div class="field-row">
+        <label class="field">Geburtsjahr<input name="birth_year" type="number" inputmode="numeric"
+          min="1920" max="${year - 6}" value="${p.birth_year ?? ""}" placeholder="optional"></label>
+        <label class="field">Größe (cm)<input name="height_cm" type="number" inputmode="decimal"
+          min="100" max="250" step="0.5" value="${p.height_cm ?? ""}" placeholder="optional"></label>
+      </div>
+      <label class="field">Geschlecht
+        <select name="sex">
+          ${option("", "keine Angabe", p.sex || "")}
+          ${option("weiblich", "weiblich", p.sex)}
+          ${option("männlich", "männlich", p.sex)}
+          ${option("divers", "divers", p.sex)}
+        </select>
+      </label>
+      <p class="form-section">Für Coach und Plan</p>
+      <label class="field">Was dich motiviert – warum du trainierst
+        <textarea name="motivation" rows="3" maxlength="300"
+          placeholder="optional, z. B. Ziel-Outfit, mehr Energie im Alltag, Rücken stärken">${esc(p.motivation || "")}</textarea>
+        <span class="hint">Das liest nur dein Coach – er bezieht sich darauf statt auf Druck.</span>
+      </label>
+      <label class="field">Einschränkungen oder Verletzungen
+        <textarea name="limitations" rows="2" maxlength="500"
+          placeholder="optional, z. B. Knie links, keine Überkopf-Übungen">${esc(p.limitations || "")}</textarea>
+        <span class="hint">Stichwörter wie Knie, Rücken, Schulter oder Ellbogen berücksichtigt der
+          Assistent direkt bei der Übungswahl; alles andere nur die KI-Verfeinerung.</span>
+      </label>
+    </form>`,
+    footer: `<button type="submit" class="btn primary" form="profilForm">Speichern</button>` });
+  const form = $("#profilForm", sheet);
+  submitOnce(form, async () => {
+    try {
+      const saved = await api(`profiles/${getProfile()}`, { method: "PATCH", body: formData(form) });
+      data.profile = saved;
+      window.dispatchEvent(new CustomEvent("profile-changed", { detail: saved }));
+      closeSheet();
+      toast("Profil gespeichert");
+      render();
+    } catch (e) { formError(form, e); }
+  });
+}
+
+/** Ernährungsziel: Anzeige, Assistent und die "eigenen Werte" – alles in einem Sheet. */
+function openNutritionSheet() {
+  const sheet = openSheet({ title: "Ernährungsziel", body: nutritionCard() });
+  const nf = $("#nutriForm", sheet);
   nf.nutrition_auto.addEventListener("change", () => {
     nf.querySelectorAll("[data-manual]").forEach((el) => { el.hidden = nf.nutrition_auto.checked; });
   });
   nf.water_auto.addEventListener("change", () => {
     nf.querySelectorAll("[data-water-manual]").forEach((el) => { el.hidden = nf.water_auto.checked; });
+  });
+  sheet.addEventListener("click", (ev) => {
+    if (ev.target.closest("[data-goal-wizard]")) openGoalAssistant();
   });
   submitOnce(nf, async () => {
     try {
@@ -401,23 +396,27 @@ function render() {
       else if (body.water_goal_ml == null) return formError(nf, new Error("Trinkziel: bitte einen Wert eintragen."));
       delete body.water_auto;
       await api(`profiles/${getProfile()}`, { method: "PATCH", body });
+      closeSheet();
       toast("Ernährungsziel gespeichert");
-      data = null;
       await load();
     } catch (e) { formError(nf, e); }
   });
+}
 
-  const form = $("#profilForm", root);
-  submitOnce(form, async () => {
-    try {
-      const body = formData(form);
-      const saved = await api(`profiles/${getProfile()}`, { method: "PATCH", body });
-      data.profile = saved;
-      window.dispatchEvent(new CustomEvent("profile-changed", { detail: saved }));
-      toast("Profil gespeichert");
-      render();
-    } catch (e) { formError(form, e); }
-  });
+function openFastingMenu() {
+  const on = Boolean(data.profile.fasting_kind);
+  actionMenu("Intervallfasten", [
+    { label: on ? "Fastenart ändern" : "Welche Fastenart passt zu mir?", icon: "clock",
+      run: () => openFastAssistant({ onDone: () => { load(); } }) },
+    on && { label: "Zur Fasten-Ansicht", icon: "right", run: () => { prefs.set("nutriView", "fasten"); location.hash = "ernaehrung"; } },
+    on && { label: "Fasten ausschalten", icon: "x", danger: true, run: turnFastingOff },
+  ]);
+}
+
+function openExport() {
+  openSheet({ title: "Daten exportieren", body: `<p class="hint">Als CSV für Excel oder Numbers – nur die Daten dieses Profils.</p>
+    <div class="chips export-chips">${[["saetze", "Sätze"], ["cardio", "Cardio"], ["koerper", "Körper"], ["ernaehrung", "Ernährung"]]
+      .map(([k, l]) => `<a class="btn small tonal" href="/api/export/${k}.csv?profile=${getProfile()}" download>${icon("download")} ${l}</a>`).join("")}</div>` });
 }
 
 async function turnFastingOff() {
@@ -425,16 +424,12 @@ async function turnFastingOff() {
     const saved = await api(`profiles/${getProfile()}`, { method: "PATCH", body: { fasting_kind: null } });
     window.dispatchEvent(new CustomEvent("profile-changed", { detail: saved }));
     toast("Fasten ausgeschaltet");
-    data = null;
     await load();
   } catch (e) { toast(e.offline ? "Dafür ist eine Verbindung nötig." : e.message, { error: true }); }
 }
 
 export async function load() {
-  // Nicht neu zeichnen, während jemand im Formular tippt
-  if (data && root.contains(document.activeElement) && document.activeElement.matches("input, textarea, select")) return;
-  if (data && hasDirtyForm(root)) return;
-  if (!data) root.innerHTML = skeleton(4);
+  if (!data) root.innerHTML = skeletonCards([150, 130, 200]);
   const [profile, bw, nutrition, splits] = await Promise.all([api(`profiles/${getProfile()}`),
     api("bodyweight"), api("nutrition/goals"), api("splits").catch(() => [])]);
   data = { profile, weight: bw[bw.length - 1] || null, nutrition, hasPlan: splits.some((s) => s.active) };
@@ -443,13 +438,15 @@ export async function load() {
 
 export async function mount(el) {
   root = el;
+  data = null;   // frisch (z. B. nach Profilwechsel)
   el.addEventListener("click", (ev) => {
     if (ev.target.closest("[data-wizard]")) openWizard(data?.profile);
     if (ev.target.closest("[data-profiles]")) document.getElementById("profileBtn")?.click();
     if (ev.target.closest("[data-topf]")) openTopf();
-    if (ev.target.closest("[data-goal-wizard]")) openGoalAssistant();
-    if (ev.target.closest("[data-fast-assistant]")) openFastAssistant({ onDone: () => { data = null; load(); } });
-    if (ev.target.closest("[data-fast-off]")) turnFastingOff();
+    if (ev.target.closest("[data-nutrition]")) openNutritionSheet();
+    if (ev.target.closest("[data-edit-data]")) openDataSheet();
+    if (ev.target.closest("[data-fasting]")) openFastingMenu();
+    if (ev.target.closest("[data-export]")) openExport();
   });
 }
 
