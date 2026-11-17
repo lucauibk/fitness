@@ -25,3 +25,13 @@ def test_unplanned_gap_breaks_the_streak():
     # Kein Plan: mehr als zwei Ruhetage am Stueck werden nicht toleriert.
     best, current = _runs({d1, d5}, planned=set(), start=d1, end=d5)
     assert current == 1
+
+
+def test_bestleistung_hat_trend_der_letzten_einheiten(profile_id):
+    from app import db, stats
+    ex = db.one("SELECT id FROM exercises LIMIT 1")["id"]
+    for i, weight in enumerate((40.0, 45.0, 50.0)):
+        db.save_workout({"profile_id": profile_id, "started_at": f"2026-10-0{i + 1}T08:00:00+00:00",
+                         "sets": [{"exercise_id": ex, "set_no": 1, "reps": 8, "weight": weight, "warmup": 0}]})
+    best = next(b for b in stats.best_per_exercise(profile_id) if b["exercise_id"] == ex)
+    assert len(best["trend"]) == 3 and best["trend"] == sorted(best["trend"])

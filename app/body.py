@@ -112,6 +112,23 @@ def delete(profile_id, mid):
                       (profile_id, row["date"]))
 
 
+def _merge_bodyweight(profile_id, series, latest):
+    """Gewichte, die nicht aus einer Messung stammen (Ernaehrungsziel-Assistent, Einzel-Eintrag), stehen
+    nur in `bodyweight`. Ohne diesen Abgleich fehlten sie im Koerper-Tab, obwohl Uebersicht und Profil
+    sie zeigen. Ein Tag mit Messung behaelt deren Wert; der juengste Tag bestimmt "latest"."""
+    have = {p["date"] for p in series["weight_kg"]}
+    extra = [{"date": r["date"], "value": r["kg"]}
+             for r in db.rows("SELECT date, kg FROM bodyweight WHERE profile_id=? ORDER BY date", (profile_id,))
+             if r["date"] not in have]
+    if not extra:
+        return
+    series["weight_kg"] = sorted(series["weight_kg"] + extra, key=lambda p: p["date"])
+    newest = series["weight_kg"][-1]
+    if newest in extra:
+        latest["weight_kg"] = {"value": newest["value"], "date": newest["date"], "source": "gewicht",
+                               "estimated": False}
+
+
 def history(profile_id):
     rows = db.rows("SELECT * FROM body_measurements WHERE profile_id=? ORDER BY date, id",
                    (profile_id,))
@@ -123,6 +140,7 @@ def history(profile_id):
                                "estimated": bool(r["body_fat_estimated"]) if key == "body_fat_pct" else False}
     series = {key: [{"date": r["date"], "value": r[key]} for r in rows if r.get(key) is not None]
               for key in RANGES}
+    _merge_bodyweight(profile_id, series, latest)
     return {"entries": list(reversed(rows)), "latest": latest,
             "series": {k: v for k, v in series.items() if v}, "labels": LABELS}
 
