@@ -116,3 +116,13 @@ def test_reihenfolge_bestimmt_das_ziel(profile_id):
     jeans = next(i for i in s["open"] if i["name"] == "Jeans")
     s = routes.update_item(jeans["id"], routes.ItemIn(position=1), profile_id)
     assert s["goal"]["name"] == "Kleid"
+
+
+def test_heute_karte_ohne_foto(profile_id):
+    """Das Base64-Foto reist nicht mit jeder Heute-Antwort; das Sheet (status) hat es weiterhin."""
+    rewards.set_rate(profile_id, 5.0)
+    _item(profile_id, image=JPEG)
+    card = rewards.card(profile_id)
+    assert card["goal"]["name"] == "Jeans"
+    assert "image" not in card["goal"]
+    assert rewards.status(profile_id)["goal"]["image"] == JPEG

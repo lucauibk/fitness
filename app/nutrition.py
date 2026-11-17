@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from difflib import SequenceMatcher
 
-from . import db
+from . import body, db
 from .activity import latest_weight, planned_weekdays
 from .stats import _local_date, today as local_today
 
@@ -41,6 +41,18 @@ KCAL_PER_KG_FAT = 7700
 CUT_RANGE = (300, 500)
 BULK_PCT, BULK_RANGE = 0.10, (200, 500)
 GOAL_FIXED = {"kraft": 150, "fitness": 0}
+# Tempo (profiles.nutrition_pace) fuer Abnehmen und Aufbau: Anteil am Koerpergewicht pro Woche bzw. am
+# Verbrauch, dazu die Spanne in kcal. "standard" ist die Rechnung von oben und gilt ohne Auswahl.
+PACES = ("sanft", "standard", "zuegig")
+CUT_PACES = {"sanft": (0.25, (150, 300)), "standard": (CUT_PCT_BW_PER_WEEK, CUT_RANGE),
+             "zuegig": (0.75, (500, 700))}
+BULK_PACES = {"sanft": (0.05, (100, 250)), "standard": (BULK_PCT, BULK_RANGE), "zuegig": (0.15, (400, 600))}
+# Untergrenze im Defizit: nie weniger als das, auch wenn Grundumsatz minus Abschlag darunter laege.
+# Gaengige Mindestmengen fuer selbstgesteuertes Abnehmen (Frauen 1200, Maenner 1500 kcal); ohne Angabe
+# oder bei "divers" gilt der niedrigere Wert, weil der hoehere Menschen mit kleinem Verbrauch ein
+# Plus ueber dem Erhaltungsbedarf aufzwingen koennte. Setzung, keine Leitlinie.
+KCAL_FLOOR = {"männlich": 1500}
+KCAL_FLOOR_DEFAULT = 1200
 # Eiweiss in g pro kg Koerpergewicht (ohne Koerperfett) bzw. kg fettfreier Masse (mit).
 # Basis: ISSN 2017, Morton et al. 2018 (Plateau ~1,6 g/kg, im Defizit bis ~2,2), Helms 2014.
 PROTEIN_PER_KG = {"abnehmen": 2.2, "aufbau": 1.9, "kraft": 1.9, "fitness": 1.6}
@@ -94,13 +106,59 @@ def training_session_kcal(weight, minutes):
     return (STRENGTH_MET - 1) * weight * (minutes / 60)
 
 
-def goal_adjustment(goal, tdee, weight):
+def kcal_floor(sex):
+    return KCAL_FLOOR.get(sex, KCAL_FLOOR_DEFAULT)
+
+
+def goal_adjustment(goal, tdee, weight, pace=None):
+    """Zu- oder Abschlag in kcal pro Tag. pace: sanft | standard | zuegig (None = standard); nur
+    Abnehmen und Aufbau haben ein Tempo, Kraft und Fitness sind fest."""
+    pace = pace if pace in PACES else "standard"
     if goal == "abnehmen":
-        cut = CUT_PCT_BW_PER_WEEK / 100 * weight * KCAL_PER_KG_FAT / 7
-        return -round(min(max(cut, CUT_RANGE[0]), CUT_RANGE[1]))
+        pct, (low, high) = CUT_PACES[pace]
+        cut = pct / 100 * weight * KCAL_PER_KG_FAT / 7
+        return -round(min(max(cut, low), high))
     if goal == "aufbau":
-        return round(min(max(tdee * BULK_PCT, BULK_RANGE[0]), BULK_RANGE[1]))
+        pct, (low, high) = BULK_PACES[pace]
+        return round(min(max(tdee * pct, low), high))
     return GOAL_FIXED.get(goal, 0)
+
+
+# Nachsteuerung am Gewichtsverlauf: Formeln liegen je nach Person 10-15 % daneben. Passt die Gewichts-
+# aenderung der letzten Wochen nicht zum Ziel, korrigiert die App das Ziel zur Haelfte der Luecke.
+# Gilt, wenn du dich ans Ziel haeltst; ohne Eintraege im Essenstagebuch kann sie das nicht pruefen.
+TREND_DAMPING = 0.5
+TREND_MAX_KCAL = 300
+
+
+def trend_adjustment(profile_id, goal, planned_adjust, today=None):
+    """(Korrektur in kcal pro Tag, gemessene kg pro Woche). Korrektur 0, wenn der Verlauf zum Ziel
+    passt oder zu wenig/zu alt ist (gleiche Schwellen wie body.trend). Quelle ist `bodyweight`."""
+    today = today or local_today()
+    daily = [(date.fromisoformat(r["date"]), r["kg"]) for r in db.rows(
+        "SELECT date, kg FROM bodyweight WHERE profile_id=? ORDER BY date", (profile_id,))]
+    win = body._window(daily)
+    if not body._enough(win) or (today - win[-1][0]).days > body.STALE_DAYS:
+        return 0, None
+    slope, end = body._fit(win)
+    rate = slope * 7
+    lo, hi = body.GOAL_RATE.get(goal, body.GOAL_RATE["fitness"])
+    if lo <= rate / end * 100 <= hi:
+        return 0, round(rate, 2)
+    if goal in ("abnehmen", "aufbau"):
+        target = planned_adjust * 7 / KCAL_PER_KG_FAT        # kg pro Woche, das die Tempo-Wahl meint
+    else:
+        target = (lo + hi) / 2 * end / 100
+    wanted = (target - rate) * KCAL_PER_KG_FAT / 7 * TREND_DAMPING
+    return round(max(-TREND_MAX_KCAL, min(TREND_MAX_KCAL, wanted)) / 10) * 10, round(rate, 2)
+
+
+def _protein_basis(weight, goal, body_fat):
+    """Eiweiss-Faktor (g je kg) und Bezugsmasse (kg): Koerpergewicht, mit gemessenem Koerperfett die
+    fettfreie Masse."""
+    per_kg = PROTEIN_PER_KG_LEAN if body_fat is not None else PROTEIN_PER_KG
+    ref = weight * (1 - body_fat / 100) if body_fat is not None else weight
+    return per_kg.get(goal, per_kg["fitness"]), ref
 
 
 def computed_goals(profile):
@@ -135,27 +193,38 @@ def computed_goals(profile):
     sport = training_kcal(weight, sessions, minutes)
     tdee = base * pal + sport
     goal = profile.get("goal") or "fitness"
-    adjust = goal_adjustment(goal, tdee, weight)
+    pace = profile.get("nutrition_pace")
+    base_adjust = goal_adjustment(goal, tdee, weight, pace)
+    trend_adjust, trend_rate = trend_adjustment(profile["id"], goal, base_adjust)
+    adjust = base_adjust + trend_adjust
     floor = round(base / 10) * 10                                         # nie unter den Grundumsatz
+    if adjust < 0:                                                        # im Defizit zusaetzlich KCAL_FLOOR
+        floor = max(floor, kcal_floor(sex))
     daily = base * pal
     session = training_session_kcal(weight, minutes)
-    kcal = max(round((tdee + adjust) / 10) * 10, floor)
+    wanted = round((tdee + adjust) / 10) * 10
+    kcal = max(wanted, floor)
     by_day = {   # Trainingstag mit dem vollen Mehrverbrauch, Ruhetag ohne: im Wochenmittel wie `kcal`
         "training": _macros(max(round((daily + session + adjust) / 10) * 10, floor), weight, goal, body_fat),
         "rest": _macros(max(round((daily + adjust) / 10) * 10, floor), weight, goal, body_fat)}
+    per_kg, ref = _protein_basis(weight, goal, body_fat)
     return {**_macros(kcal, weight, goal, body_fat), "by_day": by_day,
             "tdee": round(tdee), "weight": weight,
             "breakdown": {"bmr": round(base), "formula": formula, "pal": pal,
                           "daily_kcal": round(base * pal), "training_kcal": round(sport),
                           "session_kcal": round(session),
-                          "sessions": sessions, "adjustment": adjust, "body_fat": body_fat}}, []
+                          "sessions": sessions, "adjustment": adjust, "trend_adjust": trend_adjust,
+                          "trend_rate": trend_rate, "body_fat": body_fat,
+                          "pace": pace if pace in PACES else "standard",
+                          "floor": floor, "floor_applied": wanted < floor,
+                          "protein_per_kg": per_kg, "protein_basis_kg": round(ref, 1),
+                          "protein_capped": ref * per_kg > kcal * PROTEIN_MAX_KCAL_SHARE / 4}}, []
 
 
 def _macros(kcal, weight, goal, body_fat):
     """Eiweiss, Fett und Kohlenhydrate zu einem Kalorienziel."""
-    per_kg = PROTEIN_PER_KG_LEAN if body_fat is not None else PROTEIN_PER_KG
-    ref = weight * (1 - body_fat / 100) if body_fat is not None else weight
-    protein = round(min(ref * per_kg.get(goal, per_kg["fitness"]), kcal * PROTEIN_MAX_KCAL_SHARE / 4))
+    per_kg, ref = _protein_basis(weight, goal, body_fat)
+    protein = round(min(ref * per_kg, kcal * PROTEIN_MAX_KCAL_SHARE / 4))
     fat = round(max(weight * FAT_MIN_G_PER_KG, kcal * FAT_KCAL_SHARE / 9))
     carbs = max(0, round((kcal - protein * 4 - fat * 9) / 4))
     return {"kcal": kcal, "protein": protein, "carbs": carbs, "fat": fat}
@@ -202,6 +271,27 @@ def goals(profile, day_iso=None):
             "activity_level": profile.get("activity_level"), "reference": reference(active.get("kcal"))}
 
 
+def preview(profile, goal=None, activity_level=None, pace=None):
+    """Ziele mit probeweise geaenderten Angaben – nichts wird gespeichert. Die Rechnung ist
+    computed_goals; zusaetzlich je Tempo das Ergebnis, damit der Assistent sie vergleichen kann
+    (nur bei Abnehmen und Aufbau), und das berechnete Trinkziel zur Aktivitaet."""
+    trial = dict(profile)
+    for key, value in (("goal", goal), ("activity_level", activity_level), ("nutrition_pace", pace)):
+        if value is not None:
+            trial[key] = value
+    calc, missing = computed_goals(trial)
+    paces = {}
+    if calc and (trial.get("goal") or "fitness") in ("abnehmen", "aufbau"):
+        for name in PACES:
+            one, _ = computed_goals({**trial, "nutrition_pace": name})
+            adjust = one["breakdown"]["adjustment"]
+            paces[name] = {"kcal": one["kcal"], "adjustment": adjust,
+                           "floor_applied": one["breakdown"]["floor_applied"],
+                           # 7700 kcal je kg Fett; bei Muskelaufbau gibt es keine solche Umrechnung
+                           "weekly_kg": round(-adjust * 7 / KCAL_PER_KG_FAT, 2) if adjust < 0 else None}
+    return {"computed": calc, "missing": missing, "paces": paces, "water_ml": _water_goal_computed(trial)}
+
+
 def reference(kcal):
     """Richtwerte fuer die Detail-Naehrwerte. "min": mindestens so viel ist gut, "max": darunter
     bleiben. Ballaststoffe 30 g (DGE); freier Zucker und gesaettigte Fette je hoechstens 10 % der
@@ -211,6 +301,13 @@ def reference(kcal):
         out["sugar"] = {"value": round(kcal * 0.10 / 4), "kind": "max"}
         out["sat_fat"] = {"value": round(kcal * 0.10 / 9), "kind": "max"}
     return out
+
+
+def budget(goals, burned_kcal):
+    """Tagesbudget in kcal: Ziel plus verbrannte kcal (Cardio). 0, wenn es kein Kalorienziel gibt –
+    ohne Ziel gibt es nichts zu verrechnen. Heute und Ernaehrung zeigen genau diese Zahl."""
+    goal = (goals or {}).get("kcal")
+    return goal + (burned_kcal or 0) if goal else 0
 
 
 def day(profile_id, day_iso):

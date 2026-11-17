@@ -8,7 +8,10 @@ from datetime import datetime, timedelta, timezone
 from . import db, stats
 
 # Feste Fastenarten -> Stunden ohne Essen. "custom" nimmt profiles.fasting_hours.
-KINDS = {"14:10": 14, "16:8": 16, "18:6": 18}
+KINDS = {"12:12": 12, "14:10": 14, "16:8": 16, "18:6": 18, "20:4": 20, "OMAD": 23}
+# Nur mit Erfahrung und bewusst gewaehlt; die Evidenz ist hier duenn (kaum Langzeitstudien, kein
+# belegter Vorteil gegenueber 16:8 bei gleicher Kalorienbilanz). Texte fuer die UI: fasting_advice.
+ADVANCED = ("18:6", "20:4", "OMAD")
 CUSTOM = "custom"
 MAX_HOURS = 48          # Obergrenze fuer die eigene Stundenzahl
 MAX_PAST = timedelta(hours=72)     # aelter darf eine nachgetragene Startzeit nicht sein
@@ -80,6 +83,17 @@ def hint(profile_id, current):
         return ("Du hast im Fasten trainiert. Plane das Eiweiß direkt danach oder im Essensfenster ein "
                 "– die Tagesmenge bleibt gleich.")
     return None
+
+
+def brief(profile_id, profile):
+    """Kurzstand fuer "Heute": nur ob Fasten an ist und was gerade laeuft (ohne Verlauf und Tipps).
+    None, wenn weder eine Fastenart gewaehlt ist noch ein Fasten laeuft."""
+    current = running(profile_id)
+    if not profile.get("fasting_kind") and not current:
+        return None
+    last = None if current else next(iter(history(profile_id, limit=1)), None)
+    return {"kind": profile.get("fasting_kind"), "target_hours": target_hours(profile),
+            "running": current, "last_ended_at": last["ended_at"] if last else None}
 
 
 def overview(profile_id, profile):

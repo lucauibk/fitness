@@ -62,6 +62,12 @@ def get_messages(profile_id: int = Depends(current_profile),
             "unread": coach_chat.unread(profile_id), "page": coach_chat.PAGE}
 
 
+@router.get("/coach/unread")
+def get_unread(profile_id: int = Depends(current_profile)):
+    """Nur die Zahl, fuer den Punkt am Coach-Knopf in der oberen Leiste (jeder Tab)."""
+    return {"unread": coach_chat.unread(profile_id)}
+
+
 @router.post("/coach/seen")
 def post_seen(body: SeenIn, profile_id: int = Depends(current_profile)):
     coach_chat.mark_seen(profile_id, body.id)

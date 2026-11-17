@@ -11,17 +11,16 @@ import * as cardio from "./cardio.js";
 import * as ernaehrung from "./ernaehrung.js";
 import * as uebersicht from "./fortschritt.js";
 import * as koerper from "./koerper.js";
-import * as erfolge from "./erfolge.js";
 import * as verlauf from "./verlauf.js";
 import * as profil from "./profil.js";
+import { openCoach } from "./coach.js";
 
 const training = subTabs("training", {
   einheit: ["Einheit", einheit], plan: ["Plan", plan],
   uebungen: ["Übungen", uebungen], cardio: ["Cardio", cardio],
 }, "einheit");
 const fortschritt = subTabs("fortschritt", {
-  uebersicht: ["Übersicht", uebersicht], koerper: ["Körper", koerper],
-  erfolge: ["Erfolge", erfolge], verlauf: ["Verlauf", verlauf],
+  uebersicht: ["Übersicht", uebersicht], koerper: ["Körper", koerper], verlauf: ["Verlauf", verlauf],
 }, "uebersicht");
 const WITH_SUBS = { training, fortschritt };
 // Alte Adressen aus der ersten Version
@@ -105,15 +104,33 @@ async function reload() {
       try {
         await VIEWS[current][1].load();
         updateBadge();
+        refreshCoachDot();
       } catch (e) {
         const el = $(`#view-${current}`);
-        if (el.querySelector(".skeleton")) el.innerHTML = errorState(e);
+        if (el.querySelector(".skeleton, .skeleton-card")) el.innerHTML = errorState(e);
         else if (!e.offline) toast(e.message, { error: true });
       }
     } while (again);
     loading = null;
   })();
   return loading;
+}
+
+/** Reload aus dem Hintergrund (Netz zurueck, Outbox gesendet): nicht mitten im Tippen einer
+ *  laufenden Einheit – der Neuaufbau wuerde Tastatur und Scrollstand wegnehmen. Er holt
+ *  sich der Reload, sobald das Feld den Fokus verliert. */
+function reloadSoon() {
+  const typing = document.activeElement?.matches("input, textarea") && einheit.hasDraft();
+  if (!typing) return reload();
+  document.addEventListener("focusout", () => setTimeout(reloadSoon, 300), { once: true });
+}
+
+/** Punkt am Coach-Knopf: eine kleine Abfrage, nur die Zahl (jeder Tab hat den Knopf). */
+async function refreshCoachDot() {
+  try {
+    const { unread } = await api("coach/unread");
+    $("#coachDot").hidden = !unread;
+  } catch { /* offline: Punkt bleibt, wie er war */ }
 }
 
 function updateBadge() {
@@ -287,7 +304,7 @@ window.addEventListener("api-stale", (e) => {
 });
 window.addEventListener("api-online", () => updateBanner("online"));
 window.addEventListener("outbox-changed", () => { updateBanner(); updateBadge(); });
-window.addEventListener("online", () => reload());
+window.addEventListener("online", () => reloadSoon());
 
 function retry() {
   const el = $(`#view-${current}`);
@@ -299,15 +316,23 @@ function retry() {
   show();
 }
 
+// Hoehe der oberen Leiste: klebende Kopfzeilen in den Ansichten (Ernaehrung) haengen sich darunter.
+const topbar = document.querySelector(".topbar");
+if (topbar && window.ResizeObserver) {
+  new ResizeObserver(() => document.documentElement.style.setProperty("--topbar-h", `${topbar.offsetHeight}px`)).observe(topbar);
+}
+
 // ------------------------------------------------------------ Ereignisse
 window.addEventListener("hashchange", show);
-window.addEventListener("data-changed", () => reload());
+window.addEventListener("data-changed", () => reloadSoon());
 window.addEventListener("profile-changed", (e) => {
   const i = profiles.findIndex((x) => x.id === e.detail.id);
   if (i >= 0) profiles[i] = e.detail;
   applyProfile(e.detail.id);
 });
 $("#profileBtn").addEventListener("click", openProfiles);
+$("#coachBtn").addEventListener("click", () => openCoach({ tab: current }));
+window.addEventListener("coach-seen", refreshCoachDot);
 document.addEventListener("click", (e) => { if (e.target.closest("[data-retry]")) retry(); });
 document.addEventListener("keydown", (e) => {
   const typing = e.target.closest?.("input, textarea, select, [contenteditable]");

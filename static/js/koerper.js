@@ -1,7 +1,7 @@
 /** Körper: Gewicht, Körperfett, Muskelmasse, Umfänge – manuell oder aus einem
  *  Screenshot der Studio-Körperanalyse (ViCoach), den die KI ausliest. */
 import { $, api, armDelete, closeSheet, deleteLater, esc, formData, formError, getProfile,
-  icon, isPendingDelete, openSheet, skeleton, submitOnce, toast, parseYmd, prefs } from "./util.js";
+  icon, isPendingDelete, openSheet, skeletonCards, submitOnce, toast, parseYmd, prefs } from "./util.js";
 import * as outbox from "./outbox.js";
 import { sparkline } from "./fortschritt.js";
 
@@ -13,6 +13,11 @@ const UNITS = { weight_kg: "kg", body_fat_pct: "%", muscle_mass_kg: "kg", water_
   chest_cm: "cm", arm_cm: "cm", thigh_cm: "cm", neck_cm: "cm" };
 const MAIN = ["weight_kg", "body_fat_pct", "muscle_mass_kg", "water_pct", "visceral_fat",
   "bmr_kcal", "bio_age"];
+// Auf der Seite: Gewicht gross (Hero), drei Körperanalyse-Werte als Reihe, der Rest hinter "Mehr Werte"
+const COMPOSITION = ["body_fat_pct", "muscle_mass_kg", "water_pct"];
+const MORE = ["visceral_fat", "bmr_kcal", "bio_age"];
+const RANGES = [[4, "4 Wochen"], [12, "12 Wochen"], [0, "Alles"]];
+let range = prefs.get("bodyRange", 12);
 const GIRTHS = ["waist_cm", "hip_cm", "chest_cm", "arm_cm", "thigh_cm", "neck_cm"];
 const fmt = (v, key) => `${Number(v).toLocaleString("de-AT", { maximumFractionDigits: 1 })}${UNITS[key] ? ` ${UNITS[key]}` : ""}`;
 const dm = (d) => parseYmd(d).toLocaleDateString("de-AT", { day: "numeric", month: "short" });
@@ -39,7 +44,7 @@ function currentTips() {
 }
 
 function assessmentCard() {
-  const v = data.trend?.verdict;
+  const v = data.latest.weight_kg ? null : data.trend?.verdict;   // mit Gewicht steht das Urteil im Hero
   const showTips = data.tips_available && Object.keys(data.latest).length;
   if (!v && !showTips) return "";
   const tips = showTips ? currentTips() : null;
@@ -74,11 +79,32 @@ function tile(key) {
   const latest = data.latest[key];
   if (!latest) return "";
   const series = data.series[key] || [];
-  return `<div class="card body-tile">
-    <p class="eyebrow">${esc(data.labels[key])}${latest.estimated ? " · geschätzt" : ""}</p>
-    <div class="bw-head"><span class="big-number">${fmt(latest.value, key)}</span>
-      <span class="hint">${dm(latest.date)}${latest.source === "vicoach" ? " · ViCoach" : ""}${sinceLast(key)}</span></div>
-    ${series.length > 1 ? sparkline(series.map((p) => ({ value: p.value, date: p.date })), { height: 48 }) : ""}
+  const delta = sinceLast(key).replace(" · ", "");
+  return `<div class="stat body-tile">
+    <span class="eyebrow">${esc(data.labels[key])}${latest.estimated ? " · geschätzt" : ""}</span>
+    <b>${fmt(latest.value, key)}</b>
+    <span class="tile-date">${dm(latest.date)}${latest.source === "vicoach" ? " · ViCoach" : ""}${delta ? ` · ${delta}` : ""}</span>
+    ${series.length > 1 ? sparkline(series.map((p) => ({ value: p.value, date: p.date })), { height: 40 }) : ""}
+  </div>`;
+}
+
+/** Gewicht als Hauptthema: grosse Zahl, Veränderung, Kurve mit Zeitraum. Quelle sind Messungen UND
+ *  Gewichte aus dem Ernährungsziel (der Server führt beide zusammen). */
+function weightHero() {
+  const latest = data.latest.weight_kg;
+  if (!latest) return "";
+  const all = data.series.weight_kg || [];
+  const since = range ? new Date(Date.now() - range * 7 * 86400000).toISOString().slice(0, 10) : "";
+  const shown = all.filter((p) => p.date >= since);
+  const delta = sinceLast("weight_kg").replace(" · ", "");
+  return `<div class="card weight-hero">
+    <div class="card-head"><span class="card-title">${esc(data.labels.weight_kg)}</span>
+      <div class="chips" role="radiogroup" aria-label="Zeitraum">${RANGES.map(([w, l]) =>
+        `<button type="button" role="radio" class="chip${w === range ? " active" : ""}" aria-checked="${w === range}" data-range="${w}">${l}</button>`).join("")}</div></div>
+    <div class="big"><b>${fmt(latest.value, "weight_kg")}</b><span>${dm(latest.date)}${delta ? ` · ${delta} seit der letzten Messung` : ""}</span></div>
+    ${shown.length > 1 ? sparkline(shown.map((p) => ({ value: p.value, date: p.date })), { height: 140, detail: true, format: (v) => fmt(v, "weight_kg") })
+      : `<p class="hint">${all.length > 1 ? "Im gewählten Zeitraum gibt es nur einen Eintrag." : "Mit der zweiten Messung entsteht hier eine Kurve."}</p>`}
+    ${data.trend?.verdict ? `<p class="hint"><b>Ziel ${esc(data.trend.verdict.goal)}:</b> ${esc(data.trend.verdict.text)}</p>` : ""}
   </div>`;
 }
 
@@ -86,20 +112,23 @@ function render() {
   const pend = outbox.pending("measurements");
   const hasAny = Object.keys(data.latest).length;
   const girths = GIRTHS.filter((k) => data.latest[k]);
-  root.innerHTML = `<div class="btn-row wide page-actions">
+  root.innerHTML = `<div class="page-actions">
       <button type="button" class="btn primary" data-new>${icon("plus")} Messung eintragen</button>
-      ${data.ai_available ? `<button type="button" class="btn tonal" data-scan>${icon("camera")} ViCoach-Screenshot</button>` : ""}
+      ${data.ai_available ? `<button type="button" class="link-btn" data-scan>${icon("camera")} Aus ViCoach-Screenshot einlesen</button>` : ""}
     </div>
     ${pend.length ? `<p class="callout">${pend.length} Messung(en) warten auf Verbindung.</p>` : ""}
-    ${assessmentCard()}
-    ${hasAny ? `<div class="body-grid">${MAIN.map(tile).join("")}</div>` : `<div class="card quiet"><p>
+    ${hasAny ? `${weightHero()}
+      ${COMPOSITION.some((k) => data.latest[k]) ? `<div class="body-grid three">${COMPOSITION.map(tile).join("")}</div>` : ""}
+      ${MORE.some((k) => data.latest[k]) ? `<details class="group-details"><summary class="section-title">Mehr Werte${icon("down", "chev")}</summary>
+        <div class="body-grid two">${MORE.map(tile).join("")}</div></details>` : ""}
+      ${assessmentCard()}` : `<div class="card quiet"><p>
       Noch keine Messung. Trag Gewicht und Umfänge ein – oder lies das Ergebnis deiner
       Körperanalyse im Studio per Screenshot ein.</p></div>`}
-    ${girths.length ? `<h3 class="group-title">Umfänge</h3><div class="list">${girths.map((k) => `
+    ${girths.length ? `<h3 class="section-title">Umfänge</h3><div class="list">${girths.map((k) => `
       <div class="row-item"><div class="row-main"><div class="row-title">${esc(data.labels[k])}</div>
-        <div class="row-meta"><span>${dm(data.latest[k].date)}</span></div></div>
+        <div class="row-meta"><span>${dm(data.latest[k].date)}${sinceLast(k)}</span></div></div>
         <span class="row-aside"><b>${fmt(data.latest[k].value, k)}</b></span></div>`).join("")}</div>` : ""}
-    ${data.entries.filter((e) => !isPendingDelete(`measurements/${e.id}`)).length ? `<details class="group-details"><summary class="group-title">Alle Messungen
+    ${data.entries.filter((e) => !isPendingDelete(`measurements/${e.id}`)).length ? `<details class="group-details"><summary class="section-title">Alle Messungen
         <span class="count-muted">${data.entries.filter((e) => !isPendingDelete(`measurements/${e.id}`)).length}</span>${icon("down", "chev")}</summary>
       <div class="list">${data.entries.filter((e) => !isPendingDelete(`measurements/${e.id}`)).map((e) => `<div class="row-item" role="button" tabindex="0" data-entry="${e.id}">
         <div class="row-main"><div class="row-title">${dm(e.date)}${e.source === "vicoach" ? " · ViCoach" : ""}</div>
@@ -111,7 +140,7 @@ function render() {
 }
 
 export async function load() {
-  if (!data) root.innerHTML = skeleton(4);
+  if (!data) root.innerHTML = skeletonCards([260, 110, 110]);
   data = await api("measurements");
   render();
 }
@@ -224,7 +253,7 @@ function openEntry(id) {
   });
   armDelete($("[data-delete]", sheet), () => {
     closeSheet();
-    deleteLater(`measurements/${id}`, "Messung gelöscht", { onDone: () => { data = null; } });
+    deleteLater(`measurements/${id}`, "Messung gelöscht");
   }, "Löschen", "Messung löschen? (Ihr Gewicht verschwindet dann auch aus dem Gewichtsverlauf.)");
 }
 
@@ -234,6 +263,8 @@ export async function mount(el) {
     if (ev.target.closest("[data-new]")) return openForm();
     if (ev.target.closest("[data-scan]")) return openScan();
     if (ev.target.closest("[data-tips]")) return fetchTips();
+    const r = ev.target.closest("[data-range]");
+    if (r) { range = Number(r.dataset.range); prefs.set("bodyRange", range); return render(); }
     const row = ev.target.closest("[data-entry]");
     if (row) openEntry(Number(row.dataset.entry));
   });

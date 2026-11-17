@@ -234,3 +234,26 @@ def test_measurements_route_meldet_ob_tipps_moeglich_sind(profile_id, monkeypatc
     assert routes.list_measurements(profile_id)["tips_available"] is True
     monkeypatch.setattr(claude_cli, "available", lambda: False)
     assert routes.list_measurements(profile_id)["tips_available"] is False
+
+
+def test_koerper_verlauf_enthaelt_gewicht_aus_dem_assistenten(profile_id):
+    """Ein Gewicht aus `bodyweight` (Ernährungsziel-Assistent) fehlte im Körper-Tab."""
+    from app import db
+    db.set_bodyweight(profile_id, "2026-11-01", 80.0)
+    hist = body.history(profile_id)
+    assert hist["series"]["weight_kg"] == [{"date": "2026-11-01", "value": 80.0}]
+    assert hist["latest"]["weight_kg"]["value"] == 80.0
+
+
+def test_koerper_verlauf_messung_gewinnt_am_selben_tag(profile_id):
+    from app import db
+    body.save(profile_id, {"date": "2026-11-01", "weight_kg": 81.0})
+    db.set_bodyweight(profile_id, "2026-11-01", 81.0)
+    db.set_bodyweight(profile_id, "2026-11-08", 80.0)
+    hist = body.history(profile_id)
+    assert [p["date"] for p in hist["series"]["weight_kg"]] == ["2026-11-01", "2026-11-08"]
+    assert hist["latest"]["weight_kg"]["value"] == 80.0
+    # Messung löschen nimmt das Gewicht des Tages zurück; der Verlauf bleibt stimmig
+    mid = hist["entries"][0]["id"]
+    body.delete(profile_id, mid)
+    assert [p["date"] for p in body.history(profile_id)["series"]["weight_kg"]] == ["2026-11-08"]

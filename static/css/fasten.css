@@ -1,0 +1,65 @@
+/* fasten: Fasten-Karte, Tipps, Fastenart-Assistent – und der Ernaehrungsziel-Assistent (Profil).
+   Basis (.card, .card-head, .stat, .week-band, .choice-grid, .callout) kommt aus style.css; der
+   Fuellstand der Verlaufszeilen ist ein <progress class="nutri-bar"> aus ernaehrung.css. */
+
+/* ------------------------------------------------------------ Fasten-Karte */
+.fast-main { display: flex; align-items: center; gap: var(--s4); }
+.fast-info { display: grid; gap: 2px; }
+.fast-info span { color: var(--muted); font-size: var(--fs-sm); }
+.fast-card .callout { margin: var(--s3) 0 0; }
+.fast-card .form-section { margin-top: var(--s4); }
+
+/* Einstieg ohne Fastenart: leise Karte, Text links, Knoepfe rechts */
+.fast-entry > span:first-child { display: inline-flex; align-items: center; gap: var(--s2); }
+.fast-entry-actions { display: inline-flex; align-items: center; gap: var(--s1); }
+
+/* Wochenband "x von 7 Tagen im Ziel" */
+.fast-week { display: grid; gap: var(--s3); margin-top: var(--s4); }
+.fast-score { margin: 0; color: var(--muted); font-size: var(--fs-sm); }
+.fast-score b { color: var(--text); font-size: var(--fs-md); font-weight: 650; }
+.fast-week .week-band .d i .icon { width: var(--s4); height: var(--s4); }
+.fast-week .week-band .d.miss i { box-shadow: inset 0 0 0 2px var(--soon); }
+
+/* Letzte Fasten */
+.fast-log { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s3); }
+.fast-log-row { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: var(--s1) var(--s3); font-size: var(--fs-sm); }
+.fast-log-day { color: var(--muted); }
+.fast-log-val { text-align: right; color: var(--muted); }
+.fast-log-val b { color: var(--text); font-weight: 650; }
+.fast-log-row .nutri-bar { grid-column: 1 / -1; }
+.fast-log-row.is-open { --bar: var(--faint); }
+
+/* Persoenliche Tipps */
+.fast-tips .card-head { margin-bottom: var(--s2); }
+.fast-tips .plain { margin: var(--s2) 0; }
+.fast-tips .callout { margin: var(--s3) 0 0; }
+
+/* -------------------------------------------------- Fastenart-Assistent (Sheet) */
+.fast-flags { margin: var(--s3) 0; }
+.fast-result { display: grid; gap: 2px; margin: var(--s3) 0; padding: var(--s4); border-radius: var(--r2); background: var(--accent-soft); }
+.fast-kind { font-size: var(--fs-xl); font-weight: 750; letter-spacing: -0.01em; line-height: 1.15; }
+.fast-reasons { margin: 0 0 var(--s3); }
+.fast-custom { margin-top: var(--s3); }
+.fast-assist .choice-grid { margin-top: var(--s2); }
+.fast-assist .callout, .goal-assist .callout { margin: var(--s3) 0 0; }
+
+/* -------------------------------------- Ernaehrungsziel-Assistent (Profil, Sheet) */
+.goal-choices { grid-template-columns: 1fr; margin: var(--s3) 0; }
+.goal-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.goal-stats .stat.lead { grid-column: 1 / -1; }
+.goal-stats .stat.lead b { font-size: var(--fs-lg); font-weight: 750; }
+/* Farbpunkt je Naehrstoff: --bar kommt aus .is-protein/.is-carbs/.is-fat (ernaehrung.css) */
+.goal-stats .stat[class*="is-"] span { display: flex; align-items: center; gap: var(--s2); }
+.goal-stats .stat[class*="is-"] span::before { content: ""; flex: none; width: var(--s2); height: var(--s2); border-radius: 50%; background: var(--bar); }
+.nutri-goal .goal-stats { margin-bottom: var(--s3); }
+.nutri-goal .btn-row { margin-top: var(--s3); }
+.calc-line { margin: var(--s3) 0 0; }
+.calc { display: grid; gap: var(--s2); margin: var(--s2) 0 var(--s3); }
+.calc > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); font-size: var(--fs-sm); }
+.calc dt { color: var(--muted); min-width: 0; }
+.calc dd { margin: 0; font-weight: 650; white-space: nowrap; }
+.calc .sum { padding-top: var(--s2); border-top: 1px solid var(--line); font-size: var(--fs); }
+.calc .sum dt { color: var(--text); font-weight: 650; }
+#view-profil .nutri-goal .goal-stats .stat { text-align: left; }
+.calc .sub dt { padding-left: var(--s3); font-size: var(--fs-xs); }
+.calc .sub dd { font-weight: 500; color: var(--muted); }

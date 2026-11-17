@@ -1,6 +1,6 @@
 import os
 import urllib.parse
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -197,7 +197,8 @@ def _profil(profile_id, **extra):
     db.update_row("profiles", profile_id, {
         "birth_year": date.today().year - 34, "sex": "männlich", "height_cm": 180,
         "goal": "fitness", "activity_level": "niedrig", "session_minutes": 60, **extra})
-    db.set_bodyweight(profile_id, date.today().isoformat(), 80)
+    if not db.one("SELECT 1 FROM bodyweight WHERE profile_id=?", (profile_id,)):
+        db.set_bodyweight(profile_id, date.today().isoformat(), 80)
     return db.get_row("profiles", profile_id)
 
 
@@ -430,3 +431,170 @@ def test_routen_liefern_feedback_und_woche(profile_id):
     assert tag["feedback"] and tag["goals"]["day_type"] in ("training", "rest")
     woche = routes.get_week(profile_id, date.today().isoformat())
     assert woche["to"] == date.today().isoformat() and len(woche["days"]) == 7
+
+
+# ------------------------------------------------- Untergrenze, Tempo, Vorschau
+def _klein(profile_id, sex, **extra):
+    """Kleine, leichte Person mit niedrigem Verbrauch: Grundumsatz weit unter den Untergrenzen."""
+    extra.setdefault("goal", "abnehmen")
+    p = _profil(profile_id, sex=sex, height_cm=150, birth_year=date.today().year - 60, **extra)
+    db.set_bodyweight(profile_id, date.today().isoformat(), 45)
+    return p
+
+
+def test_untergrenze_frau_1200_im_defizit(profile_id):
+    calc, _ = nutrition.computed_goals(_klein(profile_id, "weiblich", nutrition_pace="sanft"))
+    b = calc["breakdown"]
+    assert b["bmr"] < 1000 and b["floor"] == 1200 and b["floor_applied"] is True
+    assert calc["kcal"] == 1200
+    assert calc["by_day"]["rest"]["kcal"] >= 1200 and calc["by_day"]["training"]["kcal"] >= 1200
+
+
+def test_untergrenze_mann_1500_im_defizit(profile_id):
+    calc, _ = nutrition.computed_goals(_klein(profile_id, "männlich"))
+    assert calc["breakdown"]["floor"] == 1500 and calc["kcal"] == 1500
+    assert min(d["kcal"] for d in calc["by_day"].values()) >= 1500
+
+
+def test_untergrenze_gilt_nur_im_defizit(profile_id):
+    # Erhaltung bei kleinem Verbrauch wird nicht auf 1200 hochgezogen (das waere ein Ueberschuss ueber dem Bedarf)
+    calc, _ = nutrition.computed_goals(_klein(profile_id, "weiblich", goal="fitness"))
+    b = calc["breakdown"]
+    assert b["floor_applied"] is False and b["floor"] < 1200 and calc["kcal"] == round(calc["tdee"] / 10) * 10
+
+
+def test_rechenweg_geht_mit_untergrenze_auf(profile_id):
+    c, _ = nutrition.computed_goals(_klein(profile_id, "weiblich"))
+    b = c["breakdown"]
+    # Ohne Untergrenze laege das Ziel bei tdee + adjustment; mit ihr genau bei b["floor"]
+    assert round((c["tdee"] + b["adjustment"]) / 10) * 10 < b["floor"] == c["kcal"]
+
+
+def test_normale_person_bleibt_ueber_der_untergrenze(profile_id):
+    c = _ziele(profile_id, goal="abnehmen", train_weekdays="0,2,4")
+    assert c["breakdown"]["floor_applied"] is False and c["kcal"] > 1500
+
+
+@pytest.mark.parametrize("goal", ["abnehmen", "aufbau"])
+def test_tempo_ordnet_die_ziele(profile_id, goal):
+    kcal = {p: _ziele(profile_id, goal=goal, nutrition_pace=p, train_weekdays="0,2,4")["kcal"]
+            for p in nutrition.PACES}
+    if goal == "abnehmen":
+        assert kcal["sanft"] > kcal["standard"] > kcal["zuegig"]
+    else:
+        assert kcal["sanft"] < kcal["standard"] < kcal["zuegig"]
+    # Ohne Auswahl gilt "standard" wie bisher
+    assert _ziele(profile_id, goal=goal, nutrition_pace=None, train_weekdays="0,2,4")["kcal"] == kcal["standard"]
+
+
+def test_tempo_aendert_kraft_und_fitness_nicht(profile_id):
+    for goal in ("kraft", "fitness"):
+        base = _ziele(profile_id, goal=goal)["kcal"]
+        assert _ziele(profile_id, goal=goal, nutrition_pace="zuegig")["kcal"] == base
+
+
+def test_eiweiss_pro_kg_im_rechenweg(profile_id):
+    c = _ziele(profile_id, goal="aufbau")
+    b = c["breakdown"]
+    assert b["protein_per_kg"] == nutrition.PROTEIN_PER_KG["aufbau"] and b["protein_basis_kg"] == 80
+    assert c["protein"] == round(80 * b["protein_per_kg"]) and b["protein_capped"] is False
+    # Mit gemessenem Koerperfett: fettfreie Masse als Bezug und hoeherer Faktor
+    from app import body
+    body.save(profile_id, {"date": date.today().isoformat(), "body_fat_pct": 25.0})
+    b = nutrition.computed_goals(db.get_row("profiles", profile_id))[0]["breakdown"]
+    assert b["protein_basis_kg"] == 60 and b["protein_per_kg"] == nutrition.PROTEIN_PER_KG_LEAN["aufbau"]
+
+
+def test_vorschau_speichert_nichts_und_zeigt_alle_tempi(profile_id):
+    _profil(profile_id, goal="fitness", activity_level="niedrig")
+    before = db.get_row("profiles", profile_id)
+    out = nutrition.preview(before, goal="abnehmen", activity_level="hoch")
+    assert out["missing"] == [] and set(out["paces"]) == set(nutrition.PACES)
+    assert out["paces"]["standard"]["kcal"] == out["computed"]["kcal"]
+    assert out["paces"]["sanft"]["weekly_kg"] < out["paces"]["zuegig"]["weekly_kg"]
+    assert out["computed"]["breakdown"]["pal"] == nutrition.ACTIVITY["hoch"]
+    assert db.get_row("profiles", profile_id) == before          # nichts geschrieben
+    assert nutrition.preview(before, goal="fitness")["paces"] == {}
+
+
+def test_vorschau_ohne_daten_nennt_fehlendes(profile_id):
+    out = nutrition.preview(db.get_row("profiles", profile_id), goal="abnehmen")
+    assert out["computed"] is None and out["paces"] == {} and "Körpergewicht" in out["missing"]
+
+
+def test_vorschau_route_und_tempo_im_profil(profile_id):
+    from app import main
+    from app.routes import nutrition as routes
+    _profil(profile_id)
+    out = routes.preview_goals(profile_id=profile_id, goal="abnehmen", activity_level="mittel", pace="zuegig")
+    assert out["computed"]["breakdown"]["pace"] == "zuegig" and out["water_ml"] > 0
+    saved = main.api_update_profile(profile_id, main.ProfileIn(nutrition_pace="sanft"))
+    assert saved["nutrition_pace"] == "sanft"
+    assert main.api_update_profile(profile_id, main.ProfileIn(nutrition_pace=None))["nutrition_pace"] is None
+    with pytest.raises(Exception):
+        main.ProfileIn(nutrition_pace="turbo")
+
+
+def test_vorschau_http_nimmt_nur_bekannte_werte(profile_id):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    client = TestClient(app)
+    _profil(profile_id)
+    ok = client.get(f"/api/nutrition/goals/preview?profile={profile_id}&goal=abnehmen&activity_level=mittel&pace=sanft")
+    assert ok.status_code == 200 and ok.json()["computed"]["breakdown"]["pace"] == "sanft"
+    for query in ("pace=turbo", "goal=fliegen", "activity_level=extrem"):
+        bad = client.get(f"/api/nutrition/goals/preview?profile={profile_id}&{query}")
+        assert bad.status_code in (400, 422), query
+    # Die Vorschau schreibt nichts ins Profil
+    assert db.get_row("profiles", profile_id)["nutrition_pace"] is None
+
+
+# ------------------------------------------------- Nachsteuerung am Gewichtsverlauf
+def _gewichte(profile_id, kgs, ende=None, abstand=14):
+    """Gewichte rueckwaerts ab `ende` (Standard heute) im Abstand von `abstand` Tagen, aelteste zuerst."""
+    ende = ende or date.today()
+    for i, kg in enumerate(reversed(kgs)):
+        db.set_bodyweight(profile_id, (ende - timedelta(days=abstand * i)).isoformat(), kg)
+
+
+def _aufbau(profile_id, **extra):
+    return _ziele(profile_id, goal="aufbau", **extra)
+
+
+def test_trend_sinkendes_gewicht_beim_aufbau_hebt_das_ziel(profile_id):
+    ohne = _aufbau(profile_id)
+    _gewichte(profile_id, [85.0, 84.3, 83.6, 83.0])        # ca. -0,35 kg/Woche, Ziel Aufbau
+    mit = _aufbau(profile_id)
+    b = mit["breakdown"]
+    assert b["trend_adjust"] > 0 and b["trend_rate"] < 0
+    assert mit["kcal"] > ohne["kcal"]
+    assert b["adjustment"] - b["trend_adjust"] > 0          # der Zuschlag fuers Ziel bleibt, die Korrektur kommt dazu
+
+
+def test_trend_im_zielband_aendert_nichts(profile_id):
+    _gewichte(profile_id, [80.0, 80.4, 80.8, 81.2])        # ca. +0,2 kg/Woche = 0,25 %/Woche
+    assert _aufbau(profile_id)["breakdown"]["trend_adjust"] == 0
+
+
+def test_trend_braucht_genug_und_frische_messungen(profile_id):
+    _gewichte(profile_id, [85.0, 83.0])                    # nur zwei Punkte
+    assert _aufbau(profile_id)["breakdown"]["trend_adjust"] == 0
+    _gewichte(profile_id, [85.0, 84.3, 83.6, 83.0], ende=date.today() - timedelta(days=90))
+    assert _aufbau(profile_id)["breakdown"]["trend_adjust"] == 0   # zu alt
+
+
+def test_trend_korrektur_ist_gedeckelt_und_gerundet(profile_id):
+    _gewichte(profile_id, [90.0, 88.0, 86.0, 84.0])        # -1 kg/Woche beim Aufbau
+    t = _aufbau(profile_id)["breakdown"]["trend_adjust"]
+    assert t == nutrition.TREND_MAX_KCAL and t % 10 == 0
+
+
+def test_trend_abnehmen_ohne_fortschritt_vergroessert_das_defizit(profile_id):
+    ohne = _ziele(profile_id, goal="abnehmen")["breakdown"]["adjustment"]
+    _gewichte(profile_id, [90.0, 90.1, 89.9, 90.0])        # stagniert
+    b = _ziele(profile_id, goal="abnehmen")["breakdown"]
+    assert b["trend_adjust"] < 0 and b["adjustment"] < ohne
+
+
+def test_trend_ohne_gewichtsverlauf_ist_null(profile_id):
+    assert _aufbau(profile_id)["breakdown"]["trend_adjust"] == 0

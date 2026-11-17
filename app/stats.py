@@ -77,14 +77,22 @@ def _sets(profile_id, since=None):
     return db.rows(sql + " ORDER BY at, w.id, s.id", params)
 
 
+TREND_POINTS = 6   # so viele Einheiten zeigt die Mini-Kurve einer Bestleistung
+
+
 def best_per_exercise(profile_id):
     """Je Übung der beste Satz und das beste geschätzte 1RM, jeweils mit Datum."""
     best = {}
+    per_day = {}   # Uebung -> Tag -> bester Wert: daraus der Trend, ohne je Uebung noch mal alles zu lesen
     for s in _sets(profile_id):
         if not s["reps"]:
             continue
         key = s["exercise_id"]
         score = epley(s["weight"], s["reps"]) or (s["reps"] if not s["weight"] else 0)
+        day = _local_date(s["at"])
+        if day:
+            slot = per_day.setdefault(key, {})
+            slot[day.isoformat()] = max(slot.get(day.isoformat(), 0), epley(s["weight"], s["reps"]) or s["reps"])
         cur = best.get(key)
         if cur is None or (score or 0) > (cur["score"] or 0):
             best[key] = {
@@ -105,6 +113,8 @@ def best_per_exercise(profile_id):
         est = progression.estimate(hist.get(b["exercise_id"], []))
         b["one_rm_now"] = round(est[0], 1) if est else None
         b["one_rm_spread"] = round(100 * est[1] / est[0]) if est else None
+        days = per_day.get(b["exercise_id"], {})
+        b["trend"] = [round(days[d], 1) for d in sorted(days)][-TREND_POINTS:]   # letzte Einheiten, aelteste zuerst
     return out
 
 

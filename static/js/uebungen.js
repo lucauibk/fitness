@@ -37,9 +37,9 @@ function render() {
   root.innerHTML = `<div class="toolbar">
       <label class="search">${icon("search")}<input type="search" data-q value="${esc(query)}"
         placeholder="Übung oder Gerät suchen…" aria-label="Übung suchen"></label>
-      <button type="button" class="btn small ghost" data-new>${icon("plus")} Übung</button>
+      <button type="button" class="btn tonal add-ex" data-new>${icon("plus")} Übung</button>
     </div>
-    <div class="chips scroll" role="group" aria-label="Muskelgruppe">
+    <div class="chips scroll lib-chips" role="group" aria-label="Muskelgruppe">
       <button type="button" class="chip ${group ? "" : "active"}" data-group="">Alle</button>
       ${Object.entries(GROUPS).map(([k, l]) => `<button type="button" class="chip ${group === k ? "active" : ""}"
         data-group="${k}">${l}</button>`).join("")}

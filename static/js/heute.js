@@ -1,17 +1,16 @@
-/** Heute: Wochen-Streak, Check-in mit Readiness, heutiges (angepasstes) Training,
- *  Mobility-Routine und Kalorienbilanz – alles auf einen Blick. */
+/** Heute: eine Hauptaktion (Training, mit dem Check-in als Zeile darin), darunter drei Kacheln
+ *  (Kalorien, Wasser, Fasten), der Coach in einer Zeile und alles Weitere hinter "Mehr". */
 import { $, api, closeSheet, empty, entryDay, esc, reviewHtml, watchCoach, fmtWeight, getProfile, GROUPS, icon, openSheet,
-  setsSummary, sheetClosed, skeleton, toast, WEEKDAYS_LONG, busy } from "./util.js";
+  heroNotesHtml, patch, prefs, setsSummary, sheetClosed, skeleton, skeletonCards, toast, WEEKDAYS_LONG, busy } from "./util.js";
 import { startDraft, hasDraft, getDraft } from "./training.js";
 import { weekStrip } from "./erfolge.js";
-import { ring } from "./ernaehrung.js";
 import * as outbox from "./outbox.js";
 import { openTopf, topfCard } from "./topf.js";
 import { openCoach, prose } from "./coach.js";
+import { nextTraining } from "./naechster.js";
 
 let root;
 let data = null;
-let editingCheckin = false;
 let waterExtra = 0;   // optimistisch, bis der Klick bestaetigt oder in den Ausgang gelegt ist
 const dayCache = new Map();
 
@@ -20,10 +19,13 @@ const SCALES = {
   energy: ["Energie", ["leer", "müde", "normal", "fit", "voller Energie"]],
   stress: ["Stress", ["entspannt", "gering", "mittel", "hoch", "sehr hoch"]],
 };
+const num = (v) => Number(v || 0).toLocaleString("de-AT", { maximumFractionDigits: 0 });
+const liters = (ml) => (ml / 1000).toLocaleString("de-AT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const SORE = ["–", "leicht", "mittel", "stark"];
 const soreWord = (lvl) => (lvl ? SORE[lvl] : "keiner");
 
 // ------------------------------------------------------------ Check-in
+/** Skalen und Muskelkater – lebt im Sheet (openCheckin), nicht mehr als grosse Karte auf der Seite. */
 function checkinForm(c) {
   const v = { sleep: c?.sleep ?? 3, energy: c?.energy ?? 3, stress: c?.stress ?? 3 };
   // Noch nicht eingecheckt: die 3 ist nur ein Vorschlag – umrandet statt gefuellt, damit sie
@@ -31,8 +33,7 @@ function checkinForm(c) {
   const mark = c ? "on" : "pre";
   const sore = c?.soreness || {};
   const anySore = Object.values(sore).some(Boolean);
-  return `<div class="card checkin" data-checkin-form>
-    <p class="eyebrow">${c ? "Check-in ändern" : "Wie geht's dir heute?"}</p>
+  return `<div class="checkin" data-checkin-form>
     ${Object.entries(SCALES).map(([k, [label, words]]) => `
       <div class="scale" data-scale="${k}">
         <span class="scale-label">${label}</span>
@@ -49,25 +50,66 @@ function checkinForm(c) {
         class="chip sore-${sore[g] || 0}" data-sore="${g}" data-level="${sore[g] || 0}"
         aria-label="Muskelkater ${l}: ${soreWord(sore[g] || 0)}">${l}<small>${SORE[sore[g] || 0]}</small></button>`).join("")}</div>
     </details>
-    <div class="btn-row"><button type="button" class="btn primary" data-save-checkin>${icon("check")} Check-in speichern</button>
-      ${c ? `<button type="button" class="btn ghost" data-cancel-checkin>Abbrechen</button>` : ""}</div>
   </div>`;
 }
 
-function readinessCard(c) {
-  const lvl = c.level;
-  const tone = { voll: "ok", leichter: "soon", erholung: "urgent" }[lvl.key];
-  const sore = Object.entries(c.soreness || {}).filter(([, v]) => v >= 2).map(([g]) => GROUPS[g]);
-  return `<div class="card readiness ${tone}">
-    <div class="readiness-ring" style="--p:${c.readiness}"><b>${c.readiness}</b><small>Readiness</small></div>
-    <div class="grow">
-      <p class="eyebrow">Check-in</p>
-      <h3 class="card-title">${esc(lvl.title)}</h3>
-      <p class="hint">${esc(lvl.text)}</p>
-      ${sore.length ? `<p class="hint">Muskelkater: ${esc(sore.join(", "))}</p>` : ""}
-      <button type="button" class="link-btn" data-edit-checkin>Ändern</button>
-    </div>
-  </div>`;
+/** Eine Zeile im Hero: noch offen = Einladung, erledigt = Ergebnis. Beides oeffnet das Sheet. */
+function checkinRow() {
+  const c = data.checkin;
+  if (!c) {
+    return `<button type="button" class="checkin-row" data-open-checkin>${icon("check")}
+      <span><b>Wie fit bist du heute?</b><small>Passt die Sätze an</small></span>${icon("right", "chev")}</button>`;
+  }
+  const tone = { voll: "ok", leichter: "soon", erholung: "urgent" }[c.level.key];
+  return `<button type="button" class="checkin-row is-done" data-open-checkin>
+    <span class="pill ${tone}">${c.readiness}</span>
+    <span><b>${esc(c.level.title)}</b><small>${esc(c.level.text)}</small></span>${icon("edit", "chev")}</button>`;
+}
+
+function openCheckin() {
+  const c = data.checkin;
+  const sheet = openSheet({
+    title: c ? "Check-in ändern" : "Wie geht's dir heute?",
+    body: `${hasDraft() ? `<p class="callout">${icon("warn")} Es läuft schon eine Einheit – der Check-in gilt ab dem nächsten Training.</p>` : ""}${checkinForm(c)}`,
+    footer: `<button type="button" class="btn primary" data-save-checkin>${icon("check")} Speichern</button>`,
+  });
+  sheet.addEventListener("keydown", (ev) => {
+    // Skalen wie echte Radiogruppen: ein Tab-Stopp pro Skala, Pfeiltasten waehlen.
+    const dot = ev.target.closest?.(".dot-btn");
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[ev.key];
+    if (!dot || !step) return;
+    ev.preventDefault();
+    const dots = [...dot.closest("[role=radiogroup]").querySelectorAll(".dot-btn")];
+    const next = dots[(dots.indexOf(dot) + step + dots.length) % dots.length];
+    next.click();
+    next.focus();
+  });
+  sheet.addEventListener("click", (ev) => {
+    const dot = ev.target.closest(".dot-btn");
+    if (dot) {
+      const scale = dot.closest("[data-scale]");
+      scale.querySelectorAll(".dot-btn").forEach((b) => {
+        const on = b === dot;
+        b.classList.remove("pre");
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-checked", on);
+        b.tabIndex = on ? 0 : -1;
+      });
+      $("[data-word]", scale).textContent = SCALES[scale.dataset.scale][1][Number(dot.dataset.value) - 1];
+      return;
+    }
+    const sore = ev.target.closest("[data-sore]");
+    if (sore) {
+      const lvl = (Number(sore.dataset.level) + 1) % 4;
+      sore.dataset.level = lvl;
+      sore.className = `chip sore-${lvl}`;
+      sore.querySelector("small").textContent = SORE[lvl];
+      sore.setAttribute("aria-label", `Muskelkater ${GROUPS[sore.dataset.sore]}: ${soreWord(lvl)}`);
+      return;
+    }
+    const save = ev.target.closest("[data-save-checkin]");
+    if (save) saveCheckin(save, sheet);
+  });
 }
 
 // ---------------------------------------------------------- Coach-Hinweise
@@ -77,7 +119,7 @@ function coachCard() {
   const imp = c.impulse || {};
   const label = { impuls: "Dein Coach für heute", hallo: "Dein Coach", tipp: "Tipp des Tages",
     erledigt: "Heute erledigt" }[imp.kind] || "Coach";
-  return `<div class="card mini-card coach-card" role="button" tabindex="0" data-coach>
+  return `<div class="card quiet-card mini-card coach-card" role="button" tabindex="0" data-coach>
     <span class="row-icon">${icon("chat")}</span>
     <div class="grow"><p class="eyebrow">${label}</p>
       ${imp.text ? `<div class="coach-last">${prose(imp.text)}</div>` : ""}
@@ -121,28 +163,24 @@ function workoutCard() {
   const tw = d.today_workout;
   // Heute schon trainiert: die Karte sagt das, statt weiter "Einheit starten" anzubieten.
   if (tw && !running) {
-    return `<div class="card hero is-done">
+    return `<div class="card hero hero-main is-done">
       <p class="eyebrow">${icon("check")} Heute erledigt</p>
       <h3 class="hero-title">${esc(tw.day_label)}</h3>
       <p class="hint">${esc(tw.headline)}</p>
-      <div class="btn-row">
+      <div class="btn-row hero-cta">
         <button type="button" class="btn tonal" data-show-workout="${tw.id}">Ansehen</button>
         <button type="button" class="btn ghost" data-pick>Nochmal trainieren</button>
       </div>
     </div>`;
   }
-  return `<div class="card hero">
-      <p class="eyebrow">${d.fixed ? `${esc(weekday)} · Training`
-        : d.note === "nachgeholt" ? "Nachholen · verschoben" : "Als Nächstes dran"}</p>
-      <h3 class="hero-title">${esc(day.label)}</h3>
-      <p class="hint">${day.exercises.length} Übungen · ${day.exercises.reduce((n, e) => n + e.target_sets, 0)} Sätze
-        ${d.position ? ` · Tag ${d.position} von ${d.day_count}` : ""}
-        ${d.block ? ` · Woche ${d.block.week}/${d.block.weeks}${d.block.deload ? " (Entlastung)" : ` · ${d.block.rir} in Reserve`}` : ""}</p>
-      ${d.block?.deload ? `<p class="callout">${icon("warn")} Entlastungswoche: leichter trainieren, nichts bis ans Limit – so erholen sich Muskeln und Gelenke.</p>` : ""}
-      ${d.sore_today?.length ? `<p class="callout">${icon("warn")} Muskelkater in ${esc(d.sore_today.map((g) => GROUPS[g]).join(", "))} –
-        die Sätze sind reduziert.${d.alternative ? ` Alternativ heute <button type="button" class="link-btn" data-start="${d.alternative.id}">${esc(d.alternative.label)} trainieren</button>.` : ""}</p>` : ""}
-      ${d.note === "erholung" ? `<p class="callout">${icon("warn")} Gestern waren dieselben Muskeln dran – lass sie heute ruhen oder wähle „Anderer Tag“.</p>` : ""}
-      <div class="btn-row">
+  const nt = nextTraining(d);
+  return `<div class="card hero hero-main">
+      <p class="eyebrow">${esc(nt.eyebrow)}</p>
+      <h3 class="hero-title">${esc(nt.label)}</h3>
+      <p class="meta-line">${nt.meta.map((m) => `<span>${esc(m)}</span>`).join("")}</p>
+      ${heroNotesHtml(d)}
+      ${running ? "" : checkinRow()}
+      <div class="btn-row hero-cta">
         ${running
           ? `<a class="btn primary" href="#training/einheit">${icon("play")} Einheit fortsetzen</a>`
           : `<button type="button" class="btn primary" data-start="${day.id}">${icon("play")} Einheit starten</button>`}
@@ -158,7 +196,7 @@ function workoutCard() {
 
 function mobilityCard() {
   const m = data.mobility;
-  return `<div class="card mini-card" role="button" tabindex="0" data-mobility="${m.key}">
+  return `<div class="card quiet-card mini-card" role="button" tabindex="0" data-mobility="${m.key}">
     <span class="row-icon">${icon("stretch")}</span>
     <div class="grow"><p class="eyebrow">Mobility · ${m.minutes} min</p>
       <div class="card-title">${esc(m.title)}</div><p class="hint">${esc(m.text)}</p></div>
@@ -166,67 +204,83 @@ function mobilityCard() {
   </div>`;
 }
 
-function nutritionCard() {
+// ------------------------------------------------------------ Tageskacheln
+function caloriesTile() {
   const n = data.nutrition;
   const pend = outbox.pending("food-log").filter((e) => !e.date || e.date === data.date)
     .reduce((s, e) => s + (e.preview?.kcal || 0), 0);
   const eaten = n.totals.kcal + pend;
-  return `<div class="card nutri-mini">
-    <a class="mini-card" href="#ernaehrung">
-      ${ring(eaten, n.goals.kcal ? n.goals.kcal + (n.burned_kcal || 0) : n.goals.kcal, { size: 72 })}
-      <div class="grow"><p class="eyebrow">Ernährung</p>
-        <div class="card-title">${Math.round(eaten)} ${n.goals.kcal ? `von ${n.goals.kcal} ` : ""}kcal</div>
-        <p class="hint">Eiweiß ${Math.round(n.totals.protein)}${n.goals.protein ? ` / ${n.goals.protein}` : ""} g${n.burned_kcal ? ` · ${n.burned_kcal} kcal verbrannt` : ""}</p></div>
-      ${icon("right", "chev")}
-    </a>
-    ${waterLine()}
-  </div>`;
+  const budget = n.budget_kcal || 0;   // Ziel + verbrannt, vom Server: dieselbe Zahl wie in Ernährung
+  const pct = budget ? Math.min(100, Math.round((eaten / budget) * 100)) : 0;
+  return `<a class="tile-card" href="#ernaehrung">
+    <span class="tile-label">${icon("food")} Kalorien</span>
+    <b>${budget ? num(Math.abs(budget - eaten)) : num(eaten)}</b>
+    <small>${budget ? (eaten > budget ? "kcal zu viel" : "kcal übrig") : "kcal gegessen"}</small>
+    ${budget ? `<progress class="nutri-bar${eaten > budget ? " is-over" : ""}" max="100" value="${pct}" aria-label="${pct} % des Tagesbudgets"></progress>` : ""}
+    <small>Eiweiß ${num(n.totals.protein)}${n.goals.protein ? ` / ${num(n.goals.protein)}` : ""} g</small>
+  </a>`;
 }
 
-/** Wasser als Zeile in der Ernaehrungskarte statt eigener Karte – die volle Ansicht mit
- *  Glas gibt es unter Ernaehrung. */
-function waterLine() {
+/** Wasser: eine Taste (+250 ml), Korrekturen gibt es unter Ernährung. Kein Minus neben dem Plus. */
+function waterTile() {
   const n = data.nutrition;
   const pend = outbox.pending("water-log").filter((e) => !e.date || e.date === data.date)
     .reduce((s, e) => s + e.ml, 0);
   const ml = n.water_ml + pend + waterExtra;
-  const liters = (v) => (v / 1000).toLocaleString("de-AT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  return `<div class="water-line">
-    <span class="row-icon">${icon("water")}</span>
-    <span class="grow"><b>${liters(ml)}</b>${n.water_goal ? ` von ${liters(n.water_goal)}` : ""} L Wasser</span>
-    <button type="button" class="icon-btn tonal-icon" data-water="-500" aria-label="Halben Liter abziehen">${icon("minus")}</button>
-    <button type="button" class="icon-btn tonal-icon" data-water="500" aria-label="Halben Liter hinzufügen">${icon("plus")}</button>
+  const pct = n.water_goal ? Math.min(100, Math.round((ml / n.water_goal) * 100)) : 0;
+  return `<div class="tile-card tile-water">
+    <span class="tile-label">${icon("water")} Wasser</span>
+    <b>${liters(ml)}</b><small>${n.water_goal ? `von ${liters(n.water_goal)} L` : "Liter"}</small>
+    ${n.water_goal ? `<progress class="nutri-bar is-water" max="100" value="${pct}" aria-label="${pct} % des Trinkziels"></progress>` : ""}
+    <button type="button" class="btn small tonal" data-water="250">+ 250 ml</button>
   </div>`;
+}
+
+/** Nur wenn Fasten an ist oder laeuft. Tippen fuehrt in die Fasten-Ansicht der Ernährung. */
+function fastingTile() {
+  const f = data.fasting;
+  if (!f) return "";
+  const run = f.running;
+  const hours = run ? (Date.now() - new Date(run.started_at)) / 3600000 : 0;
+  const hm = (h) => { const m = Math.max(0, Math.round(h * 60)); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`; };
+  const pct = run && f.target_hours ? Math.min(100, Math.round((hours / f.target_hours) * 100)) : 0;
+  return `<a class="tile-card" href="#ernaehrung" data-fast-tile>
+    <span class="tile-label">${icon("clock")} Fasten</span>
+    <b>${run ? hm(hours) : esc(f.kind || "–")}</b>
+    <small>${run ? `von ${hm(f.target_hours)} h` : "nicht aktiv"}</small>
+    ${run ? `<progress class="nutri-bar" max="100" value="${pct}" aria-label="${pct} % des Fastenziels"></progress>` : ""}
+  </a>`;
 }
 
 function render() {
   const d = data;
-  const showForm = !d.checkin || editingCheckin;
-  // Reihenfolge nach Wichtigkeit: das Training zuerst, der Check-in darunter – er passt
-  // die Saetze an, ist aber nicht die Hauptsache des Tages.
-  root.innerHTML = `<div class="streak-head">
-      <span class="streak-count">${icon("flame")} <b>${d.streak.daily}</b> ${d.streak.daily === 1 ? "Tag" : "Tage"} in Folge</span>
-    </div>
-    ${weekStrip(d.streak.week)}
-    ${d.profile_missing?.length ? `<a class="card mini-card" href="#profil">
+  const more = [
+    d.profile_missing?.length ? `<a class="card quiet-card mini-card" href="#profil">
       <span class="row-icon">${icon("user")}</span>
       <div class="grow"><p class="eyebrow">Profil vervollständigen</p>
         <p class="hint">Für Kalorien- und Trinkziel fehlen noch: ${esc(d.profile_missing.join(", "))}.</p></div>
-      ${icon("right", "chev")}</a>` : ""}
-    ${coachCard()}
+      ${icon("right", "chev")}</a>` : "",
+    mobilityCard(),
+    topfCard(d.rewards),
+    (d.plan_events || []).length ? `<div class="card quiet-card quiet-events"><p class="eyebrow">${icon("spark")} Dein Plan passt sich an</p>
+      ${d.plan_events.map((e) => `<p class="hint">${esc(e.text)}</p>`).join("")}</div>` : "",
+  ].filter(Boolean).join("");
+  // Reihenfolge: Status → eine Hauptaktion → Tageskacheln → Coach → Mehr
+  patch(root, `<div class="week-card" role="button" tabindex="0" data-goto="fortschritt">
+      <span class="streak-count">${icon("flame")} <b>${d.streak.daily}</b> ${d.streak.daily === 1 ? "Tag" : "Tage"}<span class="sr-only"> in Folge</span></span>
+      ${weekStrip(d.streak.week)}
+    </div>
     ${workoutCard()}
-    ${topfCard(d.rewards)}
-    ${(d.plan_events || []).length ? `<div class="card quiet-events"><p class="eyebrow">${icon("spark")} Dein Plan passt sich an</p>
-      ${d.plan_events.map((e) => `<p class="hint">${esc(e.text)}</p>`).join("")}</div>` : ""}
-    ${showForm ? checkinForm(d.checkin) : readinessCard(d.checkin)}
-    ${mobilityCard()}
-    ${nutritionCard()}`;
+    <div class="today-tiles">${caloriesTile()}${waterTile()}${fastingTile()}</div>
+    ${coachCard()}
+    <details class="group-details more-details" ${prefs.get("heuteMore") ? "open" : ""} data-more>
+      <summary class="group-title">Mehr<span class="count-muted">Mobility, Topf, Hinweise</span>${icon("down", "chev")}</summary>
+      ${more}
+    </details>`);
 }
 
 export async function load() {
-  // Nicht mitten im Check-in neu zeichnen
-  if (data && root.querySelector("[data-checkin-form].touched")) return;
-  if (!data) root.innerHTML = skeleton(5);
+  if (!data) root.innerHTML = skeletonCards([84, 280, 130, 84]);   // Geometrie der echten Seite
   data = await api("today");
   render();
   prefetchDays();
@@ -315,8 +369,8 @@ async function showWorkout(id) {
   }
 }
 
-async function saveCheckin(btn) {
-  const form = root.querySelector("[data-checkin-form]");
+async function saveCheckin(btn, sheet) {
+  const form = sheet.querySelector("[data-checkin-form]");
   const value = (k) => Number(form.querySelector(`[data-scale="${k}"] :is(.on, .pre)`)?.dataset.value || 3);
   const soreness = {};
   form.querySelectorAll("[data-sore]").forEach((b) => {
@@ -330,8 +384,7 @@ async function saveCheckin(btn) {
   await busy(btn, async () => {
     try {
       const res = await outbox.send({ path: "checkin", body });
-      editingCheckin = false;
-      form.classList.remove("touched");
+      closeSheet();
       if (res.queued) toast("Check-in gespeichert – wird gesendet, sobald wieder Verbindung da ist");
       await load();
     } catch (e) { toast(e.message, { error: true }); }
@@ -402,48 +455,13 @@ async function openMobility(key) {
 
 export async function mount(el) {
   root = el;
-  // Skalen wie echte Radiogruppen: ein Tab-Stopp pro Skala, Pfeiltasten waehlen.
-  el.addEventListener("keydown", (ev) => {
-    const dot = ev.target.closest?.(".dot-btn");
-    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[ev.key];
-    if (!dot || !step) return;
-    ev.preventDefault();
-    const dots = [...dot.closest("[role=radiogroup]").querySelectorAll(".dot-btn")];
-    const next = dots[(dots.indexOf(dot) + step + dots.length) % dots.length];
-    next.click();
-    next.focus();
-  });
+  data = null; waterExtra = 0; dayCache.clear();   // frisch (z. B. nach Profilwechsel)
   el.addEventListener("click", (ev) => {
     const t = (s) => ev.target.closest(s);
-    const dot = t(".dot-btn");
-    if (dot) {
-      const scale = dot.closest("[data-scale]");
-      scale.querySelectorAll(".dot-btn").forEach((b) => {
-        const on = b === dot;
-        b.classList.remove("pre");
-        b.classList.toggle("on", on);
-        b.setAttribute("aria-checked", on);
-        b.tabIndex = on ? 0 : -1;
-      });
-      $("[data-word]", scale).textContent = SCALES[scale.dataset.scale][1][Number(dot.dataset.value) - 1];
-      dot.closest("[data-checkin-form]").classList.add("touched");
-      return;
-    }
-    const sore = t("[data-sore]");
-    if (sore) {
-      const lvl = (Number(sore.dataset.level) + 1) % 4;
-      sore.dataset.level = lvl;
-      sore.className = `chip sore-${lvl}`;
-      sore.querySelector("small").textContent = SORE[lvl];
-      sore.setAttribute("aria-label", `Muskelkater ${GROUPS[sore.dataset.sore]}: ${soreWord(lvl)}`);
-      sore.closest("[data-checkin-form]").classList.add("touched");
-      return;
-    }
-    const save = t("[data-save-checkin]");
-    if (save) return saveCheckin(save);
-    if (t("[data-edit-checkin]")) { editingCheckin = true; return render(); }
-    if (t("[data-cancel-checkin]")) { editingCheckin = false; return render(); }
+    if (t("[data-open-checkin]")) return openCheckin();
+    if (t("[data-fast-tile]")) prefs.set("nutriView", "fasten");   // Link zu Ernährung, dort gleich Fasten
     if (t("[data-coach]")) return openCoach();
+    if (t("[data-more]") && t("summary")) prefs.set("heuteMore", !t("[data-more]").open);   // vor dem Umschalten: neuer Zustand
     const start = t("[data-start]");
     if (start) return begin(Number(start.dataset.start));
     if (t("[data-pick]")) return pickDay();
@@ -459,11 +477,10 @@ export async function mount(el) {
   });
 }
 
-/** Nur die Wasserkarte neu zeichnen: ein render() wuerde einen halb angetippten
- *  Check-in darueber zuruecksetzen. */
+/** Nur die Wasserkachel neu zeichnen – ein Antippen soll nicht die ganze Seite neu aufbauen. */
 function paintWater() {
-  const line = root.querySelector(".water-line");
-  if (line) line.outerHTML = waterLine();
+  const tile = root.querySelector(".tile-water");
+  if (tile) tile.outerHTML = waterTile();
   else render();
 }
 

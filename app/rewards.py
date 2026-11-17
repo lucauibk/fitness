@@ -88,4 +88,7 @@ def card(profile_id):
     if not (profile or {}).get("reward_per_workout"):
         return None
     full = status(profile_id)
-    return {k: full[k] for k in ("rate", "balance", "earned_today", "goal")} | {"count": len(full["open"])}
+    # Das Foto (Base64, mehrere 100 KB) bleibt draussen: "Heute" laedt oft neu, und die
+    # Karte zeigt nur Name, Preis und Fortschritt. Das Sheet holt sich die volle Liste.
+    goal = {k: v for k, v in full["goal"].items() if k != "image"} if full["goal"] else None
+    return {k: full[k] for k in ("rate", "balance", "earned_today")} | {"goal": goal, "count": len(full["open"])}

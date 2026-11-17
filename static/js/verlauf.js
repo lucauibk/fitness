@@ -25,7 +25,7 @@ function workoutRow(w) {
   const when = w.started_at || w.finished_at;
   const dauer = minutes(w);
   return `<div class="row-item ${w.pending ? "is-pending" : ""}" ${w.pending ? "" : `role="button" tabindex="0" data-workout="${w.id}"`}>
-    <span class="row-icon">${icon("dumbbell")}</span>
+    <span class="row-icon lift">${icon("dumbbell")}</span>
     <div class="row-main">
       <div class="row-title">${esc(w.day_label || w.title || "Training")}</div>
       <div class="row-meta">
@@ -43,7 +43,7 @@ function workoutRow(w) {
 
 function cardioRow(c) {
   return `<div class="row-item ${c.pending ? "is-pending" : ""}" ${c.pending ? "" : `role="button" tabindex="0" data-cardio="${c.id}"`}>
-    <span class="row-icon">${icon("run")}</span>
+    <span class="row-icon cardio">${icon("run")}</span>
     <div class="row-main">
       <div class="row-title">${esc(c.label || c.activity)}</div>
       <div class="row-meta"><span>${dateLabel(c.date)}</span><span>${Math.round(c.minutes)} min</span>
@@ -56,7 +56,7 @@ function cardioRow(c) {
 
 let calMonth = null;   // "YYYY-MM"; null = aktueller Monat
 
-/** Monatskalender: Tage mit Krafttraining gefuellt, nur Cardio als Ring. */
+/** Monatskalender: Krafttraining orange gefuellt (mit Punkt, wenn auch Cardio), nur Cardio tuerkis, heute umrandet. */
 function calendarHtml() {
   const now = new Date();
   const key = calMonth || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -68,7 +68,7 @@ function calendarHtml() {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const cells = [...Array(lead).fill(`<i></i>`), ...Array.from({ length: days }, (_, i) => {
     const iso = `${key}-${String(i + 1).padStart(2, "0")}`;
-    const cls = strength.has(iso) ? "lift" : cardioDays.has(iso) ? "cardio" : "";
+    const cls = strength.has(iso) ? (cardioDays.has(iso) ? "lift both" : "lift") : cardioDays.has(iso) ? "cardio" : "";
     return `<b class="${cls} ${iso === today ? "today" : ""}">${i + 1}</b>`;
   })];
   return `<div class="card cal">
@@ -78,6 +78,7 @@ function calendarHtml() {
       <button type="button" class="icon-btn" data-cal="1" aria-label="Nächster Monat">${icon("right")}</button>
     </div>
     <div class="cal-grid" aria-hidden="true">${["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((d) => `<small>${d}</small>`).join("")}${cells.join("")}</div>
+    <div class="cal-legend"><span class="lift">Krafttraining</span><span class="cardio">Cardio</span><span class="today">Heute</span></div>
   </div>`;
 }
 
@@ -102,7 +103,7 @@ function render() {
   const monthLabel = (key) => (key.length === 7
     ? parseYmd(`${key}-01`).toLocaleDateString("de-AT", { month: "long", year: "numeric" }) : "");
   root.innerHTML = calendarHtml() + (items.length
-    ? `${months.map((m) => `<h3 class="group-title">${esc(monthLabel(m.key))}</h3>
+    ? `${months.map((m) => `<h3 class="section-title">${esc(monthLabel(m.key))}</h3>
       <div class="list">${m.items.map((i) => i.html).join("")}</div>`).join("")}
       ${more ? `<div class="btn-row"><button type="button" class="btn ghost" data-more>Ältere laden</button></div>` : ""}`
     : empty("Noch nichts trainiert", "Gespeicherte Einheiten und Cardio erscheinen hier."));

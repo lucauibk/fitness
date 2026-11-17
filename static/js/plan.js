@@ -91,11 +91,11 @@ function blockCard() {
     <div class="weekbars" role="img" aria-label="Sätze pro Woche im Block">${blockInfo.weeks.map((w) => `
       <span class="weekbar ${w.week === b.week ? "now" : ""}"><i style="height:${Math.max(8, (w.sets / maxSets) * 100)}%"></i>
         <b>${w.sets}</b><small>${w.week === b.weeks ? "Deload" : `W${w.week}`}</small></span>`).join("")}</div>
-    <details class="field-more"><summary>Diese Woche je Muskel</summary>
+    <details class="field-more"><summary>Diese Woche je Muskel ${icon("down", "chev")}</summary>
       <div class="bars">${vol.map((v) => `<div class="bar-row"><span class="bar-label">${esc(v.label)}</span>
         <span class="bar"><i style="width:${(v.done / top) * 100}%"></i></span>
         <span class="bar-value">${v.done}/${v.planned}</span></div>`).join("")}</div></details>
-    ${blockInfo.events.length ? `<details class="field-more"><summary>Was sich geändert hat</summary>
+    ${blockInfo.events.length ? `<details class="field-more"><summary>Was sich geändert hat ${icon("down", "chev")}</summary>
       <div class="list flush">${blockInfo.events.map((e) => `<div class="row-item"><div class="row-main">
         <div class="row-title">${esc(e.text)}</div><div class="row-meta"><span>${esc(e.date)}</span></div></div></div>`).join("")}</div></details>` : ""}
   </div>`;
@@ -112,19 +112,18 @@ function render() {
   const visible = splits.filter((s) => !isPendingDelete(`splits/${s.id}`));
   const open = detail && visible.some((s) => s.id === detail.id) ? detail : null;
 
-  root.innerHTML = `<div class="btn-row"><button type="button" class="btn primary" data-wizard>${icon("spark")} Neuen Plan erstellen</button></div>
-    ${blockCard()}<div class="list">${visible.map((s) => `
-      <div class="row-item">
+  // Ein einziger Split: kein Listen-Kopf, der Name steht über den Tagen. Erst ab zwei Splits wird gewählt.
+  root.innerHTML = `${blockCard()}${visible.length > 1 ? `<div class="list split-list">${visible.map((s) => `
+      <div class="row-item ${s.active ? "is-active" : ""}">
         <button type="button" class="row-main row-btn" data-open-split="${s.id}" aria-expanded="${open?.id === s.id}">
           <span class="row-title">${esc(s.name)}</span>
           <span class="row-meta"><span>${s.days.length} Tage</span>
             <span>${s.days.map((d) => esc(d.label)).join(" · ") || "noch leer"}</span></span>
         </button>
         ${s.active ? `<span class="pill ok">aktiv</span>` : `<button type="button" class="btn small tonal" data-activate="${s.id}">Wechseln</button>`}
-        <button type="button" class="icon-btn" data-delete-split="${s.id}" aria-label="„${esc(s.name)}“ löschen">${icon("trash")}</button>
-      </div>`).join("")}</div>
+      </div>`).join("")}</div>` : ""}
     ${open ? `<div class="plan-head">
-        <h3 class="group-title">${esc(open.name)}</h3>
+        <h3 class="group-title">${visible.length > 1 ? "Trainingstage" : esc(open.name)} <span class="count-muted">${open.days.length}</span></h3>
         <button type="button" class="btn small ghost" data-plan-menu aria-label="Aktionen für den Plan">⋯ Plan</button>
       </div>
       ${open.days.filter((d) => !isPendingDelete(`split-days/${d.id}`)).map(dayCard).join("")}
@@ -212,25 +211,6 @@ function removePlan(split) {
   });
   splits = null;
   render();
-}
-
-/** Zweiter Tipp bestätigt – ein versehentliches Löschen soll nicht gehen. */
-let confirmDelete = null;
-function askDeletePlan(split, btn) {
-  if (confirmDelete?.id === split.id) {
-    clearTimeout(confirmDelete.timer);
-    confirmDelete = null;
-    return removePlan(split);
-  }
-  clearTimeout(confirmDelete?.timer);
-  btn.classList.add("armed");
-  btn.setAttribute("aria-label", `„${split.name}“ wirklich löschen – nochmal tippen`);
-  confirmDelete = { id: split.id, timer: setTimeout(() => {
-    confirmDelete = null;
-    btn.classList.remove("armed");
-    btn.setAttribute("aria-label", `„${split.name}“ löschen`);
-  }, 3500) };
-  toast(`Nochmal tippen, um „${split.name}“ zu löschen`);
 }
 
 function editDay(day, splitId) {
@@ -374,38 +354,6 @@ async function move(itemId, dir) {
 }
 
 // ------------------------------------------------------- Übungs-Katalog
-async function manageExercises() {
-  const wait = openSheet({ title: "Übungen verwalten", body: skeleton(6) });
-  try { exercises = await api("exercises"); } catch (e) { closeSheet(); return toast(e.message, { error: true }); }
-  if (!wait.isConnected) return;
-  const labels = { brust: "Brust", ruecken: "Rücken", beine: "Beine", schultern: "Schultern",
-    arme: "Arme", rumpf: "Rumpf" };
-  const listHtml = (q = "") => {
-    const ms = exercises.filter((e) => !e.archived && e.name.toLowerCase().includes(q));
-    return ms.map((e) => `<div class="row-item" role="button" tabindex="0" data-ex="${e.id}">
-      <div class="row-main"><div class="row-title">${esc(e.name)}</div>
-        <div class="row-meta"><span>${labels[e.muscle_group] || "–"}</span>
-          ${e.unit === "koerper" ? `<span>ohne Zusatzgewicht</span>` : ""}</div>
-      </div>${icon("edit", "chev")}</div>`).join("")
-      || `<p class="hint pad">Keine Übung passt.</p>`;
-  };
-  const sheet = openSheet({
-    title: "Übungen",
-    body: `<label class="search">${icon("search")}<input type="search" data-q
-        placeholder="Übung suchen…" aria-label="Übung suchen"></label>
-      <div class="btn-row"><button type="button" class="btn small tonal" data-new-ex>${icon("plus")} Neue Übung</button></div>
-      <div class="list" data-list>${listHtml()}</div>`,
-    wide: true,
-  });
-  const q = $("[data-q]", sheet);
-  q.addEventListener("input", () => { $("[data-list]", sheet).innerHTML = listHtml(q.value.trim().toLowerCase()); });
-  sheet.addEventListener("click", (ev) => {
-    if (ev.target.closest("[data-new-ex]")) return editExercise(null);
-    const row = ev.target.closest("[data-ex]");
-    if (row) editExercise(exercises.find((e) => e.id === Number(row.dataset.ex)));
-  });
-}
-
 const textOf = (v) => (Array.isArray(v) ? v.join("\n") : v || "");
 
 export function editExercise(ex) {
@@ -665,8 +613,6 @@ function openPlanMenu() {
       const profile = await api(`profiles/${getProfile()}`).catch(() => null);
       openWizard(profile);
     } },
-    { label: "Leeren Split anlegen", icon: "plus", run: () => editSplit(null) },
-    { label: "Übungskatalog bearbeiten", icon: "dumbbell", run: manageExercises },
   ]);
 }
 
@@ -726,10 +672,6 @@ export async function mount(el) {
     const move_ = t("[data-move]");
     if (move_) { ev.stopPropagation(); return move(Number(move_.dataset.move), Number(move_.dataset.dir)); }
     if (t("[data-add-split]")) return editSplit(null);
-    const editS = t("[data-edit-split]");
-    if (editS) return editSplit(splits.find((s) => s.id === Number(editS.dataset.editSplit)));
-    const delS = t("[data-delete-split]");
-    if (delS) return askDeletePlan(splits.find((x) => x.id === Number(delS.dataset.deleteSplit)), delS);
     const openS = t("[data-open-split]");
     if (openS) {
       try {
@@ -753,8 +695,6 @@ export async function mount(el) {
       if (item) return editItem(item);
     }
     if (t("[data-plan-menu]")) return openPlanMenu();
-    if (t("[data-exercises]")) return manageExercises();
-    if (t("[data-check]")) return improvePlan();
     if (t("[data-wizard]")) {
       const profile = await api(`profiles/${getProfile()}`).catch(() => null);
       return openWizard(profile);

@@ -22,7 +22,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 from . import (activity, ai, analysis, checker, daily_view, db, export,  # noqa: E402
-               readiness, stats, workout_review)
+               fasting, nutrition, readiness, stats, workout_review)
 from .common import FIELD_NAMES, NOT_NULL, _data, _found, current_profile, owned  # noqa: E402,F401
 from .planner import generate  # noqa: E402
 from .planner.profile_model import injuries_from  # noqa: E402
@@ -187,8 +187,12 @@ class ProfileIn(BaseModel):
     fat_goal: Optional[int] = Field(None, ge=0, le=500)
     water_goal_ml: Optional[int] = Field(None, ge=500, le=8000)
     motivation: Optional[str] = Field(None, max_length=300)
-    fasting_kind: Optional[Literal["14:10", "16:8", "18:6", "custom"]] = None
+    fasting_kind: Optional[Literal[tuple(fasting.KINDS) + (fasting.CUSTOM,)]] = None  # type: ignore[valid-type]
     fasting_hours: Optional[float] = Field(None, ge=1, le=48, allow_inf_nan=False)
+    fasting_flags: Optional[List[Literal[tuple(db.FASTING_FLAGS)]]] = Field(  # type: ignore[valid-type]
+        None, max_length=len(db.FASTING_FLAGS))
+    eating_window_pref: Optional[Literal[tuple(db.EATING_WINDOWS)]] = None  # type: ignore[valid-type]
+    nutrition_pace: Optional[Literal[tuple(nutrition.PACES)]] = None  # type: ignore[valid-type]
 
 
 class ExerciseIn(BaseModel):
@@ -265,6 +269,8 @@ def _profile_in(data):
             data["days_per_week"] = len(set(wd))
     if "focus" in data:
         data["focus"] = ",".join(dict.fromkeys(data["focus"] or [])) or None
+    if "fasting_flags" in data:
+        data["fasting_flags"] = db.format_flags(data["fasting_flags"])
     return data
 
 

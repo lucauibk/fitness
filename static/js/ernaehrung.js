@@ -1,6 +1,6 @@
 /** Ernährung: Tagesbilanz, Mahlzeiten, Lebensmittel suchen/scannen/anlegen. */
-import { $, api, armDelete, closeSheet, deleteLater, entryDay, esc, formData, formError, getProfile, icon,
-  isPendingDelete, openSheet, prefs, skeleton, submitOnce, toast, busy, parseYmd } from "./util.js";
+import { $, actionMenu, api, armDelete, closeSheet, deleteLater, entryDay, esc, formData, formError, getProfile, icon,
+  isPendingDelete, openSheet, patch, prefs, skeleton, skeletonCards, submitOnce, toast, busy, parseYmd } from "./util.js";
 import * as outbox from "./outbox.js";
 import { scanBarcode } from "./scanner.js";
 
@@ -9,12 +9,17 @@ let data = null;
 let week = null;   // Wochenbilanz, kommt nach dem Tag und darf fehlen (offline)
 let day = null;   // YYYY-MM-DD, null = heute
 let fast = null;   // Intervallfasten (GET /api/fasting); darf fehlen (offline, Fasten aus)
+let fastRec = null;   // GET /api/fasting/recommendation (Sperren, Protokolle); darf fehlen
+let fastRecProfile = null;   // zu welchem Profil fastRec gehoert (Profilwechsel + offline: nicht fremde Sperren zeigen)
 let fastTimer = null;
 let waterExtra = 0;   // optimistisch, bis der Klick bestaetigt oder in den Ausgang gelegt ist
+let view = prefs.get("nutriView", "essen") === "fasten" ? "fasten" : "essen";   // Segment "Essen | Fasten"
+let weekPending = true;   // Wochenkarte noch unterwegs: Platzhalter statt Luecke
 
 // Der Pi wartet bei Open Food Facts bis zu 12 s je Abruf (app/nutrition.py) – das
 // Standard-Zeitlimit von api() wuerde vorher aufgeben und "offline" melden.
 const OFF_TIMEOUT = 30000;
+const MEAL_ICON = { fruehstueck: "clock", mittag: "food", abend: "home", snack: "bag" };
 const MEALS = { fruehstueck: "Frühstück", mittag: "Mittagessen", abend: "Abendessen", snack: "Snacks" };
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const todayIso = () => iso(new Date());
@@ -36,38 +41,32 @@ export function ring(value, goal, { size = 132, label = "kcal" } = {}) {
   </svg>`;
 }
 
-/** Naehrwerte als Donut: Anteil an den kcal aus Eiweiss, Kohlenhydraten und Fett. */
-function donutCard(t, g, extra = "") {
-  const parts = [["Proteine", t.protein, 4, "var(--c-protein)", g.protein], ["Carbs", t.carbs, 4, "var(--c-carbs)", g.carbs],
-    ["Fette", t.fat, 9, "var(--c-fat)", g.fat]];
-  const total = parts.reduce((n, [, v, k]) => n + (v || 0) * k, 0) || 1;
-  const r = 44, c = 2 * Math.PI * r;
-  let offset = 0;
-  const arcs = parts.map(([, v, k, color]) => {
-    const len = ((v || 0) * k / total) * c;
-    const el = len > 0 ? `<circle cx="60" cy="60" r="${r}" fill="none" stroke="${color}" stroke-width="12"
-      stroke-dasharray="${Math.max(0, len - 3).toFixed(1)} ${c.toFixed(1)}" stroke-dashoffset="${(-offset).toFixed(1)}"
-      transform="rotate(-90 60 60)"/>` : "";
-    offset += len;
-    return el;
-  }).join("");
-  return `<div class="card donut-card"><p class="eyebrow">Nährwerte</p>
-    <div class="donut-row">
-      <svg viewBox="0 0 120 120" width="132" height="132" role="img" aria-label="${num(t.kcal)} kcal, Eiweiß ${num(t.protein)} g, Kohlenhydrate ${num(t.carbs)} g, Fett ${num(t.fat)} g">
-        <circle cx="60" cy="60" r="${r}" fill="none" stroke="var(--surface-3)" stroke-width="12"/>${arcs}
-        <text x="60" y="58" text-anchor="middle" class="ring-value">${num(t.kcal)}</text>
-        <text x="60" y="76" text-anchor="middle" class="ring-label">kcal</text>
-      </svg>
-      <ul class="donut-legend">${parts.map(([label, v, , color, goal]) => `<li><i style="background:${color}"></i>
-        <span>${label}</span><b>${num(v)} g</b>${goal ? `<small>von ${num(goal)}</small>` : ""}</li>`).join("")}</ul>
-    </div>${extra}</div>`;
+/** Kalorienring als Hero: die Mitte zeigt, was noch uebrig ist (bei 0 gegessen also das ganze Ziel);
+ *  ohne Ziel die bisher gegessenen kcal. Der Track bleibt auch bei 0 sichtbar. */
+function heroRing(eaten, budget, size = 104) {
+  const pct = budget ? Math.min(eaten / budget, 1) : 0;
+  const over = budget && eaten > budget;
+  const r = 52, c = 2 * Math.PI * r;
+  const value = budget ? num(Math.abs(budget - eaten)) : num(eaten);
+  const label = budget ? (over ? "kcal zu viel" : "kcal übrig") : "kcal gegessen";
+  return `<svg class="ring-svg nutri-ring" viewBox="0 0 120 120" width="${size}" height="${size}" role="img"
+      aria-label="${value} ${label}${budget ? `, Ziel ${num(budget)} kcal` : ""}">
+    <circle cx="60" cy="60" r="${r}" class="ring-track"/>
+    ${pct > 0 ? `<circle cx="60" cy="60" r="${r}" class="ring-fill ${over ? "over" : ""}"
+      stroke-dasharray="${(pct * c).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 60 60)"/>` : ""}
+    <text x="60" y="58" text-anchor="middle" class="ring-value">${value}</text>
+    <text x="60" y="76" text-anchor="middle" class="ring-label">${label}</text>
+  </svg>`;
 }
 
-function macro(label, value, goal) {
-  const pct = goal ? Math.min(100, (value / goal) * 100) : 0;
-  return `<div class="macro"><span>${label}</span>
-    <span class="bar"><i style="width:${pct}%"></i></span>
-    <span class="macro-val">${num(value)}${goal ? ` / ${num(goal)}` : ""} g</span></div>`;
+/** Makrozeile im selben Muster fuer Eiweiss, Kohlenhydrate, Fett. Der Balken ist ein <progress>
+ *  (Fuellstand per Attribut, nicht per style); die Farbe kommt ueber die Klasse is-<key>. */
+function macro(key, label, value, goal, { lead = false } = {}) {
+  const pct = goal ? Math.min(100, Math.round((value / goal) * 100)) : 0;
+  return `<div class="nm is-${key}${lead ? " lead" : ""}">
+    <span class="nm-name"><i aria-hidden="true"></i>${label}</span>
+    <progress class="nutri-bar" max="100" value="${pct}" aria-label="${label}: ${num(value)}${goal ? ` von ${num(goal)}` : ""} g"></progress>
+    <span class="nm-val"><b>${num(value)}</b>${goal ? ` / ${num(goal)}` : ""} g</span></div>`;
 }
 
 // ------------------------------------------------------- Naehrwerte im Detail
@@ -109,7 +108,7 @@ function nutrientRows(t, goal = {}, count = null) {
     const refText = ref ? ` <small>${ref.kind === "max" ? "max. " : ref.kind === "min" ? "mind. " : "/ "}${num(ref.value)}</small>` : "";
     return `<div class="nutri-row ${sub ? "sub" : ""} ${state}">
       <span>${label}</span>
-      ${ref ? `<span class="bar"><i style="width:${known ? pct : 0}%"></i></span>` : "<span></span>"}
+      ${ref ? `<progress class="nutri-bar" max="100" value="${known ? Math.round(pct) : 0}" aria-hidden="true"></progress>` : "<span></span>"}
       <span class="macro-val">${value}${known ? ` ${unit}` : ""}${refText}</span></div>`;
   }).join("")}</div>`;
 }
@@ -140,27 +139,19 @@ function pendingWater() {
 // ------------------------------------------------------------- Wasser
 const liters = (ml) => (ml / 1000).toLocaleString("de-AT", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-function glass(ml, goal) {
-  const pct = goal ? Math.min(1, Math.max(0, ml / goal)) : 0;
-  const top = 12, bottom = 88, h = (bottom - top) * pct;
-  const shape = "M9 10h42l-6.5 78a4 4 0 0 1-4 3.7H19.5a4 4 0 0 1-4-3.7z";
-  return `<svg class="glass-svg" viewBox="0 0 60 100" width="60" height="100" role="img"
-      aria-label="${num(ml)} von ${goal ? num(goal) : "?"} ml Wasser getrunken">
-    <clipPath id="glassClip"><path d="${shape}"/></clipPath>
-    <path d="${shape}" class="glass-outline"/>
-    ${h > 0 ? `<rect x="3" y="${bottom - h}" width="54" height="${h + 12}" class="glass-fill" clip-path="url(#glassClip)"/>` : ""}
-  </svg>`;
-}
+const WATER_QUICK = [250, 500];
 
-function waterCard(ml, goal) {
-  return `<div class="card water-card">
-    <div class="card-title">${icon("water")} Wasser</div>
-    <div class="water-row">
-      <button type="button" class="icon-btn tonal-icon" data-water="-500" aria-label="Halben Liter abziehen">${icon("minus")}</button>
-      ${glass(ml, goal)}
-      <button type="button" class="icon-btn tonal-icon" data-water="500" aria-label="Halben Liter hinzufügen">${icon("plus")}</button>
+/** Wasser als eine Zeile: Stand, Balken, zwei Schnelltasten. Das Minus korrigiert einen Fehltipp. */
+function waterRow(ml, goal) {
+  const pct = goal ? Math.min(100, Math.round((ml / goal) * 100)) : 0;
+  return `<div class="card water-row">
+    ${icon("water")}
+    <div class="water-info"><span><b>${liters(ml)}</b>${goal ? ` von ${liters(goal)}` : ""} L Wasser</span>
+      ${goal ? `<progress class="nutri-bar is-water" max="100" value="${pct}" aria-label="${pct} % des Trinkziels"></progress>` : ""}</div>
+    <div class="water-quick">
+      ${WATER_QUICK.map((v) => `<button type="button" class="btn small tonal" data-water="${v}">+${num(v)}</button>`).join("")}
+      <button type="button" class="icon-btn" data-water="-250" aria-label="250 ml abziehen">${icon("minus")}</button>
     </div>
-    <p class="water-total">${liters(ml)}${goal ? ` von ${liters(goal)}` : ""} L</p>
   </div>`;
 }
 
@@ -175,29 +166,76 @@ function feedbackLine() {
 
 const WEEKDAY = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 
-/** Die letzten sieben Tage, eingeklappt: Balken = gegessene kcal, Linie = Tagesziel. */
+/** Die letzten sieben Tage als Band: Haken = Kalorienziel getroffen, Ring = heute.
+ *  Der Korridor (+-10 %) spiegelt app/nutrition.py KCAL_CORRIDOR; der Server liefert pro Tag kein Flag. */
+const WEEK_CORRIDOR = 0.10;
+
 function weekCard() {
   if (!week) return "";
-  const scale = Math.max(...week.days.map((d) => Math.max(d.kcal, d.goal_kcal || 0)), 1) * 1.1;
-  const bars = week.days.map((d) => {
+  const today = todayIso();
+  const days = week.days.map((d) => {
     const label = WEEKDAY[parseYmd(d.date).getDay()];
-    const goal = d.goal_kcal ? Math.round((d.goal_kcal / scale) * 100) : null;
-    return `<div class="wk-day${d.open ? " is-open" : ""}${d.logged ? "" : " is-empty"}">
-      <div class="wk-bar" title="${esc(`${label}: ${num(d.kcal)} kcal`)}">
-        ${goal !== null ? `<i class="wk-goal" style="bottom:${goal}%"></i>` : ""}
-        <b style="height:${Math.round((d.kcal / scale) * 100)}%"></b></div>
+    const hit = d.logged && !d.open && d.goal_kcal && Math.abs(d.kcal - d.goal_kcal) <= d.goal_kcal * WEEK_CORRIDOR;
+    const state = hit ? "hit" : d.logged && !d.open ? "miss" : "";
+    const what = d.logged ? `${num(d.kcal)} kcal${hit ? ", Ziel getroffen" : ""}` : "nichts eingetragen";
+    return `<div class="d ${state}${d.date === today ? " today" : ""}" role="img" aria-label="${esc(`${label}: ${what}`)}">
+      <i>${hit ? icon("check") : ""}</i>
       <span>${label}${d.training ? ` <i class="wk-dot" aria-label="Trainingstag"></i>` : ""}</span></div>`;
   }).join("");
-  const summary = week.avg_kcal === null ? "noch keine Bilanz" : `Ø ${num(week.avg_kcal)} kcal`;
-  return `<details class="card nutri-week"><summary class="group-title">Letzte 7 Tage
-      <span class="count-muted">${esc(summary)}</span>${icon("down", "chev")}</summary>
-    <div class="wk-chart" role="img" aria-label="${esc(week.text[0])}">${bars}</div>
-    ${week.text.map((t) => `<p class="hint">${esc(t)}</p>`).join("")}</details>`;
+  const none = !week.days.some((d) => d.logged);
+  return `<div class="card nutri-week"><div class="card-head">${icon("progress")}<div class="card-title">Letzte 7 Tage</div>
+      <span class="aside">${week.avg_kcal === null ? "noch keine Bilanz" : `Ø ${num(week.avg_kcal)} kcal`}</span></div>
+    ${none ? `<div class="empty"><p class="empty-title">Noch nichts eingetragen</p><p>Sobald du Mahlzeiten einträgst, siehst du hier, an welchen Tagen du dein Ziel getroffen hast.</p></div>`
+      : `<div class="week-band">${days}</div>${week.text.map((t) => `<p class="hint">${esc(t)}</p>`).join("")}`}</div>`;
 }
 
 // ------------------------------------------------------------- Fasten
 const clock = (d) => d.toLocaleTimeString("de-AT", { hour: "2-digit", minute: "2-digit" });
 const hoursText = (h) => { const m = Math.max(0, Math.round(h * 60)); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`; };
+// Der Server wartet bei Claude bis zu 90 s (app/fasting_advice.py TIMEOUT) – das Standard-Zeitlimit
+// von api() meldete vorher "offline".
+const ADVICE_TIMEOUT = 100000;
+const FAST_LOG_ROWS = 4;
+const FAST_DOCTOR = "Sprich bitte mit deiner Ärztin oder deinem Arzt, bevor du Intervallfasten ausprobierst.";
+
+const kindLabel = (kind, hours) => (kind === "custom" ? `${num(hours, 1)} h` : kind || "");
+
+// ---- Phasentext: feste Texte, ohne Stundenversprechen ("ab Stunde X passiert Y"), offline lauffaehig
+const PHASE_TIPS = [
+  [0.15, "Gerade gestartet. Wasser, Tee oder Kaffee ohne Zucker und Milch sind im Fasten in Ordnung."],
+  [0.4, "Hunger kommt in Wellen und geht oft nach einigen Minuten wieder vorbei. Trink etwas und lenk dich kurz ab."],
+  [0.75, "Du bist mittendrin. Plane die erste Mahlzeit schon jetzt: Eiweiß und Gemüse sind ein guter Start."],
+  [1, "Bald geschafft. Trink genug und halte die erste Mahlzeit bereit."],
+];
+const PHASE_LONG_NOTE = " Bei Schwindel oder Zittern brich ab und iss etwas.";
+const PHASE_DONE = "Ziel erreicht. Du kannst jetzt essen – starte mit Eiweiß und Gemüse und iss langsam. Länger zu fasten bringt keinen Pflichtbonus.";
+const PHASE_OVER = "Du bist über dein Ziel hinaus. Länger durchzuhalten bringt nichts Zusätzliches – iss etwas, vor allem bei Schwindel, Zittern oder Übelkeit.";
+const OVER_HOURS = 6;     // so weit ueber dem Ziel kippt der Text von "geschafft" zu "iss etwas"
+const LONG_TARGET = 18;   // ab hier der Zusatz zu Schwindel und Abbruch
+
+/** Kurzer Hinweis zum Stand des laufenden Fastens: nur Fortschritt (Anteil am Ziel) und Alltagstipps. */
+export function phaseTip(hours, target) {
+  if (!(hours >= 0) || !(target > 0)) return "";
+  if (hours >= target + OVER_HOURS) return PHASE_OVER;
+  if (hours >= target) return PHASE_DONE;
+  const text = PHASE_TIPS.find(([upto]) => hours / target < upto)[1];
+  return target >= LONG_TARGET ? text + PHASE_LONG_NOTE : text;
+}
+
+/** Die letzten sieben Kalendertage bis `today`: Tag im Ziel = mindestens ein beendetes Fasten mit
+ *  erreichtem Ziel (h.day = Tag des Endes, h.hit vom Server). */
+export function weekBand(history, today = new Date()) {
+  const list = history || [];
+  const hit = new Set(list.filter((h) => h.hit).map((h) => h.day));
+  const fasted = new Set(list.map((h) => h.day));
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+    const key = iso(d);
+    days.push({ date: key, label: WEEKDAY[d.getDay()], hit: hit.has(key), fasted: fasted.has(key), today: i === 0 });
+  }
+  return { days, hits: days.filter((d) => d.hit).length };
+}
 
 /** Laufendes Fasten: Stand vom Server, korrigiert um das, was noch im Ausgang liegt (offline
  *  gestartet oder beendet). Der Timer rechnet aus der Startzeit, nicht aus einem Zaehler. */
@@ -215,6 +253,15 @@ function lastFastEnd() {
   return queued || fast?.last_ended_at || null;
 }
 
+/** Empfehlung sagt "nicht empfohlen" (Alter, BMI, Selbstauskunft). Ohne geladene Empfehlung (offline)
+ *  gilt es als erlaubt – der Server prueft beim Start trotzdem (409). */
+const fastBlocked = () => fastRec?.allowed === false && fastRecProfile === getProfile();
+
+function blockedHtml(rec) {
+  return `${(rec.blocked || []).map((b) => `<div class="callout warn">${icon("warn")}<span>${esc(b.text)}</span></div>`).join("")}
+    <p class="hint">${esc(FAST_DOCTOR)}</p>`;
+}
+
 function fastRing(hours, target) {
   const r = 52, c = 2 * Math.PI * r, pct = Math.min(hours / target, 1);
   return `<svg class="ring-svg" viewBox="0 0 120 120" width="132" height="132" role="img"
@@ -227,25 +274,46 @@ function fastRing(hours, target) {
   </svg>`;
 }
 
+/** Wochenband "x von 7 Tagen im Ziel" und die letzten Fasten als Liste – ohne Inline-Styles
+ *  (der Fuellstand ist ein <progress>). */
 function fastHistory() {
-  const items = [...(fast.history || [])].reverse();
+  const items = fast.history || [];
   if (!items.length) return "";
-  const scale = Math.max(...items.map((h) => Math.max(h.hours, h.target_hours)), 1) * 1.1;
-  const bars = items.map((h) => `<div class="wk-day${h.hit ? "" : " is-open"}">
-      <div class="wk-bar" title="${esc(`${hoursText(h.hours)} h von ${num(h.target_hours, 1)} h`)}">
-        <i class="wk-goal" style="bottom:${Math.round((h.target_hours / scale) * 100)}%"></i>
-        <b style="height:${Math.round((h.hours / scale) * 100)}%"></b></div>
-      <span>${WEEKDAY[parseYmd(h.day).getDay()]}</span></div>`).join("");
-  const hits = items.filter((h) => h.hit).length;
-  return `<div class="wk-chart fast-hist" role="img" aria-label="${hits} von ${items.length} Fasten mit erreichtem Ziel">${bars}</div>
-    <p class="hint">${hits} von ${items.length} Zielen erreicht${fast.streak ? ` · Serie: ${fast.streak} ${fast.streak === 1 ? "Tag" : "Tage"}` : ""}</p>`;
+  const { days, hits } = weekBand(items);
+  const band = days.map((d) => {
+    const what = d.hit ? "Ziel erreicht" : d.fasted ? "Ziel nicht erreicht" : "kein Fasten";
+    return `<div class="d${d.hit ? " hit" : d.fasted ? " miss" : ""}${d.today ? " today" : ""}" role="img" aria-label="${esc(`${d.label}: ${what}`)}">
+      <i>${d.hit ? icon("check") : ""}</i><span>${d.label}</span></div>`;
+  }).join("");
+  const rows = items.slice(0, FAST_LOG_ROWS).map((h) => {
+    const day = parseYmd(h.day);
+    return `<li class="fast-log-row${h.hit ? "" : " is-open"}">
+      <span class="fast-log-day">${WEEKDAY[day.getDay()]} ${day.getDate()}.${day.getMonth() + 1}.</span>
+      <span class="fast-log-val"><b>${hoursText(h.hours)}</b> von ${num(h.target_hours, 1)} h</span>
+      <progress class="nutri-bar" max="${h.target_hours}" value="${Math.min(h.hours, h.target_hours)}"
+        aria-label="${esc(`${hoursText(h.hours)} von ${num(h.target_hours, 1)} Stunden`)}"></progress></li>`;
+  }).join("");
+  return `<div class="fast-week">
+      <p class="fast-score"><b>${hits} von 7</b> Tagen im Ziel${fast.streak ? ` · Serie: ${fast.streak} ${fast.streak === 1 ? "Tag" : "Tage"}` : ""}</p>
+      <div class="week-band" role="group" aria-label="${hits} von 7 Tagen im Ziel">${band}</div></div>
+    <h3 class="form-section">Letzte Fasten</h3>
+    <ul class="fast-log">${rows}</ul>`;
 }
 
-/** Fasten-Karte: nur wenn eine Fastenart gewaehlt ist (oder noch eins laeuft) und der Tag heute ist. */
+/** Fasten-Karte. Ohne Fastenart (und ohne laufendes Fasten) nur der leise Einstieg zum Assistenten. */
 function fastCard() {
-  if (!fast || data.date !== todayIso()) return "";
+  if (!fast) return "";
   const run = runningFast();
-  if (!fast.kind && !run) return "";
+  if (!fast.kind && !run) {
+    if (fastBlocked()) {
+      return `<div class="card fast-card" data-fast-card><div class="card-head">${icon("clock")}<span class="card-title">Fasten</span></div>
+        ${blockedHtml(fastRec)}
+        <div class="btn-row"><button type="button" class="btn primary" data-fast-assist>Angaben prüfen</button></div></div>`;
+    }
+    return `<div class="card quiet fast-card fast-entry" data-fast-card>
+      <span>${icon("clock")} Intervallfasten ausprobieren? Der Assistent fragt kurz nach und schlägt eine Fastenart vor, die zu dir passt.</span>
+      <span class="fast-entry-actions"><button type="button" class="btn tonal" data-fast-assist>Fastenart finden</button></span></div>`;
+  }
   const target = run?.target_hours || fast.target_hours || 16;
   let body;
   if (run) {
@@ -255,36 +323,137 @@ function fastCard() {
     body = `<div class="fast-main">${fastRing(hours, target)}
       <div class="fast-info"><b>${hours >= target ? "Ziel erreicht" : `Ende um ${clock(endAt)}`}</b>
         <span>seit ${clock(start)}</span></div></div>
+      <div class="callout fast-phase" data-fast-phase>${icon("spark")}<span>${esc(phaseTip(hours, target))}</span></div>
       <div class="btn-row">
         <button type="button" class="btn primary" data-fast-stop><span>${icon("check")}</span> Fasten beenden</button>
         ${fast.running && !outbox.pending("fasting/stop").length ? `<button type="button" class="btn ghost" data-fast-edit>Startzeit ändern</button>` : ""}
       </div>`;
+  } else if (fastBlocked()) {
+    body = `${blockedHtml(fastRec)}
+      <div class="btn-row"><button type="button" class="btn primary" data-fast-assist>Angaben prüfen</button></div>`;
   } else {
     const end = lastFastEnd();
     const left = end ? (new Date(end).getTime() + (24 - target) * 3600000 - Date.now()) / 3600000 : null;
     const window = left === null ? "Noch kein Fasten aufgezeichnet."
       : left > 0 ? `Essensfenster noch ${hoursText(left)} h offen.` : "Das Essensfenster ist vorbei – Zeit zum Fasten.";
     body = `<p class="hint" data-fast-window>${esc(window)}</p>
-      <div class="btn-row"><button type="button" class="btn primary" data-fast-start>Fasten starten</button></div>`;
+      <div class="btn-row"><button type="button" class="btn primary" data-fast-start>Fasten starten</button>
+        <button type="button" class="btn ghost" data-fast-assist>Fastenart ändern</button></div>`;
   }
   return `<div class="card fast-card" data-fast-card>
-    <div class="card-title">${icon("clock")} Fasten <span class="count-muted">${esc(fast.kind === "custom" ? `${num(fast.target_hours, 1)} h` : fast.kind || "")}</span></div>
+    <div class="card-head">${icon("clock")}<span class="card-title">Fasten</span>
+      <span class="aside">${esc(kindLabel(fast.kind, fast.target_hours))}</span></div>
     ${body}
     ${fast.hint ? `<p class="hint">${esc(fast.hint)}</p>` : ""}
     ${fastHistory()}</div>`;
 }
 
-/** Nur die Fasten-Karte neu zeichnen (Timer) – die ganze Seite neu aufzubauen wuerde Eingaben stoeren. */
+// ---- Persoenliche Tipps: feste Tipps sofort, Claude-Text auf Knopfdruck. Eigene Karte mit eigenem
+// Zustand, damit der Minuten-Timer (tickFast) und render() sie nicht zuruecksetzen.
+const fastTips = { kind: null, fixed: null, advice: null, blocked: "", note: "", loading: false };
+
+function fastTipsVisible() {
+  return Boolean(fast && view === "fasten" && (fast.kind || runningFast()) && !fastBlocked());
+}
+
+function fastTipsCard() {
+  if (!fastTipsVisible()) return "";
+  const t = fastTips;
+  const list = (items) => `<ul class="plain">${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
+  let body;
+  if (t.blocked) body = `<div class="callout warn">${icon("warn")}<span>${esc(t.blocked)}</span></div>`;
+  else if (t.advice) {
+    body = `<p>${esc(t.advice.erklaerung)}</p>${list(t.advice.tipps)}`
+      + (t.advice.cached ? `<p class="hint">Gleiche Angaben wie vorhin – der Text ist höchstens 24 Stunden alt.</p>` : "");
+  } else if (t.fixed?.tipps?.length) {
+    body = list(t.fixed.tipps.slice(0, 3))
+      + (t.fixed.evidenz ? `<div class="callout">${icon("warn")}<span>${esc(t.fixed.evidenz)}</span></div>` : "");
+  } else body = `<p class="hint">Gerade sind keine festen Tipps geladen. Mit dem Knopf unten erstellt dein Coach persönliche Tipps.</p>`;
+  return `<div class="card fast-tips" data-fast-tips>
+    <div class="card-head">${icon("spark")}<span class="card-title">Persönliche Tipps</span></div>
+    ${body}
+    ${t.note ? `<p class="hint" role="status">${esc(t.note)}</p>` : ""}
+    <div class="btn-row"><button type="button" class="btn tonal" data-fast-advice ${t.loading ? 'disabled aria-busy="true"' : ""}>
+      ${t.loading ? "Dein Coach schreibt …" : t.advice ? "Erneut abrufen" : "Tipps für mich erstellen"}</button></div></div>`;
+}
+
+function paintFastTips() {
+  if (view !== "fasten") return;
+  const card = root?.querySelector("[data-fast-tips]");
+  const html = fastTipsCard();
+  if (card) card.outerHTML = html;
+  else if (html) render();   // Karte war noch nicht da (erst jetzt Fastenart gewaehlt)
+}
+
+/** Feste Tipps der gewaehlten Fastenart (GET fasting/tips, ohne KI). Nur nachladen, wenn sich die Art aendert. */
+async function loadFastTips() {
+  const kind = fast?.kind ? `${getProfile()}:${fast.kind}` : null;   // je Profil und Art
+  if (!kind || fastTips.kind === kind) return;
+  fastTips.kind = kind;
+  fastTips.advice = null;
+  fastTips.blocked = "";
+  try { fastTips.fixed = await api(`fasting/tips?kind=${encodeURIComponent(fast.kind)}`); }
+  catch { fastTips.fixed = null; fastTips.kind = null; }   // offline: beim naechsten Laden nochmal
+  paintFastTips();
+}
+
+const ADVICE_NOTES = {
+  400: "Persönliche Tipps brauchen Claude auf dem Server – hier stehen die festen Tipps.",
+  422: "Die Tipps konnten gerade nicht erstellt werden. Bitte später nochmal versuchen – bis dahin gelten die festen Tipps.",
+  429: "Es werden gerade schon Tipps erstellt. Bitte einen Moment warten und dann nochmal tippen.",
+};
+
+async function requestAdvice() {
+  if (fastTips.loading) return;
+  Object.assign(fastTips, { loading: true, note: "", blocked: "" });
+  paintFastTips();
+  try {
+    const res = await api("fasting/advice", { method: "POST", timeout: ADVICE_TIMEOUT });
+    if (res.kind) fastTips.advice = res;
+    else { fastTips.advice = null; fastTips.blocked = res.erklaerung; }   // Sperre: fester Text, keine KI
+  } catch (e) {
+    fastTips.advice = null;
+    fastTips.note = e.offline ? "Offline – hier stehen die festen Tipps." : ADVICE_NOTES[e.status] || e.message;
+  } finally {
+    fastTips.loading = false;
+    paintFastTips();
+  }
+}
+
+/** Nur die Fasten-Karte und den Chip im Kopf neu zeichnen (Timer) – die ganze Seite neu aufzubauen
+ *  wuerde Eingaben stoeren. */
 function tickFast() {
-  const card = root?.querySelector("[data-fast-card]");
-  if (!card || document.hidden || !data) return;
+  if (!root || document.hidden || !data) return;
+  const chip = root.querySelector("[data-fast-chip]");
+  if (chip) chip.outerHTML = fastChip();
+  const card = root.querySelector("[data-fast-card]");
+  if (!card) return;
   const html = fastCard();
   if (html) card.outerHTML = html;
 }
 
+/** Stand und Empfehlung vom Server holen, ohne zu zeichnen (load() zeichnet einmal fuer alles). */
+async function fetchFast() {
+  // Empfehlung (Sperren) ist optional: ohne sie laeuft die Karte wie bisher, der Server sperrt beim Start trotzdem.
+  const [overview, rec] = await Promise.allSettled([api("fasting"), api("fasting/recommendation")]);
+  if (overview.status === "fulfilled") fast = overview.value;
+  if (rec.status === "fulfilled") { fastRec = rec.value; fastRecProfile = getProfile(); }
+}
+
+/** Nach einer Fasten-Aktion: neu holen und zeichnen. */
 async function loadFast() {
-  try { fast = await api("fasting"); } catch { /* offline oder Fasten nicht erreichbar: Karte bleibt aus */ }
+  await fetchFast();
   if (data) render();
+  loadFastTips();
+}
+
+/** Laufendes Fasten als kleiner Chip im Kopf der Essen-Ansicht – ohne die Hoehe zu aendern. */
+function fastChip() {
+  const run = runningFast();
+  if (!run) return `<span data-fast-chip hidden></span>`;
+  const hours = (Date.now() - new Date(run.started_at)) / 3600000;
+  return `<button type="button" class="chip-btn fast-chip" data-fast-chip data-view="fasten"
+    aria-label="Fasten läuft seit ${hoursText(hours)} Stunden, zur Fasten-Ansicht">${icon("clock")} ${hoursText(hours)} h</button>`;
 }
 
 /** Uhrzeit aus einem time-Feld als ISO: spaeter als jetzt heisst gestern (ueber Mitternacht gefastet). */
@@ -297,6 +466,16 @@ function timeToIso(value) {
 }
 
 function openFastStart() {
+  if (!fast?.kind || fastBlocked()) {
+    // Veralteter Zustand (Karte bietet den Start dann nicht an): zum Assistenten statt in ein Formular ohne Art
+    const blocked = fastBlocked();
+    const sheet = openSheet({ title: "Fasten starten",
+      body: blocked ? blockedHtml(fastRec) : `<p>Du hast noch keine Fastenart gewählt.</p>
+        <p class="hint">Der Assistent fragt kurz nach und schlägt dir eine Art vor, die zu dir passt.</p>`,
+      footer: `<button class="btn primary" type="button" data-assist>${blocked ? "Angaben prüfen" : "Welche Fastenart passt zu mir?"}</button>` });
+    sheet.addEventListener("click", (ev) => { if (ev.target.closest("[data-assist]")) openFastAssistant({ onDone: loadFast }); });
+    return;
+  }
   const now = clock(new Date());
   openSheet({ title: "Fasten starten", body: `<form id="fastForm">
       <label class="field"><span>Startzeit</span>
@@ -313,7 +492,7 @@ function openFastStart() {
       await loadFast();
     } catch (e) {
       formError(form, e);
-      if (e.status === 409) loadFast();   // zweites Geraet hat schon gestartet
+      if (e.status === 409) loadFast();   // Sperre oder zweites Geraet hat schon gestartet
     }
   });
 }
@@ -349,80 +528,288 @@ function openFastEdit() {
   });
 }
 
-function render() {
+// ---- Fastenart-Assistent: Kurz-Check -> Essensfenster -> Empfehlung. Die Regeln liegen auf dem Server
+// (app/fasting_advice.py); hier wird nur gefragt, angezeigt und gespeichert.
+const FLAG_LABELS = {
+  pregnant: "Ich bin schwanger oder stille",
+  eating_disorder: "Ich habe oder hatte eine Essstörung",
+  diabetes_meds: "Ich nehme Medikamente gegen Diabetes (z. B. Insulin)",
+};
+const WINDOW_CHOICES = [
+  ["morgens", "Eher früh", "Frühstück und Mittag, abends nichts mehr"],
+  ["abends", "Eher spät", "Kein Frühstück, dafür bis in den Abend"],
+  ["egal", "Egal", "Passt sich meinem Alltag an"],
+];
+const CUSTOM_MIN = 1, CUSTOM_MAX = 48;
+
+/** Fastenart-Assistent als Sheet. onDone: nach dem Uebernehmen oder Ausschalten (z. B. Karte neu laden). */
+export async function openFastAssistant({ onDone } = {}) {
+  let profile, rec;
+  try {
+    [profile, rec] = await Promise.all([api(`profiles/${getProfile()}`), api("fasting/recommendation")]);
+  } catch (e) {
+    return toast(e.offline ? "Der Assistent braucht eine Verbindung." : e.message, { error: true });
+  }
+  const st = { step: 0, profile, rec, flags: [...(profile.fasting_flags || [])], pref: profile.eating_window_pref || null,
+    choice: null, hours: profile.fasting_hours || 16, busy: false };
+  const sheet = openSheet({ title: "Welche Fastenart passt zu mir?", body: "", footer: " " });
+  const body = $(".sheet-body", sheet);
+  const foot = $(".sheet-foot", sheet);
+  body.classList.add("fast-assist");   // Bereichs-CSS (fasten.css) nur fuer dieses Sheet
+
+  const bar = () => `<div class="steps-bar" role="img" aria-label="Schritt ${st.step + 1} von 3">${
+    [0, 1, 2].map((i) => `<i${i <= st.step ? ' class="on"' : ""}></i>`).join("")}</div>`;
+  const protocol = (kind) => st.rec.protocols.find((p) => p.kind === kind);
+  const chosenHours = () => (st.choice === "custom" ? Number(st.hours) : protocol(st.choice)?.hours);
+
+  function paint() {
+    if (st.step === 0) {
+      body.innerHTML = `${bar()}<h3 class="form-section">Schritt 1 von 3 · Kurz-Check</h3>
+        <p>Intervallfasten passt nicht zu jedem. Trifft etwas davon auf dich zu?</p>
+        <div class="toggles fast-flags">${Object.entries(FLAG_LABELS).map(([k, l]) => `<label class="toggle">
+          <input type="checkbox" data-flag="${k}" ${st.flags.includes(k) ? "checked" : ""}><span></span>${esc(l)}</label>`).join("")}</div>
+        <p class="hint">Nichts davon? Dann einfach weiter. Die Angaben nutzt nur diese Empfehlung – sie gehen nicht an den Coach.</p>`;
+      foot.innerHTML = `<button type="button" class="btn primary" data-next ${st.busy ? "disabled" : ""}>Weiter</button>`;
+    } else if (st.step === 1) {
+      body.innerHTML = `${bar()}<h3 class="form-section">Schritt 2 von 3 · Essensfenster</h3>
+        <p>Wann isst du am liebsten?</p>
+        <div class="choice-grid">${WINDOW_CHOICES.map(([k, label, text]) => `<button type="button" class="choice"
+          data-pref="${k}" aria-pressed="${st.pref === k}"><b>${label}</b><small>${text}</small></button>`).join("")}</div>
+        <p class="hint">Das ist nur ein Wunsch – die Empfehlung richtet sich nach deinem Fasten-Verlauf, deinem Ziel und deinen Angaben im Profil.</p>`;
+      foot.innerHTML = `<button type="button" class="btn ghost" data-back>Zurück</button>
+        <button type="button" class="btn primary" data-next ${st.busy ? "disabled" : ""}>Empfehlung ansehen</button>`;
+    } else if (!st.rec.allowed) {
+      body.innerHTML = `${bar()}<h3 class="form-section">Ergebnis</h3>
+        <p><b>Intervallfasten wird für dich nicht empfohlen.</b></p>
+        ${blockedHtml(st.rec)}<p class="hint">${esc(st.rec.disclaimer)}</p>`;
+      foot.innerHTML = `<button type="button" class="btn ghost" data-back>Angaben ändern</button>
+        ${st.profile.fasting_kind ? `<button type="button" class="btn" data-off>Fasten ausschalten</button>` : ""}
+        <button type="button" class="btn primary" data-close>Schließen</button>`;
+    } else paintResult();
+    toTop();
+  }
+
+  function paintResult() {
+    const rec = st.rec;
+    const recP = protocol(rec.kind);
+    const picked = protocol(st.choice);
+    const hours = chosenHours();
+    const over = recP && hours > recP.hours;
+    const evidence = picked?.advanced && picked.evidenz && !rec.reasons.includes(picked.evidenz) ? picked.evidenz : null;
+    const choice = (p) => `<button type="button" class="choice" data-kind="${p.kind}" aria-pressed="${st.choice === p.kind}">
+        <b>${esc(p.kind)}</b><small>${p.hours} h fasten · ${p.eating_hours} h essen${p.kind === rec.kind ? " · empfohlen" : ""}${
+      p.kind === rec.current_kind ? " · aktuell" : ""}${p.advanced ? " · fortgeschritten" : ""}</small></button>`;
+    body.innerHTML = `${bar()}<h3 class="form-section">Ergebnis</h3>
+      <div class="fast-result"><span class="eyebrow">Empfehlung</span><b class="fast-kind">${esc(rec.kind)}</b>
+        <span class="hint">${recP.hours} h fasten · ${recP.eating_hours} h essen</span></div>
+      <ul class="plain fast-reasons">${rec.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>
+      ${rec.warnings.map((w) => `<div class="callout warn">${icon("warn")}<span>${esc(w)}</span></div>`).join("")}
+      <h3 class="form-section">Andere Fastenart wählen</h3>
+      <div class="choice-grid">${rec.protocols.map(choice).join("")}
+        <button type="button" class="choice" data-kind="custom" aria-pressed="${st.choice === "custom"}"><b>Eigene</b>
+          <small>Stunden selbst festlegen${rec.current_kind === "custom" ? " · aktuell" : ""}</small></button></div>
+      ${st.choice === "custom" ? `<label class="field fast-custom">Stunden ohne Essen (${CUSTOM_MIN}–${CUSTOM_MAX})
+        <input type="number" inputmode="decimal" min="${CUSTOM_MIN}" max="${CUSTOM_MAX}" step="0.5" value="${st.hours}" data-hours></label>` : ""}
+      ${evidence ? `<div class="callout">${icon("warn")}<span>${esc(evidence)}</span></div>` : ""}
+      ${over ? `<div class="callout warn">${icon("warn")}<span>Das liegt über der Empfehlung ${esc(rec.kind)}. Du kannst es wählen – ich empfehle es dir nicht.</span></div>` : ""}
+      <p class="hint">${esc(rec.disclaimer)}</p>`;
+    foot.innerHTML = `<button type="button" class="btn ghost" data-back>Zurück</button>
+      <button type="button" class="btn primary" data-apply ${st.busy ? "disabled" : ""}>${esc(st.choice === "custom" ? "Eigene Art übernehmen" : `${st.choice} übernehmen`)}</button>`;
+  }
+
+  const toTop = () => body.scrollTo?.({ top: 0 });
+
+  async function save(patch) {
+    st.profile = await api(`profiles/${getProfile()}`, { method: "PATCH", body: patch });
+    window.dispatchEvent(new CustomEvent("profile-changed", { detail: st.profile }));
+  }
+  async function guarded(fn) {
+    if (st.busy) return;
+    st.busy = true;
+    paint();
+    try { await fn(); } catch (e) { toast(e.offline ? "Dafür ist eine Verbindung nötig." : e.message, { error: true }); }
+    finally { st.busy = false; if (sheet.isConnected) paint(); }
+  }
+  const sameList = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+
+  sheet.addEventListener("change", (ev) => {
+    const f = ev.target.closest("[data-flag]");
+    if (f) st.flags = f.checked ? [...new Set([...st.flags, f.dataset.flag])] : st.flags.filter((x) => x !== f.dataset.flag);
+  });
+  sheet.addEventListener("input", (ev) => {
+    if (ev.target.matches("[data-hours]")) st.hours = ev.target.value;
+  });
+  sheet.addEventListener("click", (ev) => {
+    const t = ev.target;
+    const pref = t.closest("[data-pref]");
+    if (pref) { st.pref = pref.dataset.pref; return paint(); }
+    const kind = t.closest("[data-kind]");
+    if (kind) { st.choice = kind.dataset.kind; return paint(); }
+    // Mit Flag wurde das Essensfenster uebersprungen: Zurueck geht dann direkt zum Kurz-Check
+    if (t.closest("[data-back]")) { st.step = st.step === 2 && st.flags.length ? 0 : st.step - 1; return paint(); }
+    if (t.closest("[data-next]")) {
+      return guarded(async () => {
+        if (st.step === 0) {
+          if (!sameList(st.flags, st.profile.fasting_flags || [])) await save({ fasting_flags: st.flags });
+          if (st.flags.length) {          // Sperre: kein Essensfenster mehr abfragen
+            st.rec = await api("fasting/recommendation");
+            st.step = 2;
+          } else st.step = 1;
+        } else {
+          if (st.pref && st.pref !== st.profile.eating_window_pref) await save({ eating_window_pref: st.pref });
+          st.rec = await api("fasting/recommendation");
+          st.step = 2;
+        }
+        if (st.rec.allowed && !st.choice) st.choice = st.rec.kind;
+      });
+    }
+    if (t.closest("[data-off]")) {
+      return guarded(async () => {
+        await save({ fasting_kind: null });
+        closeSheet();
+        toast("Fasten ausgeschaltet");
+        onDone?.();
+      });
+    }
+    if (t.closest("[data-apply]")) {
+      return guarded(async () => {
+        const custom = st.choice === "custom";
+        const hours = Number(st.hours);
+        if (custom && !(hours >= CUSTOM_MIN && hours <= CUSTOM_MAX)) {
+          throw new Error(`Bitte eine Stundenzahl zwischen ${CUSTOM_MIN} und ${CUSTOM_MAX} eintragen.`);
+        }
+        await save(custom ? { fasting_kind: "custom", fasting_hours: hours } : { fasting_kind: st.choice });
+        closeSheet();
+        toast(`Fastenart ${custom ? `${num(hours, 1)} h` : st.choice} gespeichert`);
+        onDone?.();
+      });
+    }
+  });
+  paint();
+}
+
+const MEAL_SHORT = { fruehstueck: "Frühstück", mittag: "Mittag", abend: "Abend", snack: "Snack" };
+
+/** Kopf der Essen-Ansicht: Datum und eine Zeile Bilanz. Klebt beim Scrollen unter der Leiste. */
+function nutriHead(eaten, budget, g, t) {
+  const isToday = data.date === todayIso();
+  const dateLabel = isToday ? "Heute" : parseYmd(data.date).toLocaleDateString("de-AT", { weekday: "long", day: "numeric", month: "long" });
+  return `<div class="nutri-head">
+    <div class="date-switch">
+      <button type="button" class="icon-btn" data-day="-1" aria-label="Vorheriger Tag">${icon("left")}</button>
+      <b>${esc(dateLabel)}</b>
+      ${fastChip()}
+      <button type="button" class="icon-btn" data-day="1" aria-label="Nächster Tag" ${isToday ? "disabled" : ""}>${icon("right")}</button>
+    </div>
+    <p class="nutri-sum"><b>${num(eaten)}</b>${budget ? ` von ${num(budget)}` : ""} kcal · Eiweiß <b>${num(t.protein)}</b>${g.protein ? ` / ${num(g.protein)}` : ""} g</p>
+  </div>`;
+}
+
+/** Kompakte Bilanz: Ring, drei Makros, eine Fusszeile. Wird immer gezeichnet, auch bei 0 kcal –
+ *  sonst schiebt der erste Eintrag des Tages alles darunter nach unten. */
+function nutriCard(eaten, budget, g, t) {
+  return `<div class="card nutri-card">
+    <div class="nutri-top">
+      ${heroRing(eaten, budget)}
+      <div class="nutri-macros">
+        ${macro("protein", "Eiweiß", t.protein, g.protein, { lead: true })}
+        ${macro("carbs", "Kohlenhydrate", t.carbs, g.carbs)}
+        ${macro("fat", "Fett", t.fat, g.fat)}
+      </div>
+    </div>
+    <div class="nutri-foot"><span>Ziel ${g.kcal ? num(g.kcal) : "–"} · Verbrannt ${num(data.burned_kcal || 0)} kcal</span>
+      <button type="button" class="link-btn" data-details>Alle Nährwerte</button></div>
+    ${feedbackLine()}
+  </div>`;
+}
+
+function mealCard(key, m, pend) {
+  const extra = pend.filter((e) => e.meal === key);
+  const visible = m.entries.filter((e) => !isPendingDelete(`food-log/${e.id}`));
+  const kcal = m.kcal - m.entries.filter((e) => isPendingDelete(`food-log/${e.id}`))
+    .reduce((n, e) => n + (e.kcal || 0), 0) + extra.reduce((n, e) => n + (e.preview?.kcal || 0), 0);
+  return `<div class="card meal" data-meal-card="${key}">
+    <div class="card-head">${icon(MEAL_ICON[key] || "food")}
+      <div class="meal-title"><b>${esc(m.label)}</b><span class="aside">${num(kcal)} kcal</span></div>
+      <button type="button" class="btn small tonal" data-add="${key}" aria-label="${esc(m.label)} hinzufügen">${icon("plus")} Hinzufügen</button>
+      <button type="button" class="icon-btn" data-meal-menu="${key}" aria-label="Mehr zu ${esc(m.label)}">${icon("more")}</button>
+    </div>
+    <div class="list flush">
+      ${visible.map((e) => `<div class="row-item" role="button" tabindex="0" data-entry="${e.id}">
+        <div class="row-main"><div class="row-title">${esc(e.name)}</div>
+          <div class="row-meta"><span>${isQuick(e) ? "Schnelleintrag" : `${portionsText(e)}${num(e.grams)} g`}</span>${
+            e.protein || e.carbs || e.fat ? `<span>E ${num(e.protein)} · K ${num(e.carbs)} · F ${num(e.fat)}</span>` : ""}</div></div>
+        <span class="row-aside">${num(e.kcal)} kcal</span></div>`).join("")}
+      ${extra.map((e) => `<div class="row-item is-pending"><div class="row-main">
+        <div class="row-title">${esc(e.preview?.name || "Eintrag")}</div>
+        <div class="row-meta"><span>${e.grams ? `${num(e.grams)} g` : "Schnelleintrag"}</span><span class="pill">wartet</span></div></div>
+        <span class="row-aside">${num(e.preview?.kcal)} kcal</span></div>`).join("")}
+      ${visible.length || extra.length ? "" : `<div class="meal-empty-row">Noch nichts eingetragen</div>`}
+    </div>
+  </div>`;
+}
+
+/** Seltene Aktionen einer Mahlzeit hinter dem "⋯": immer erreichbar, nicht nur bei leerer Mahlzeit. */
+function openMealMenu(key) {
+  const entries = data.meals[key].entries.filter((e) => !isPendingDelete(`food-log/${e.id}`));
+  actionMenu(data.meals[key].label, [
+    { label: "Wie am Vortag", icon: "refresh", run: () => copyMeal(key) },
+    { label: "Gespeicherte Mahlzeit", icon: "food", run: () => openSavedMeals(key) },
+    entries.length && { label: "Als Mahlzeit speichern", icon: "download", run: () => saveMeal(key) },
+    entries.length && { label: "Nährwerte", icon: "progress", run: () => openNutrients(`${data.meals[key].label} · Nährwerte`, entries, {}) },
+  ]);
+}
+
+/** Alle Naehrwerte als Sheet (statt Akkordeon, das die Seite verschiebt). */
+function openNutrients(title, entries, goal) {
+  const t = sumEntries(entries);
+  const day = sumEntries(visibleEntries()).kcal;
+  const share = goal === null || !day ? "" : `<p class="hint">${Math.round((t.kcal / day) * 100)} % des Tages</p>`;
+  openSheet({ title, body: `${nutrientRows(t, goal || {}, entries.length)}${incomplete(t, entries.length)}${share}` });
+}
+
+function essenView() {
   const g = data.goals.goals || {};
   const t = data.totals;
   const pend = pendingEntries();
   const pendKcal = pend.reduce((n, e) => n + (e.preview?.kcal || 0), 0);
-  const isToday = data.date === todayIso();
-  const dateLabel = isToday ? "Heute" : parseYmd(data.date).toLocaleDateString("de-AT", { weekday: "long", day: "numeric", month: "long" });
-  root.innerHTML = `<div class="date-switch">
-      <button type="button" class="icon-btn" data-day="-1" aria-label="Vorheriger Tag">${icon("left")}</button>
-      <b>${esc(dateLabel)}</b>
-      <button type="button" class="icon-btn" data-day="1" aria-label="Nächster Tag" ${isToday ? "disabled" : ""}>${icon("right")}</button>
-    </div>
-    <div class="card nutri-head">
-      <div class="nutri-stat"><b>${num(t.kcal + pendKcal)}</b><span>Gegessen</span></div>
-      ${ring(t.kcal + pendKcal, g.kcal ? g.kcal + (data.burned_kcal || 0) : g.kcal)}
-      <div class="nutri-stat"><b>${num(data.burned_kcal || 0)}</b><span>Verbrannt</span></div>
-    </div>
-    ${feedbackLine()}
-    ${t.kcal ? donutCard(t, g, dayDetails()) : ""}
+  const eaten = t.kcal + pendKcal;
+  const budget = g.kcal ? g.kcal + (data.burned_kcal || 0) : 0;
+  return `${nutriHead(eaten, budget, g, t)}
+    ${nutriCard(eaten, budget, g, t)}
     ${!g.kcal ? `<p class="callout">${icon("warn")} Für ein Kalorienziel fehlen noch: ${esc((data.goals.missing || []).join(", "))}.
       <a href="#profil">Im Profil ergänzen</a></p>` : ""}
-    ${waterCard(data.water_ml + pendingWater() + waterExtra, data.water_goal)}
-    ${fastCard()}
-    ${Object.entries(data.meals).map(([key, m]) => {
-      const extra = pend.filter((e) => e.meal === key);
-      const visible = m.entries.filter((e) => !isPendingDelete(`food-log/${e.id}`));
-      const kcal = m.kcal - m.entries.filter((e) => isPendingDelete(`food-log/${e.id}`))
-        .reduce((n, e) => n + (e.kcal || 0), 0) + extra.reduce((n, e) => n + (e.preview?.kcal || 0), 0);
-      return `<div class="card meal">
-        <div class="ex-head"><div><div class="card-title">${esc(m.label)}</div>
-          <div class="row-meta"><span>${num(kcal)} kcal</span></div></div>
-          <button type="button" class="icon-btn tonal-icon" data-add="${key}" aria-label="${esc(m.label)} hinzufügen">${icon("plus")}</button>
-        </div>
-        ${visible.length || extra.length ? `<div class="list flush">
-          ${visible.map((e) => `<div class="row-item" role="button" tabindex="0" data-entry="${e.id}">
-            <div class="row-main"><div class="row-title">${esc(e.name)}</div>
-              <div class="row-meta"><span>${isQuick(e) ? "Schnelleintrag" : `${portionsText(e)}${num(e.grams)} g`}</span>${
-                e.protein || e.carbs || e.fat ? `<span>E ${num(e.protein)} · K ${num(e.carbs)} · F ${num(e.fat)}</span>` : ""}</div></div>
-            <span class="row-aside">${num(e.kcal)} kcal</span></div>`).join("")}
-          ${extra.map((e) => `<div class="row-item is-pending"><div class="row-main">
-            <div class="row-title">${esc(e.preview?.name || "Eintrag")}</div>
-            <div class="row-meta"><span>${e.grams ? `${num(e.grams)} g` : "Schnelleintrag"}</span><span class="pill">wartet</span></div></div>
-            <span class="row-aside">${num(e.preview?.kcal)} kcal</span></div>`).join("")}
-        </div>${visible.length ? mealDetails(key, visible) : ""}<button type="button" class="link-btn copy-meal" data-save-meal="${key}">${icon("download")} Als Mahlzeit speichern</button>`
-        : `<div class="btn-row"><button type="button" class="link-btn copy-meal" data-copy-meal="${key}">${icon("refresh")} Wie am Vortag</button>
-          <button type="button" class="link-btn copy-meal" data-saved-meal="${key}">${icon("food")} Gespeicherte Mahlzeit</button></div>`}
-      </div>`;
-    }).join("")}
-    ${weekCard()}
+    ${Object.entries(data.meals).map(([key, m]) => mealCard(key, m, pend)).join("")}
+    ${waterRow(data.water_ml + pendingWater() + waterExtra, data.water_goal)}
+    ${weekCard() || (weekPending ? skeletonCards([150]) : "")}
     <p class="hint pad source-note">Nährwerte: Bundeslebensmittelschlüssel (BLS) 4.0, Max Rubner-Institut, CC BY 4.0 · Markenprodukte: Open Food Facts, ODbL</p>`;
+}
+
+function fastenView() {
+  if (!fast) {
+    return `<div class="card quiet">${icon("cloud")} <span>Fasten ist gerade nicht geladen – bitte Verbindung prüfen.</span></div>`;
+  }
+  return `${fastCard()}${fastTipsCard()}`;
+}
+
+function render() {
+  const switcher = `<div class="segmented view-switch" role="radiogroup" aria-label="Ansicht">
+    <button type="button" role="radio" aria-checked="${view === "essen"}" data-view="essen">Essen</button>
+    <button type="button" role="radio" aria-checked="${view === "fasten"}" data-view="fasten">Fasten</button></div>`;
+  patch(root, `${switcher}${view === "fasten" ? fastenView() : essenView()}`);
+  window.dispatchEvent(new Event("nutri-rendered"));
 }
 
 const visibleEntries = () => Object.values(data.meals).flatMap((m) => m.entries)
   .filter((e) => !isPendingDelete(`food-log/${e.id}`));
-
-function dayDetails() {
-  const entries = visibleEntries();
-  const t = sumEntries(entries);
-  return detailsBox("day", "Alle Nährwerte", nutrientRows(t, targets(data.goals), entries.length) + incomplete(t, entries.length));
-}
-
-function mealDetails(key, entries) {
-  const t = sumEntries(entries);
-  const day = sumEntries(visibleEntries()).kcal;
-  const share = day ? ` · ${Math.round((t.kcal / day) * 100)} % des Tages` : "";
-  return detailsBox(key, `Nährwerte${share}`, nutrientRows(t, {}, entries.length) + incomplete(t, entries.length));
-}
 
 /** Dieselbe Mahlzeit wie am Vortag eintragen – das Fruehstueck ist oft jeden Tag gleich.
  *  Jeder Eintrag geht einzeln durch den Ausgang, also auch offline. */
 async function copyMeal(meal, btn) {
   const prev = parseYmd(data.date);
   prev.setDate(prev.getDate() - 1);
-  await busy(btn, async () => {
+  await (btn ? busy(btn, run) : run());
+  async function run() {
     let before;
     try {
       before = await api(`nutrition/day?date=${iso(prev)}`);
@@ -446,7 +833,7 @@ async function copyMeal(meal, btn) {
     toast(queued ? `${entries.length} Einträge übernommen – werden gesendet, sobald wieder Verbindung da ist`
       : `${MEALS[meal]} vom Vortag übernommen (${entries.length} ${entries.length === 1 ? "Eintrag" : "Einträge"})`);
     window.dispatchEvent(new CustomEvent("data-changed"));
-  });
+  }
 }
 
 /** Alle Eintraege einer Mahlzeit unter einem Namen merken – naechstes Mal ein Tipp. */
@@ -508,16 +895,26 @@ async function openSavedMeals(meal) {
 }
 
 export async function load() {
-  if (!data) root.innerHTML = skeleton(5);
   const when = day || todayIso();
-  data = await api(`nutrition/day?date=${when}`);
-  render();
-  loadFast();
-  api(`nutrition/week?date=${when}`).then((w) => {
-    if (data?.date !== when) return;      // inzwischen anderer Tag
-    week = w;
+  view = prefs.get("nutriView", "essen") === "fasten" ? "fasten" : "essen";   // z. B. von der Fasten-Kachel auf Heute gesetzt
+  if (!data) root.innerHTML = skeletonCards([76, 200, 150, 150, 150]);   // grobe Geometrie der echten Seite
+  else root.classList.add("is-loading");   // Tageswechsel/Neuladen: alten Stand dimmen statt Skeleton
+  try {
+    // Alles parallel; Woche und Fasten warten hoechstens kurz mit, damit die Seite einmal zeichnet
+    // (spaeter eintreffendes zeichnet still nach – es liegt unten bzw. im Kopf ohne Hoehe).
+    const dayP = api(`nutrition/day?date=${when}`);
+    const weekP = api(`nutrition/week?date=${when}`).then((w) => { week = w; }, () => { week = null; });
+    const fastP = fetchFast();
+    data = await dayP;
+    await Promise.race([Promise.allSettled([weekP, fastP]), new Promise((r) => setTimeout(r, 1200))]);
+    if ((day || todayIso()) !== when) return;   // inzwischen anderer Tag
+    weekPending = false;
     render();
-  }).catch(() => { week = null; });
+    loadFastTips();
+    Promise.allSettled([weekP, fastP]).then(() => { if (data?.date === when && root.isConnected) render(); });
+  } finally {
+    root.classList.remove("is-loading");
+  }
 }
 
 // ------------------------------------------------------- Hinzufügen
@@ -573,14 +970,15 @@ function highlight(text, q) {
   return `${esc(text.slice(0, at))}<mark>${esc(text.slice(at, at + word.length))}</mark>${esc(text.slice(at + word.length))}`;
 }
 
-function foodRow(f, i, q, again = false) {
+function foodRow(f, i, q, again = false, online = false) {
+  const badge = online ? `<span class="pill">Online</span>` : "";
   // Schon mal gegessen: die zuletzt genommene Menge ist, was man mit einem Tipp uebernimmt –
   // also deren kcal als Hauptzahl, nicht mal pro Portion und mal pro 100 g.
   if (f.last_grams) {
     const meta = [f.brand && esc(f.brand), `${num(f.kcal)} kcal / 100 g`].filter(Boolean);
     return `<div class="row-item food-row" role="button" tabindex="0" data-pick="${i}">
       <div class="row-main"><div class="row-title">${highlight(f.name, q)}</div>
-        <div class="row-meta">${meta.map((m) => `<span>${m}</span>`).join("")}</div></div>
+        <div class="row-meta">${meta.map((m) => `<span>${m}</span>`).join("")}${badge}</div></div>
       <span class="row-aside food-kcal"><b>${num(kcalFor(f, f.last_grams))} kcal</b><small>${portionsText({ ...f, grams: f.last_grams })}${num(f.last_grams)} g wie zuletzt</small></span>
       ${again ? `<button type="button" class="icon-btn tonal-icon again-btn" data-repeat="${i}"
         aria-label="${esc(f.name)}, ${num(f.last_grams)} g wie zuletzt direkt eintragen">${icon("plus")}</button>` : ""}</div>`;
@@ -590,24 +988,32 @@ function foodRow(f, i, q, again = false) {
   const meta = [f.brand && esc(f.brand), u && esc(`${u.label} · ${num(u.g)} g`)].filter(Boolean);
   return `<div class="row-item food-row" role="button" tabindex="0" data-pick="${i}">
     <div class="row-main"><div class="row-title">${highlight(f.name, q)}</div>
-      ${meta.length ? `<div class="row-meta">${meta.map((m) => `<span>${m}</span>`).join("")}</div>` : ""}</div>
+      ${meta.length || badge ? `<div class="row-meta">${meta.map((m) => `<span>${m}</span>`).join("")}${badge}</div>` : ""}</div>
     <span class="row-aside food-kcal">${u ? `<b>${num(kcalFor(f, u.g))} kcal</b><small>pro ${esc(u.label.replace(/ \(.*\)$/, ""))}</small><small>${num(f.kcal)} / 100 g</small>`
       : `<b>${num(f.kcal)} kcal</b><small>pro 100 g</small>`}</span></div>`;
 }
 
-/** Menge in Portionen oder Gramm. Gespeichert werden immer Gramm. */
-function amountBox(box, f, grams, onChange) {
-  const units = unitsOf(f);
-  const hit = grams ? asUnits(f, grams) : null;
+/** Menge in Portionen oder Gramm. Gespeichert werden immer Gramm.
+ *  update(food): Einheiten nachtragen (Portion kommt spaeter vom Server) – eine schon begonnene
+ *  Eingabe bleibt dabei erhalten. */
+function amountBox(box, f0, grams, onChange) {
+  let f = f0;
+  let units = unitsOf(f);
+  let touched = false;
   // unit: Index in units, -1 = Gramm. Ohne Vorgabe: erste Einheit x 1, sonst 100 g.
-  let unit = hit ? hit.i : (!grams && units.length ? 0 : -1);
-  let value = hit ? hit.n : (unit >= 0 ? 1 : Math.round(grams || 100));
+  let unit = -1, value = 100;
+  const init = () => {
+    const hit = grams ? asUnits(f, grams) : null;
+    unit = hit ? hit.i : (!grams && units.length ? 0 : -1);
+    value = hit ? hit.n : (unit >= 0 ? 1 : Math.round(grams || 100));
+  };
+  init();
   const current = () => (unit >= 0 ? Math.round(value * units[unit].g * 10) / 10 : value);
-  const pack = f.pack_g > 0 && f.pack_g <= 1000 ? Math.round(f.pack_g) : null;
   const unitText = (u) => (/\d\s*(g|ml)\b/i.test(u.label) ? u.label : `${u.label} · ${num(u.g)} g`);
 
   function paint() {
-    const gramChips = [...new Set([f.last_grams, pack, 50, 100, 150, 200].filter(Boolean).map(Math.round))].slice(0, 6);
+    const pack = f.pack_g > 0 && f.pack_g <= 1000 ? Math.round(f.pack_g) : null;
+    const gramChips = [...new Set([f.last_grams, pack, 50, 100, 150, 200].filter(Boolean).map(Math.round))].slice(0, 5);
     box.innerHTML = `${units.length ? `<div class="chips unit-chips" role="radiogroup" aria-label="Einheit">
         ${units.map((u, i) => `<button type="button" role="radio" class="chip${i === unit ? " active" : ""}" aria-checked="${i === unit}"
           data-unit="${i}">${esc(unitText(u))}</button>`).join("")}
@@ -619,7 +1025,7 @@ function amountBox(box, f, grams, onChange) {
             <input data-count type="number" inputmode="decimal" min="0.25" max="50" step="0.25" value="${value}" aria-label="Anzahl">
             <button type="button" class="icon-btn tonal-icon" data-step="0.5" aria-label="Eine halbe mehr">${icon("plus")}</button>
           </div></div>
-        <div class="chips">${[0.5, 1, 2, 3, 4].map((n) => `<button type="button" class="chip${n === value ? " active" : ""}" data-set="${n}">${count(n)}</button>`).join("")}</div>`
+        <div class="chips">${[0.5, 1, 2, 3].map((n) => `<button type="button" class="chip${n === value ? " active" : ""}" data-set="${n}">${count(n)}</button>`).join("")}</div>`
       : `<label class="field">Menge (g)<input data-grams type="number" inputmode="decimal" min="1" max="5000" value="${value}"></label>
         <div class="chips">${gramChips.map((g) => `<button type="button" class="chip${g === value ? " active" : ""}" data-set="${g}">${
           g === pack ? `${g} g (Packung)` : f.last_grams && g === Math.round(f.last_grams) ? `${g} g (zuletzt)` : `${g} g`}</button>`).join("")}</div>`}`;
@@ -632,6 +1038,7 @@ function amountBox(box, f, grams, onChange) {
   box.addEventListener("click", (ev) => {
     const u = ev.target.closest("[data-unit]");
     if (u && Number(u.dataset.unit) !== unit) {
+      touched = true;
       const g = current();
       unit = Number(u.dataset.unit);
       // Beim Wechsel die Menge mitnehmen, auf halbe Einheiten gerundet
@@ -644,6 +1051,7 @@ function amountBox(box, f, grams, onChange) {
     const set = ev.target.closest("[data-set]");
     if (set) value = Number(set.dataset.set);
     if (step || set) {
+      touched = true;
       const input = box.querySelector("[data-count], [data-grams]");
       input.value = value;
       changed();
@@ -651,12 +1059,23 @@ function amountBox(box, f, grams, onChange) {
   });
   box.addEventListener("input", (ev) => {
     if (!ev.target.matches("[data-count], [data-grams]")) return;
+    touched = true;
     value = Number(ev.target.value) || 0;
     changed();
   });
   paint();
   onChange(current());
-  return { grams: current };
+  return {
+    grams: current,
+    update(next) {
+      f = next;
+      units = unitsOf(f);
+      if (!touched) init();
+      else if (unit >= units.length) unit = -1;
+      paint();
+      onChange(current());
+    },
+  };
 }
 
 /** Online gefundenes Produkt erst lokal uebernehmen – Eintraege und Rezepte brauchen eine id. */
@@ -669,67 +1088,75 @@ async function ensureFood(f) {
     pack_g: f.pack_g, source: "off" } });
 }
 
-/** Hinzufuegen-Sheet. opts.onPick: Auswahl-Modus fuer Rezept-Zutaten (statt ins Tagebuch);
+/** Hinzufuegen-Sheet in fester Huelle: Kopf (Suche, Barcode, Foto, Mahlzeit) | scrollender Inhalt
+ *  (Vorschlaege/Treffer oder Menge) | Fuss (Zuletzt hinzugefuegt, Fertig/Hinzufuegen). Die Hoehe
+ *  aendert sich nie – das Sheet bleibt nach dem Eintragen offen, damit man ein ganzes Fruehstueck
+ *  in einem Rutsch erfassen kann.
+ *  opts.onPick: Auswahl-Modus fuer Rezept-Zutaten (statt ins Tagebuch);
  *  opts.food: gleich mit diesem Lebensmittel bei der Menge starten. */
 function openAdd(meal, opts = {}) {
   const picking = typeof opts.onPick === "function";
   const st = { meal, local: [], online: [], recent: [], favorites: [], items: [], query: "", food: null, error: null,
-    searchingLocal: false, searchingOnline: false };
-  const sheet = openSheet({ title: picking ? "Zutat hinzufügen" : `${MEALS[meal]} · hinzufügen`, body: "", wide: true });
+    searchingLocal: false, searchingOnline: false, suggestLoading: true, mode: "list", last: null };
+  const sheet = openSheet({ title: picking ? "Zutat hinzufügen" : "Hinzufügen", cls: "add-sheet", wide: true,
+    body: "", footer: `<div class="add-foot" data-foot></div>` });
   const body = $(".sheet-body", sheet);
+  const foot = $("[data-foot]", sheet);
   let localTimer = null;
   let onlineTimer = null;
   let amount = null;
+  const scroller = () => $("[data-scroll]", sheet);
 
-  function section(title, items, empty) {
-    const from = st.items.length;
-    st.items.push(...items);
-    return `<h3 class="form-section">${title}</h3>
-      ${items.length ? `<div class="list">${items.map((f, i) => foodRow(f, from + i, st.query, !picking)).join("")}</div>` : empty}`;
-  }
-
-  function paintList() {
-    const box = $("[data-results]", sheet);
-    if (!box) return;
-    st.items = [];
-    if (st.query.length < 2) {
-      const favIds = new Set(st.favorites.map((f) => f.id));
-      box.innerHTML = (st.favorites.length ? section(`${icon("star")} Favoriten`, st.favorites, "") : "")
-        + section("Zuletzt verwendet", st.recent.filter((f) => !favIds.has(f.id)),
-          `<p class="hint pad">Noch keine zuletzt verwendeten Lebensmittel.</p>`);
+  // ---- Fuss: je nach Modus
+  function paintFoot() {
+    if (st.mode === "amount") {
+      foot.innerHTML = `<button type="button" class="btn ghost" data-back>${icon("left")} Zurück</button>
+        <span class="grow"></span>
+        <button type="button" class="btn primary" data-save>${icon("check")} ${picking ? "Als Zutat übernehmen" : "Hinzufügen"}</button>`;
+    } else if (st.mode === "own") {
+      foot.innerHTML = `<button type="button" class="btn ghost" data-back>${icon("left")} Zurück</button>
+        <span class="grow"></span>
+        <button type="submit" class="btn primary" form="foodForm">${st.editing ? "Speichern" : "Weiter"}</button>`;
+    } else if (picking) {
+      foot.innerHTML = `<span class="hint add-last">Lebensmittel wählen, dann die Menge angeben.</span>`;
     } else {
-      const known = new Set(st.local.map((f) => f.barcode).filter(Boolean));
-      const online = st.online.filter((f) => !f.barcode || !known.has(f.barcode));
-      box.innerHTML = (st.local.length || st.searchingLocal
-        ? section("Lebensmittel", st.local, `<p class="hint pad">Suche …</p>`) : "")
-        + section("Markenprodukte (Open Food Facts)", online,
-          `<p class="hint pad">${st.searchingOnline ? "Weitere Produkte werden gesucht …" : st.error ? ""
-            : st.query.length < 3 ? "Ab drei Buchstaben wird auch hier gesucht." : "Nichts gefunden."}</p>`)
-        + (online.length && st.searchingOnline ? `<p class="hint pad">Weitere Produkte werden gesucht …</p>` : "");
+      const l = st.last;
+      const eaten = data ? data.totals.kcal + pendingEntries().reduce((n, e) => n + (e.preview?.kcal || 0), 0) : null;
+      foot.innerHTML = `<div class="add-last" data-last>${l
+        ? `${icon("check")}<span>${esc(l.name)} · ${num(l.grams)} g · ${num(l.kcal)} kcal</span>${
+          l.id ? `<button type="button" class="link-btn" data-undo>Rückgängig</button>` : `<span class="pill">wartet</span>`}`
+        : `<span class="hint">${eaten == null ? "" : `Heute ${num(eaten)} kcal`}</span>`}</div>
+        <button type="button" class="btn primary" data-done>Fertig</button>`;
     }
-    $("[data-error]", sheet).textContent = st.error || "";
   }
 
-  function paintSearch() {
-    body.innerHTML = `<label class="search">${icon("search")}<input type="search" data-q value="${esc(st.query)}"
-        placeholder="z. B. Topfen, Semmel, Hühnerbrust oder eine Marke" aria-label="Lebensmittel suchen" autocomplete="off"></label>
-      <div class="btn-row">
-        <button type="button" class="btn small tonal" data-scan>${icon("barcode")} Barcode scannen</button>
-        ${picking ? "" : `<button type="button" class="btn small tonal" data-ai>${icon("spark")} Beschreiben / Foto</button>
-        <button type="button" class="btn small ghost" data-quick>${icon("flame")} Nur Kalorien</button>
-        <button type="button" class="btn small ghost" data-recipe>${icon("food")} Rezept erstellen</button>`}
-        <button type="button" class="btn small ghost" data-own>${icon("plus")} Eigenes Lebensmittel</button>
+  // ---- Kopf + Inhalt (Suche)
+  function paintShell() {
+    st.mode = "list";
+    st.food = null;
+    amount = null;
+    body.innerHTML = `<div class="add-top">
+        <label class="search">${icon("search")}<input type="search" data-q value="${esc(st.query)}"
+          placeholder="Lebensmittel oder Marke suchen" aria-label="Lebensmittel suchen" autocomplete="off"></label>
+        <div class="add-tools">
+          <button type="button" class="btn small tonal" data-scan>${icon("barcode")} Barcode</button>
+          ${picking ? "" : `<button type="button" class="btn small tonal" data-ai>${icon("spark")} Foto / Text</button>`}
+          <button type="button" class="btn small ghost icon-only" data-more aria-label="Weitere Möglichkeiten">${icon("more")}</button>
+        </div>
+        ${picking ? "" : `<div class="segmented add-meal" role="radiogroup" aria-label="Mahlzeit">${Object.keys(MEALS).map((k) =>
+          `<button type="button" role="radio" aria-checked="${k === st.meal}" data-meal="${k}">${MEAL_SHORT[k]}</button>`).join("")}</div>`}
       </div>
-      <p class="hint" data-error role="status"></p>
-      <div data-results></div>`;
+      <div class="add-scroll" data-scroll></div>`;
     paintList();
+    paintFoot();
     const input = $("[data-q]", sheet);
     input.addEventListener("input", () => {
+      if (st.mode !== "list") { st.mode = "list"; st.food = null; amount = null; paintFoot(); }
       st.query = input.value.trim();
       clearTimeout(localTimer);
       clearTimeout(onlineTimer);
       st.error = null;
-      if (st.query.length < 2) { st.local = []; st.online = []; st.searchingOnline = false; return paintList(); }
+      if (st.query.length < 2) { st.local = []; st.online = []; st.searchingOnline = false; st.searchingLocal = false; return paintList(); }
       // Eigene Lebensmittel sofort, Open Food Facts erst ab drei Zeichen und wenn nicht
       // mehr getippt wird – jede Suche kostet dort mehrere Abrufe (429-Gefahr).
       st.searchingLocal = true;
@@ -737,8 +1164,33 @@ function openAdd(meal, opts = {}) {
       localTimer = setTimeout(searchLocal, 200);
       if (st.searchingOnline) onlineTimer = setTimeout(searchOnline, 700);
       else st.online = [];
+      paintList();
     });
     if (!st.query) input.focus({ preventScroll: true });
+  }
+
+  // Eine Liste, eine Reihenfolge: Eintraege rutschen nie nach oben, neue haengen sich unten an.
+  function paintList() {
+    const box = scroller();
+    if (!box || st.mode !== "list") return;
+    st.items = [];
+    const rows = (items, online = false) => items.map((f) => { st.items.push(f); return foodRow(f, st.items.length - 1, st.query, !picking, online); }).join("");
+    let html;
+    if (st.query.length < 2) {
+      const favIds = new Set(st.favorites.map((f) => f.id));
+      const list = [...st.favorites, ...st.recent.filter((f) => !favIds.has(f.id))];
+      html = `<h3 class="form-section">Vorschläge</h3>${st.suggestLoading ? skeleton(5)
+        : list.length ? `<div class="list">${rows(list)}</div>` : `<p class="hint pad">Noch keine zuletzt verwendeten Lebensmittel.</p>`}`;
+    } else {
+      const known = new Set(st.local.map((f) => f.barcode).filter(Boolean));
+      const online = st.online.filter((f) => !f.barcode || !known.has(f.barcode));
+      const status = st.searchingLocal || st.searchingOnline ? "Suche …"
+        : st.error ? ""
+        : !st.local.length && !online.length ? (st.query.length < 3 ? "Ab drei Buchstaben wird auch bei Marken gesucht." : "Nichts gefunden.") : "";
+      html = `${st.local.length || online.length ? `<div class="list">${rows(st.local)}${rows(online, true)}</div>` : ""}
+        <p class="hint pad add-status" role="status">${esc(status)}</p>`;
+    }
+    box.innerHTML = `${st.error ? `<p class="callout warn" role="status">${icon("warn")} ${esc(st.error)}</p>` : ""}${html}`;
   }
 
   async function searchLocal() {
@@ -771,40 +1223,50 @@ function openAdd(meal, opts = {}) {
     paintList();
   }
 
+  // ---- Menge
   function paintAmount() {
+    st.mode = "amount";
     const f = st.food;
-    const u = unitsOf(f)[0];
-    body.innerHTML = `<button type="button" class="link-btn" data-back>${icon("left")} Zurück</button>
-      <div class="amount-head"><h3 class="card-title">${esc(f.name)}</h3>
+    const box = scroller();
+    box.innerHTML = `<div class="amount-head"><h3 class="card-title">${esc(f.name)}</h3>
         ${f.id ? `<button type="button" class="icon-btn fav-btn${f.favorite ? " on" : ""}" data-fav aria-pressed="${!!f.favorite}"
           aria-label="${f.favorite ? "Aus den Favoriten nehmen" : "Als Favorit merken"}">${icon("star")}</button>` : ""}</div>
-      ${f.source === "eigen" && f.id ? `<button type="button" class="link-btn" data-edit-food>${icon("edit")} Lebensmittel bearbeiten</button>` : ""}
-      ${f.source === "rezept" && f.id && !picking ? `<button type="button" class="link-btn" data-edit-recipe>${icon("edit")} Rezept bearbeiten</button>` : ""}
-      <p class="hint">${f.brand ? `${esc(f.brand)} · ` : ""}je 100 g: ${num(f.kcal)} kcal · E ${num(f.protein, 1)} · K ${num(f.carbs, 1)} · F ${num(f.fat, 1)}
-        ${u ? `<br>${esc(/\d\s*(g|ml)\b/i.test(u.label) ? u.label : `${u.label} (${num(u.g)} g)`)}: ${num(kcalFor(f, u.g))} kcal` : ""}</p>
+      <div class="amount-links hint">${f.brand ? `<span>${esc(f.brand)}</span>` : ""}
+        ${f.source === "eigen" && f.id ? `<button type="button" class="link-btn" data-edit-food>${icon("edit")} Lebensmittel bearbeiten</button>` : ""}
+        ${f.source === "rezept" && f.id && !picking ? `<button type="button" class="link-btn" data-edit-recipe>${icon("edit")} Rezept bearbeiten</button>` : ""}</div>
       <div data-amount></div>
-      ${picking ? "" : `<label class="field">Mahlzeit<select data-meal>${Object.entries(MEALS).map(([k, l]) => `<option value="${k}"${k === st.meal ? " selected" : ""}>${l}</option>`).join("")}</select></label>`}
-      <div class="card quiet" data-calc></div>
-      <div class="btn-row"><button type="button" class="btn primary" data-save>${icon("check")} ${picking ? "Als Zutat übernehmen" : "Hinzufügen"}</button></div>`;
+      <div class="card quiet" data-calc></div>`;
+    box.scrollTop = 0;
     amount = amountBox($("[data-amount]", sheet), f, f.last_grams, (g) => {
       const k = (v) => num(((v || 0) * g) / 100, 1);
       $("[data-calc]", sheet).innerHTML = `<b>${k(f.kcal)} kcal</b><span>${num(g, 1)} g · E ${k(f.protein)} g · K ${k(f.carbs)} g · F ${k(f.fat)} g</span>`;
     });
+    paintFoot();
   }
 
   async function pick(food) {
     st.food = { ...food };
     paintAmount();
-    // Die Suche kennt die Portion nur fuer die ersten Treffer – bei Bedarf jetzt nachladen
+    // Die Suche kennt die Portion nur fuer die ersten Treffer – bei Bedarf jetzt nachladen.
+    // Die Menge wird nur ergaenzt (update), nie neu aufgebaut: eine Eingabe geht nicht verloren.
     if (food.barcode && !food.serving_g && (food.source === "off" || !food.id)) {
       try {
         const p = await api(`foods/portion/${food.barcode}`, { timeout: OFF_TIMEOUT });
         if (st.food?.barcode !== food.barcode || !(p.serving_g || p.pack_g)) return;
-        const before = servingOf(st.food);
         Object.entries(p).forEach(([k, v]) => { if (v && !st.food[k]) st.food[k] = v; });
-        if (!before && servingOf(st.food)) paintAmount();
+        amount?.update(st.food);
       } catch { /* ohne Portion geht es auch */ }
     }
+  }
+
+  /** Nach dem Eintragen: zurueck zur Liste, Streifen "zuletzt hinzugefuegt", Sheet bleibt offen. */
+  function afterAdd(entry, food, grams, queued) {
+    st.last = { id: queued ? null : entry?.id ?? null, name: food.name, grams, kcal: Math.round((food.kcal * grams) / 100) };
+    st.query = "";
+    st.local = [];
+    st.online = [];
+    paintShell();
+    window.dispatchEvent(new CustomEvent("data-changed"));
   }
 
   async function save(btn) {
@@ -816,18 +1278,13 @@ function openAdd(meal, opts = {}) {
         try { opts.onPick(await ensureFood(f), grams); } catch (e) { toast(e.offline ? "Dafür ist eine Verbindung nötig." : e.message, { error: true }); }
       });
     }
-    const meal = $("[data-meal]", sheet).value;
     await busy(btn, async () => {
       try {
         const food = await ensureFood(f);
-        const body = { profile_id: getProfile(), food_id: food.id, grams, meal, date: entryDay(data?.date),
-          client_id: outbox.uuid(),
-          preview: { name: food.name, kcal: Math.round((food.kcal * grams) / 100) } };
-        const res = await outbox.send({ path: "food-log", body });
-        closeSheet();
-        toast(res.queued ? "Gespeichert – wird gesendet, sobald wieder Verbindung da ist"
-          : `${food.name} eingetragen`);
-        window.dispatchEvent(new CustomEvent("data-changed"));
+        const res = await outbox.send({ path: "food-log", body: { profile_id: getProfile(), food_id: food.id, grams, meal: st.meal,
+          date: entryDay(data?.date), client_id: outbox.uuid(),
+          preview: { name: food.name, kcal: Math.round((food.kcal * grams) / 100) } } });
+        afterAdd(res.data?.entry, food, grams, res.queued);
       } catch (e) {
         toast(e.offline ? "Offline lassen sich nur schon verwendete Lebensmittel eintragen." : e.message, { error: true });
       }
@@ -848,8 +1305,24 @@ function openAdd(meal, opts = {}) {
         added.add(f.id);
         btn.innerHTML = icon("check");
         btn.classList.add("done");
-        toast(res.queued ? "Gespeichert – wird gesendet, sobald wieder Verbindung da ist"
-          : `${f.name} · ${num(f.last_grams)} g eingetragen`);
+        st.last = { id: res.queued ? null : res.data?.entry?.id ?? null, foodId: f.id, name: f.name, grams: f.last_grams, kcal: kcalFor(f, f.last_grams) };
+        paintFoot();
+        window.dispatchEvent(new CustomEvent("data-changed"));
+      } catch (e) { toast(e.message, { error: true }); }
+    });
+  }
+
+  async function undoLast(btn) {
+    const l = st.last;
+    if (!l?.id) return;
+    await busy(btn, async () => {
+      try {
+        await api(`food-log/${l.id}`, { method: "DELETE" });
+        if (l.foodId) added.delete(l.foodId);
+        st.last = null;
+        // Haken in der Liste zuruecknehmen
+        if (st.mode === "list") paintList();
+        paintFoot();
         window.dispatchEvent(new CustomEvent("data-changed"));
       } catch (e) { toast(e.message, { error: true }); }
     });
@@ -865,7 +1338,7 @@ function openAdd(meal, opts = {}) {
         return openOwn({ barcode: code });
       }
       st.error = e.offline ? "Offline – der Barcode kann gerade nicht nachgeschlagen werden." : e.message;
-      paintSearch();
+      paintShell();
     }
   }
 
@@ -873,8 +1346,9 @@ function openAdd(meal, opts = {}) {
   function openOwn(preset = {}) {
     const edit = Boolean(preset.id);
     const v = (k) => esc(preset[k] ?? "");
-    body.innerHTML = `<button type="button" class="link-btn" data-back>${icon("left")} Zurück</button>
-      <form id="foodForm" class="form">
+    st.mode = "own";
+    st.editing = edit;
+    body.innerHTML = `<div class="add-scroll"><form id="foodForm" class="form">
         <label class="field">Name<input name="name" maxlength="120" required autofocus value="${esc(preset.name || st.query || "")}"></label>
         <label class="field">Marke<input name="brand" maxlength="60" placeholder="optional" value="${v("brand")}"></label>
         <p class="hint">Nährwerte je 100 g (stehen auf der Packung):</p>
@@ -892,12 +1366,10 @@ function openAdd(meal, opts = {}) {
           <label class="field">Portion (g)<input name="serving_g" type="number" inputmode="decimal" min="1" max="2000" placeholder="optional" value="${v("serving_g")}"></label>
         </div>
         <input type="hidden" name="barcode" value="${esc(preset.barcode || "")}">
-        ${edit ? `<p class="hint">Gilt für alle Profile – eigene Lebensmittel sind gemeinsam. Schon eingetragene Mahlzeiten behalten ihre Werte.</p>` : ""}
-        <div class="btn-row">
-          ${edit ? `<button type="button" class="btn danger ghost" data-delete-food>${icon("trash")} Löschen</button><span class="grow"></span>` : ""}
-          <button type="submit" class="btn primary">${edit ? "Speichern" : "Weiter"}</button>
-        </div>
-      </form>`;
+        ${edit ? `<p class="hint">Gilt für alle Profile – eigene Lebensmittel sind gemeinsam. Schon eingetragene Mahlzeiten behalten ihre Werte.</p>
+          <div class="btn-row"><button type="button" class="btn danger ghost" data-delete-food>${icon("trash")} Löschen</button></div>` : ""}
+      </form></div>`;
+    paintFoot();
     const form = $("#foodForm", sheet);
     submitOnce(form, async () => {
       try {
@@ -905,6 +1377,7 @@ function openAdd(meal, opts = {}) {
           ? await api(`foods/${preset.id}`, { method: "PATCH", body: formData(form) })
           : await api("foods", { method: "POST", body: formData(form) });
         if (edit) toast("Lebensmittel gespeichert");
+        paintShell();       // Huelle wieder aufbauen, dann Menge
         pick({ ...preset, ...food });
       } catch (e) { formError(form, e); }
     });
@@ -914,28 +1387,46 @@ function openAdd(meal, opts = {}) {
           await api(`foods/${preset.id}`, { method: "DELETE" });
           st.recent = st.recent.filter((f) => f.id !== preset.id);
           st.local = st.local.filter((f) => f.id !== preset.id);
-          st.food = null;
           toast("Lebensmittel gelöscht – eingetragene Mahlzeiten bleiben");
-          paintSearch();
+          paintShell();
         } catch (e) { toast(e.message, { error: true }); }
       }, "Löschen", "Wirklich löschen?");
     }
   }
 
+  /** Seltenes hinter dem "⋯": Menue ersetzt das Sheet, die Ziele oeffnen ohnehin eigene Sheets. */
+  function openMore() {
+    actionMenu("Weitere Möglichkeiten", [
+      !picking && { label: "Nur Kalorien eintragen", icon: "flame", run: () => openQuick(st.meal) },
+      { label: "Eigenes Lebensmittel anlegen", icon: "plus", run: () => openAdd(st.meal, { ...opts, own: true, query: st.query }) },
+      !picking && { label: "Rezept erstellen", icon: "food", run: () => openRecipe(null, st.meal) },
+      !picking && { label: "Gespeicherte Mahlzeit", icon: "download", run: () => openSavedMeals(st.meal) },
+      !picking && { label: "Wie am Vortag", icon: "refresh", run: () => copyMeal(st.meal) },
+    ]);
+  }
+  // Hinweis: actionMenu ersetzt dieses Sheet – "Eigenes Lebensmittel" oeffnet es deshalb neu im Anlege-Modus.
+
   sheet.addEventListener("click", async (ev) => {
-    const t = (s) => ev.target.closest(s);
+    const t = (q) => ev.target.closest(q);
     const repeat = t("[data-repeat]");
     if (repeat) return logAgain(repeat);
     const p = t("[data-pick]");
     if (p) return pick(st.items[Number(p.dataset.pick)]);
-    if (t("[data-back]")) { st.food = null; return paintSearch(); }
+    if (t("[data-back]")) return paintShell();
     if (t("[data-edit-food]") && st.food) return openOwn(st.food);
     const s = t("[data-save]");
     if (s) return save(s);
-    if (t("[data-own]")) return openOwn();
-    if (t("[data-quick]")) return openQuick(st.meal);
+    const undo = t("[data-undo]");
+    if (undo) return undoLast(undo);
+    if (t("[data-done]")) return closeSheet();
+    const m = t("[data-meal]");
+    if (m) {
+      st.meal = m.dataset.meal;
+      sheet.querySelectorAll("[data-meal]").forEach((b) => b.setAttribute("aria-checked", String(b === m)));
+      return;
+    }
+    if (t("[data-more]")) return openMore();
     if (t("[data-ai]")) return openAi(st.meal, st.query);
-    if (t("[data-recipe]")) return openRecipe(null, st.meal);
     if (t("[data-edit-recipe]") && st.food) return openRecipe(st.food.id, st.meal);
     const fav = t("[data-fav]");
     if (fav && st.food?.id) return toggleFavorite(fav);
@@ -960,10 +1451,24 @@ function openAdd(meal, opts = {}) {
     });
   }
 
-  if (opts.food) pick(opts.food);
-  else paintSearch();
-  api("foods/recent").then((r) => { st.recent = r; if (!st.food) paintList(); }).catch(() => {});
-  api("foods/favorites").then((r) => { st.favorites = r; if (!st.food) paintList(); }).catch(() => {});
+  // Zaehler im Fuss nachfuehren, wenn die Seite dahinter neu gezeichnet wurde
+  const onRendered = () => {
+    if (!sheet.isConnected) return window.removeEventListener("nutri-rendered", onRendered);
+    if (st.mode === "list" && !st.last) paintFoot();
+  };
+  window.addEventListener("nutri-rendered", onRendered);
+
+  if (opts.query) st.query = opts.query;
+  paintShell();
+  if (opts.own) openOwn({ name: opts.query });
+  else if (opts.food) pick(opts.food);
+  // Vorschlaege erst zeigen, wenn Zuletzt UND Favoriten da sind: ein Mal zeichnen, nichts springt nach
+  Promise.allSettled([api("foods/recent"), api("foods/favorites")]).then(([r, f]) => {
+    st.recent = r.status === "fulfilled" ? r.value : [];
+    st.favorites = f.status === "fulfilled" ? f.value : [];
+    st.suggestLoading = false;
+    paintList();
+  });
 }
 
 // ------------------------------------------------------------ KI: Text oder Foto
@@ -1222,7 +1727,7 @@ function openQuick(meal, entry = null) {
   if (entry) {
     armDelete($("[data-delete]", sheet), () => {
       closeSheet();
-      deleteLater(`food-log/${entry.id}`, "Eintrag gelöscht", { onDone: () => { data = null; } });
+      deleteLater(`food-log/${entry.id}`, "Eintrag gelöscht");
     }, "Löschen", "Eintrag löschen?");
   }
 }
@@ -1268,7 +1773,7 @@ function openEntry(id) {
   });
   armDelete($("[data-delete]", sheet), () => {
     closeSheet();
-    deleteLater(`food-log/${id}`, "Eintrag gelöscht", { onDone: () => { data = null; } });
+    deleteLater(`food-log/${id}`, "Eintrag gelöscht");
   }, "Löschen", "Eintrag löschen?");
 }
 
@@ -1280,29 +1785,38 @@ document.addEventListener("toggle", (ev) => {
 
 export async function mount(el) {
   root = el;
+  data = null; week = null; fast = null; fastRec = null; weekPending = true;   // frisch (z. B. nach Profilwechsel)
   el.addEventListener("click", (ev) => {
     const d = ev.target.closest("[data-day]");
     if (d) {
       const cur = parseYmd(data.date);
       cur.setDate(cur.getDate() + Number(d.dataset.day));
       day = iso(cur) >= todayIso() ? null : iso(cur);
-      data = null;
-      return load();
+      return load();   // alter Stand bleibt gedimmt stehen, bis der neue Tag da ist
+    }
+    const switchTo = ev.target.closest("[data-view]");
+    if (switchTo) {
+      view = switchTo.dataset.view === "fasten" ? "fasten" : "essen";
+      prefs.set("nutriView", view);
+      render();
+      if (view === "fasten") loadFastTips();
+      return;
     }
     const add = ev.target.closest("[data-add]");
     if (add) return openAdd(add.dataset.add);
-    const copy = ev.target.closest("[data-copy-meal]");
-    if (copy) return copyMeal(copy.dataset.copyMeal, copy);
-    const sv = ev.target.closest("[data-save-meal]");
-    if (sv) return saveMeal(sv.dataset.saveMeal);
-    const sm = ev.target.closest("[data-saved-meal]");
-    if (sm) return openSavedMeals(sm.dataset.savedMeal);
+    const menu = ev.target.closest("[data-meal-menu]");
+    if (menu) return openMealMenu(menu.dataset.mealMenu);
+    if (ev.target.closest("[data-details]")) {
+      return openNutrients("Alle Nährwerte", visibleEntries(), targets(data.goals));
+    }
     const entry = ev.target.closest("[data-entry]");
     if (entry) openEntry(Number(entry.dataset.entry));
     const water = ev.target.closest("[data-water]");
     if (water) return addWater(Number(water.dataset.water));
     if (ev.target.closest("[data-fast-start]")) return openFastStart();
     if (ev.target.closest("[data-fast-edit]")) return openFastEdit();
+    if (ev.target.closest("[data-fast-assist]")) return openFastAssistant({ onDone: loadFast });
+    if (ev.target.closest("[data-fast-advice]")) return requestAdvice();
     const stop = ev.target.closest("[data-fast-stop]");
     if (stop) return confirmStop(stop);
   });
