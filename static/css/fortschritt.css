@@ -105,3 +105,5 @@
 #view-fortschritt .body-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 479px) { #view-fortschritt .body-grid.three .body-tile b { font-size: var(--fs-md); } }
 #view-fortschritt .body-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#view-fortschritt .body-grid.three .eyebrow { text-transform: none; letter-spacing: 0; font-size: var(--fs-xs); overflow-wrap: normal; hyphens: none; }
+.card > .btn-row .btn { flex: 1; justify-content: center; }
