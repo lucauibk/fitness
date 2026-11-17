@@ -85,6 +85,17 @@ def hint(profile_id, current):
     return None
 
 
+def brief(profile_id, profile):
+    """Kurzstand fuer "Heute": nur ob Fasten an ist und was gerade laeuft (ohne Verlauf und Tipps).
+    None, wenn weder eine Fastenart gewaehlt ist noch ein Fasten laeuft."""
+    current = running(profile_id)
+    if not profile.get("fasting_kind") and not current:
+        return None
+    last = None if current else next(iter(history(profile_id, limit=1)), None)
+    return {"kind": profile.get("fasting_kind"), "target_hours": target_hours(profile),
+            "running": current, "last_ended_at": last["ended_at"] if last else None}
+
+
 def overview(profile_id, profile):
     current = running(profile_id)
     entries = history(profile_id)

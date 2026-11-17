@@ -3,7 +3,7 @@ Mobility-Vorschlag, Wochen-Streak und Kalorienbilanz."""
 import logging
 from datetime import timedelta
 
-from . import activity, coach_chat, db, mobility, nutrition, readiness, rewards, session_review, stats
+from . import activity, coach_chat, db, fasting, mobility, nutrition, readiness, rewards, session_review, stats
 
 # "Heute" zeigt nur frische Plan-Aenderungen; die ganze Liste steht im Plan unter "Was sich geaendert hat"
 EVENT_DAYS = 3
@@ -99,5 +99,9 @@ def build(profile_id):
         "profile_missing": goal_info["missing"],
         "nutrition": {"totals": kcal_day, "goals": goals,
                      "water_ml": day_nutrition["water_ml"], "water_goal": water_goal,
-                      "burned_kcal": day_nutrition["burned_kcal"]},
+                      "burned_kcal": day_nutrition["burned_kcal"],
+                      # Tagesbudget wie in Ernaehrung: Ziel plus verbrannte kcal (0 = kein Ziel).
+                      # Eine Quelle, damit Heute und Ernaehrung dieselbe Zahl zeigen.
+                      "budget_kcal": nutrition.budget(goals, day_nutrition["burned_kcal"])},
+        "fasting": fasting.brief(profile_id, profile),
     }

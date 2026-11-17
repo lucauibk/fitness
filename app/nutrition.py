@@ -303,6 +303,13 @@ def reference(kcal):
     return out
 
 
+def budget(goals, burned_kcal):
+    """Tagesbudget in kcal: Ziel plus verbrannte kcal (Cardio). 0, wenn es kein Kalorienziel gibt –
+    ohne Ziel gibt es nichts zu verrechnen. Heute und Ernaehrung zeigen genau diese Zahl."""
+    goal = (goals or {}).get("kcal")
+    return goal + (burned_kcal or 0) if goal else 0
+
+
 def day(profile_id, day_iso):
     # Portion des Lebensmittels mitliefern, damit ein Eintrag in Portionen bearbeitet werden kann
     from .portions import units
