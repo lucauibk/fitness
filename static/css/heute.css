@@ -74,3 +74,5 @@
 /* "Mehr": alles Seltene hinter einem Tipp */
 .more-details { margin-top: var(--s2); }
 .more-details > .card, .more-details > a.card { margin-top: var(--s2); }
+.week-card .week-strip { flex: 1; min-width: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

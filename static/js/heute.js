@@ -58,7 +58,7 @@ function checkinRow() {
   const c = data.checkin;
   if (!c) {
     return `<button type="button" class="checkin-row" data-open-checkin>${icon("check")}
-      <span><b>Wie fit bist du heute?</b><small>Schlaf, Energie, Stress – passt die Sätze an</small></span>${icon("right", "chev")}</button>`;
+      <span><b>Wie fit bist du heute?</b><small>Passt die Sätze an</small></span>${icon("right", "chev")}</button>`;
   }
   const tone = { voll: "ok", leichter: "soon", erholung: "urgent" }[c.level.key];
   return `<button type="button" class="checkin-row is-done" data-open-checkin>
@@ -270,7 +270,7 @@ function render() {
   ].filter(Boolean).join("");
   // Reihenfolge: Status → eine Hauptaktion → Tageskacheln → Coach → Mehr
   patch(root, `<div class="week-card" role="button" tabindex="0" data-goto="fortschritt">
-      <span class="streak-count">${icon("flame")} <b>${d.streak.daily}</b> ${d.streak.daily === 1 ? "Tag" : "Tage"} in Folge</span>
+      <span class="streak-count">${icon("flame")} <b>${d.streak.daily}</b> ${d.streak.daily === 1 ? "Tag" : "Tage"}<span class="sr-only"> in Folge</span></span>
       ${weekStrip(d.streak.week)}
     </div>
     ${workoutCard()}
