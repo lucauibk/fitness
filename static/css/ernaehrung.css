@@ -117,7 +117,7 @@
 .add-scroll .form-section:first-child { margin-top: 0; }
 .add-foot { display: flex; align-items: center; gap: var(--s2); flex: 1; min-height: 44px; }
 .add-foot .grow { flex: 1; }
-.add-last { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); }
+.add-last { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); }
 .add-last span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .add-last .link-btn { flex: none; }
 .amount-head { display: flex; align-items: center; gap: var(--s2); }
