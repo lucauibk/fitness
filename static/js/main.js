@@ -116,6 +116,15 @@ async function reload() {
   return loading;
 }
 
+/** Reload aus dem Hintergrund (Netz zurueck, Outbox gesendet): nicht mitten im Tippen einer
+ *  laufenden Einheit – der Neuaufbau wuerde Tastatur und Scrollstand wegnehmen. Er holt
+ *  sich der Reload, sobald das Feld den Fokus verliert. */
+function reloadSoon() {
+  const typing = document.activeElement?.matches("input, textarea") && einheit.hasDraft();
+  if (!typing) return reload();
+  document.addEventListener("focusout", () => setTimeout(reloadSoon, 300), { once: true });
+}
+
 function updateBadge() {
   const badge = $('#nav [data-tab="training"] .count');
   badge.hidden = !einheit.hasDraft();
@@ -287,7 +296,7 @@ window.addEventListener("api-stale", (e) => {
 });
 window.addEventListener("api-online", () => updateBanner("online"));
 window.addEventListener("outbox-changed", () => { updateBanner(); updateBadge(); });
-window.addEventListener("online", () => reload());
+window.addEventListener("online", () => reloadSoon());
 
 function retry() {
   const el = $(`#view-${current}`);
@@ -301,7 +310,7 @@ function retry() {
 
 // ------------------------------------------------------------ Ereignisse
 window.addEventListener("hashchange", show);
-window.addEventListener("data-changed", () => reload());
+window.addEventListener("data-changed", () => reloadSoon());
 window.addEventListener("profile-changed", (e) => {
   const i = profiles.findIndex((x) => x.id === e.detail.id);
   if (i >= 0) profiles[i] = e.detail;

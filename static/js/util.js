@@ -114,6 +114,32 @@ export function empty(title, text = "", action = null) {
 export const skeleton = (rows = 3) => `<div class="skeleton">${
   Array.from({ length: rows }, () => '<div class="sk-row"><i></i><i></i></div>').join("")}</div>`;
 
+/** Platzhalter in der Geometrie der echten Karten: je Eintrag eine Karte mit dieser Mindesthoehe
+ *  (px). So springt die Seite beim Wechsel Platzhalter -> Inhalt nicht. */
+export const skeletonCards = (heights = [160, 120, 120]) => heights
+  .map((h) => `<div class="card skeleton-card" style="min-height:${h}px" aria-hidden="true"><i></i><i></i></div>`).join("");
+
+/** root.innerHTML = html, ohne dass der Nutzer es merkt: offene <details>, Scrollstand und
+ *  das fokussierte Feld (per id/name/data-keep) bleiben erhalten. Fuer Ansichten, die nach
+ *  einer Aktion neu gezeichnet werden, waehrend jemand dran arbeitet. */
+export function patch(root, html) {
+  const open = [...root.querySelectorAll("details")].map((d) => [d.querySelector("summary")?.textContent.trim(), d.open]);
+  const active = root.contains(document.activeElement) ? document.activeElement : null;
+  const key = active && (active.id ? `#${CSS.escape(active.id)}` : active.name ? `[name="${CSS.escape(active.name)}"]` : null);
+  const sel = active && "selectionStart" in active ? [active.selectionStart, active.selectionEnd] : null;
+  const y = window.scrollY;
+  root.innerHTML = html;
+  root.querySelectorAll("details").forEach((d, i) => {
+    const was = open[i];
+    if (was && was[0] === d.querySelector("summary")?.textContent.trim()) d.open = was[1];
+  });
+  if (key) {
+    const el = root.querySelector(key);
+    if (el) { el.focus({ preventScroll: true }); if (sel) try { el.setSelectionRange(...sel); } catch { /* Typ ohne Auswahl */ } }
+  }
+  window.scrollTo(0, y);
+}
+
 // --------------------------------------------------------- Profile
 export const safeColor = (c) => (/^#[0-9a-f]{3,8}$/i.test(c || "") ? c : "var(--faint)");
 
@@ -171,12 +197,13 @@ export function accentTokens(hex) {
   return { accent: toHex(rgb), soft: `rgb(${rgb.join(" ")} / 0.14)`, on, toastAction: toHex(light) };
 }
 
-/** Akzent der App auf die Profilfarbe setzen; ohne gueltige Farbe gilt das Gruen aus style.css. */
+/** Akzent der App auf die Profilfarbe setzen; ohne gueltige Farbe gilt das Gruen aus style.css.
+ *  --ok (erledigt, geschafft) bleibt bewusst immer gruen: Bedeutung, keine Marke. */
 export function applyAccent(hex) {
   const root = document.documentElement.style;
   const t = accentTokens(hex);
   const vars = { "--accent": t?.accent, "--accent-soft": t?.soft, "--on-accent": t?.on,
-    "--ok": t?.accent, "--on-ok": t?.on, "--toast-action": t?.toastAction };
+    "--toast-action": t?.toastAction };
   for (const [k, v] of Object.entries(vars)) {
     if (v) root.setProperty(k, v);
     else root.removeProperty(k);
