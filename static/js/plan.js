@@ -353,6 +353,75 @@ async function move(itemId, dir) {
   } catch (e) { toast(e.message, { error: true }); } finally { moving = false; }
 }
 
+// ------------------------------------------------------- Übungs-Katalog
+const textOf = (v) => (Array.isArray(v) ? v.join("\n") : v || "");
+
+export function editExercise(ex) {
+  const isNew = !ex;
+  const groups = { brust: "Brust", ruecken: "Rücken", beine: "Beine", schultern: "Schultern",
+    arme: "Arme", rumpf: "Rumpf" };
+  const sheet = openSheet({
+    title: isNew ? "Neue Übung" : "Übung",
+    body: `<form id="exForm" class="form">
+      <label class="field">Name<input name="name" maxlength="80" required autofocus
+        value="${esc(ex?.name || "")}"></label>
+      <fieldset class="field"><legend>Muskelgruppe</legend><div class="chips">
+        ${Object.entries(groups).map(([k, label]) => `<label class="chip">
+          <input type="radio" name="muscle_group" value="${k}" ${ex?.muscle_group === k ? "checked" : ""}>${label}</label>`).join("")}
+      </div></fieldset>
+      <details class="field-more"${ex?.pattern ? " open" : ""}>
+        <summary>Bewegungsmuster (für den Assistenten)</summary>
+        <label class="field">Muster
+          <select name="pattern">
+            <option value="">keines – der Assistent nutzt die Übung nicht</option>
+            ${Object.entries(PATTERNS).map(([k, l]) => `<option value="${k}"${ex?.pattern === k ? " selected" : ""}>${l}</option>`).join("")}
+          </select>
+        </label>
+      </details>
+      <details class="field-more"${ex?.instructions ? "" : ""}>
+        <summary>Anleitung (für die Übungsbibliothek)</summary>
+        <label class="field">Gerät<input name="equipment" maxlength="80" value="${esc(ex?.equipment || "")}"
+          placeholder="z. B. Kabelzug"></label>
+        <label class="field">Ausführung – ein Schritt pro Zeile
+          <textarea name="instructions" rows="4" maxlength="2000">${esc(textOf(ex?.instructions))}</textarea></label>
+        <label class="field">Typische Fehler – einer pro Zeile
+          <textarea name="mistakes" rows="3" maxlength="1000">${esc(textOf(ex?.mistakes))}</textarea></label>
+      </details>
+      <fieldset class="field"><legend>Gewicht</legend><div class="segmented">
+        <label><input type="radio" name="unit" value="kg" ${ex?.unit !== "koerper" ? "checked" : ""}><span>mit Gewicht</span></label>
+        <label><input type="radio" name="unit" value="koerper" ${ex?.unit === "koerper" ? "checked" : ""}><span>Körpergewicht</span></label>
+      </div></fieldset>
+    </form>`,
+    footer: footer("exForm", !isNew),
+  });
+  const form = $("#exForm", sheet);
+  submitOnce(form, async () => {
+    try {
+      const body = formData(form);
+      if (isNew) await api("exercises", { method: "POST", body });
+      else await api(`exercises/${ex.id}`, { method: "PATCH", body });
+      closeSheet();
+      exercises = null;
+      toast("Übung gespeichert");
+      changed();
+    } catch (e) { formError(form, e); }
+  });
+  if (!isNew) {
+    // Der Katalog ist fuer alle Profile gemeinsam – geloescht wird auch aus fremden Plaenen.
+    armDelete($("[data-delete]", sheet), async () => {
+      closeSheet();
+      try {
+        const res = await api(`exercises/${ex.id}`, { method: "DELETE" });
+        exercises = null;
+        toast(res.archived
+          ? "Übung ausgeblendet – deine bisherigen Sätze bleiben erhalten"
+          : "Übung gelöscht");
+        changed();
+      } catch (e) { toast(e.message, { error: true }); }
+    }, "Löschen", "Aus allen Plänen löschen?");
+  }
+}
+
 // -------------------------------------------------------- Plan verbessern
 const LEVEL_ICON = { warn: "warn", info: "spark" };
 
