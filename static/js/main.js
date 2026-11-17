@@ -11,7 +11,6 @@ import * as cardio from "./cardio.js";
 import * as ernaehrung from "./ernaehrung.js";
 import * as uebersicht from "./fortschritt.js";
 import * as koerper from "./koerper.js";
-import * as erfolge from "./erfolge.js";
 import * as verlauf from "./verlauf.js";
 import * as profil from "./profil.js";
 import { openCoach } from "./coach.js";
@@ -21,8 +20,7 @@ const training = subTabs("training", {
   uebungen: ["Übungen", uebungen], cardio: ["Cardio", cardio],
 }, "einheit");
 const fortschritt = subTabs("fortschritt", {
-  uebersicht: ["Übersicht", uebersicht], koerper: ["Körper", koerper],
-  erfolge: ["Erfolge", erfolge], verlauf: ["Verlauf", verlauf],
+  uebersicht: ["Übersicht", uebersicht], koerper: ["Körper", koerper], verlauf: ["Verlauf", verlauf],
 }, "uebersicht");
 const WITH_SUBS = { training, fortschritt };
 // Alte Adressen aus der ersten Version

@@ -4,18 +4,6 @@
 #view-fortschritt .stat.lg span { line-height: 1.3; }
 #view-fortschritt .card-head .icon { flex: none; }
 
-/* ---- Übersicht: Kachelraster ruhiger und kürzer */
-#view-fortschritt .tiles { gap: var(--s2); }
-#view-fortschritt .tile { min-height: 0; padding: var(--s4); gap: var(--s3); }
-#view-fortschritt .tile.span { grid-column: 1 / -1; }
-#view-fortschritt .tile-in { min-height: 0; }
-#view-fortschritt .tile-body { min-height: 56px; }
-#view-fortschritt .tile-empty { color: var(--faint); font-size: var(--fs-sm); text-align: center; }
-/* Trainings-Raster: 30 Tage in drei Zeilen, Punkte gut sichtbar */
-#view-fortschritt .dotgrid { grid-template-columns: repeat(10, 1fr); gap: 6px; }
-#view-fortschritt .dotgrid i { border-radius: 50%; }
-#view-fortschritt .dotgrid i.on { box-shadow: 0 0 0 1px var(--c-train); }
-
 /* ---- Letzte 8 Wochen: höhere Balken, Zahl oben, Datum unten */
 #view-fortschritt .weekbars { height: auto; align-items: stretch; gap: var(--s2); margin-top: var(--s3); }
 #view-fortschritt .weekbar { height: auto; justify-content: flex-end; gap: 4px; }
@@ -73,3 +61,47 @@
 #view-fortschritt .cal-legend .today::before { box-shadow: 0 0 0 2px var(--text); width: 8px; height: 8px; margin: 2px; }
 #view-fortschritt .row-icon.lift { background: color-mix(in srgb, var(--c-train) 16%, transparent); color: var(--c-train); }
 #view-fortschritt .row-icon.cardio { background: color-mix(in srgb, var(--c-fat) 16%, transparent); color: var(--c-fat); }
+
+/* ====================================================== Umbau: Übersicht + Körper */
+/* Linie mit rundem Endpunkt (HTML-Punkt statt gestauchtem SVG-Kreis) */
+.spark-wrap { position: relative; height: var(--h, 64px); margin: var(--s2) 0; }
+.spark-wrap .spark { position: absolute; inset: 0; height: 100%; margin: 0; }
+.spark-dot { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.spark-wrap.has-detail { margin-right: 44px; }
+.spark-max, .spark-min { position: absolute; left: calc(100% + var(--s2)); font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.spark-max { top: 0; }
+.spark-min { bottom: 0; }
+.spark-dates { display: flex; justify-content: space-between; margin-right: 44px; color: var(--faint); font-size: var(--fs-xs); }
+
+/* Trend: Balken mit gestrichelter Ziellinie */
+#view-fortschritt .weekbars.trend { position: relative; }
+#view-fortschritt .goal-line { position: absolute; left: 0; right: 0; border-top: 2px dashed var(--line-strong); pointer-events: none; }
+
+/* Muskelgruppen: Zielband 10-20 Sätze */
+#view-fortschritt .muscle-bars .bar { position: relative; height: 10px; background: var(--surface-3); }
+#view-fortschritt .muscle-bars .zone { position: absolute; top: 0; bottom: 0; background: var(--accent-soft); border-radius: 0; }
+#view-fortschritt .muscle-bars .fill { position: absolute; left: 0; top: 0; background: var(--faint); }
+#view-fortschritt .muscle-bars .fill.in-band { background: var(--accent); }
+
+/* Bestleistungen: Mini-Kurve + Veränderung */
+#view-fortschritt .best-spark { flex: none; width: 56px; }
+#view-fortschritt .best-spark .spark-wrap { margin: 0; }
+#view-fortschritt .best-spark .spark-dot { width: 6px; height: 6px; margin: -3px 0 0 -3px; box-shadow: none; }
+#view-fortschritt .row-aside small { display: block; font-size: var(--fs-xs); }
+#view-fortschritt .row-aside small.up { color: var(--ok); }
+#view-fortschritt .row-aside small.down { color: var(--soon); }
+
+/* Abzeichen-Vorschau: drei in einer Reihe, kein langes Raster */
+#view-fortschritt .badges.preview { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: var(--s3); }
+#view-fortschritt .badges.preview .badge { min-height: 120px; }
+.card > .btn-row { margin-top: var(--s3); }
+
+/* Körper: Gewicht als Hero */
+.weight-hero { display: grid; gap: var(--s2); }
+.weight-hero .big { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
+.weight-hero .big b { font-size: var(--fs-xl); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; }
+.weight-hero .big span { color: var(--muted); font-size: var(--fs-sm); }
+.weight-hero .chips { margin: 0; }
+#view-fortschritt .body-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 479px) { #view-fortschritt .body-grid.three .body-tile b { font-size: var(--fs-md); } }
+#view-fortschritt .body-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
