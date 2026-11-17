@@ -107,7 +107,7 @@ async function reload() {
         updateBadge();
       } catch (e) {
         const el = $(`#view-${current}`);
-        if (el.querySelector(".skeleton")) el.innerHTML = errorState(e);
+        if (el.querySelector(".skeleton, .skeleton-card")) el.innerHTML = errorState(e);
         else if (!e.offline) toast(e.message, { error: true });
       }
     } while (again);
@@ -306,6 +306,12 @@ function retry() {
     mounted.delete(current);
   }
   show();
+}
+
+// Hoehe der oberen Leiste: klebende Kopfzeilen in den Ansichten (Ernaehrung) haengen sich darunter.
+const topbar = document.querySelector(".topbar");
+if (topbar && window.ResizeObserver) {
+  new ResizeObserver(() => document.documentElement.style.setProperty("--topbar-h", `${topbar.offsetHeight}px`)).observe(topbar);
 }
 
 // ------------------------------------------------------------ Ereignisse

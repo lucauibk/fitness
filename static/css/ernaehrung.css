@@ -58,3 +58,68 @@
 .nutri-week .week-band .d.miss i { box-shadow: inset 0 0 0 2px var(--soon); }
 .nutri-week .week-band .d .wk-dot { width: .5em; height: .5em; border-radius: 50%; background: var(--accent); }
 .nutri-week .hint { margin: var(--s3) 0 0; }
+
+/* ====================================================== Umbau: ruhiges Tagebuch */
+.view-switch { display: flex; width: 100%; margin-bottom: var(--s3); }
+.view-switch > button { flex: 1; justify-content: center; }
+.is-loading { opacity: .55; transition: opacity var(--dur-fast); pointer-events: none; }
+
+/* Klebender Kopf: Datum + eine Zeile Bilanz; bleibt beim Scrollen sichtbar */
+.nutri-head { position: sticky; top: var(--topbar-h, 54px); z-index: 20; background: var(--bg); padding: var(--s1) 0 var(--s2); margin-bottom: var(--s2); }
+@media (min-width: 900px) { .nutri-head { top: 0; } }
+.nutri-head .date-switch { margin-bottom: 0; }
+.nutri-head .date-switch b { flex: 1; text-align: center; }
+.nutri-sum { margin: 0; text-align: center; color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; min-height: 1.4em; }
+.nutri-sum b { color: var(--text); font-weight: var(--fw-semibold); }
+.fast-chip { margin-left: var(--s2); }
+
+/* Kompakte Bilanz: Ring links, Makros rechts, eine Fusszeile */
+.nutri-card { display: grid; gap: var(--s3); }
+.nutri-top { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: var(--s4); }
+.nutri-top .nutri-macros { gap: var(--s2); }
+.nutri-top .nm { grid-template-columns: 1fr auto; row-gap: 4px; padding: 0; background: none; font-size: var(--fs-sm); }
+.nutri-top .nm .nm-name { grid-column: 1; grid-row: 1; }
+.nutri-top .nm .nm-val { grid-column: 2; grid-row: 1; }
+.nutri-top .nm .nutri-bar { grid-column: 1 / -1; grid-row: 2; height: 6px; }
+.nutri-top .nm.lead { font-size: var(--fs); }
+.nutri-top .nm.lead .nm-name { color: var(--text); font-weight: var(--fw-semibold); }
+.nutri-top .nm.lead .nutri-bar { background: var(--surface-3); }
+.nutri-top .nm.lead .nm-val b { font-size: var(--fs); }
+.nutri-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); color: var(--muted); font-size: var(--fs-sm); }
+.nutri-foot .link-btn { flex: none; }
+.nutri-card .nutri-line { margin: 0; }
+
+/* Wasser: eine Zeile statt Karte mit Glas */
+.water-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--s3); padding: var(--s2) var(--s3); min-height: 56px; }
+.water-row .icon { width: 22px; height: 22px; color: var(--accent); }
+.water-info { display: grid; gap: 4px; min-width: 0; font-size: var(--fs-sm); color: var(--muted); }
+.water-info b { color: var(--text); font-weight: var(--fw-semibold); }
+.water-row .water-quick { flex-wrap: nowrap; }
+
+/* Mahlzeitenkarte: feste Struktur, leer und gefuellt gleich hoch */
+.meal .card-head { align-items: center; }
+.meal-title { flex: 1; min-width: 0; display: grid; }
+.meal-title b { font-weight: var(--fw-semibold); font-size: var(--fs-md); }
+.meal-title .aside { font-size: var(--fs-sm); }
+.meal-empty-row { display: flex; align-items: center; min-height: 56px; padding: 0 var(--s1); color: var(--muted); font-size: var(--fs-sm); }
+
+/* Hinzufuegen-Sheet: feste Hoehe, Kopf bleibt stehen, nur die Liste scrollt */
+.sheet.add-sheet { height: min(85dvh, calc(100dvh - var(--kb, 0px) - 16px)); }
+@media (min-width: 720px) { .sheet.add-sheet { height: min(720px, 86dvh); } }
+.add-sheet .sheet-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.add-top { flex: none; display: grid; gap: var(--s2); padding: var(--s2) var(--s4) var(--s3); border-bottom: 1px solid var(--line); }
+.add-tools { display: flex; gap: var(--s2); }
+.add-tools .btn { flex: 1; }
+.add-tools .btn.icon-only { flex: none; width: var(--tap); padding: 0; }
+.add-meal { display: flex; width: 100%; }
+.add-meal > button { flex: 1; justify-content: center; padding-inline: var(--s1); font-size: var(--fs-sm); }
+.add-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--s3) var(--s4) var(--s4); }
+.add-scroll .form-section:first-child { margin-top: 0; }
+.add-foot { display: flex; align-items: center; gap: var(--s2); flex: 1; min-height: 44px; }
+.add-foot .grow { flex: 1; }
+.add-last { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); }
+.add-last span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.add-last .link-btn { flex: none; }
+.amount-head { display: flex; align-items: center; gap: var(--s2); }
+.amount-head h3 { flex: 1; min-width: 0; }
+.amount-links { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3); }

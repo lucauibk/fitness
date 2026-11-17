@@ -355,7 +355,7 @@ const coarse = () => window.matchMedia("(pointer: coarse)").matches;
  * title: Ueberschrift, body: HTML, footer: HTML fuer die feste Fusszeile.
  * Gibt das Sheet-Element zurueck.
  */
-export function openSheet({ title = "", body = "", footer = "", wide = false } = {}) {
+export function openSheet({ title = "", body = "", footer = "", wide = false, cls = "" } = {}) {
   const replacing = Boolean(document.getElementById("sheet"));
   closeSheet(false, { replacing: true });
   if (!replacing) {
@@ -366,7 +366,7 @@ export function openSheet({ title = "", body = "", footer = "", wide = false } =
   const wrap = document.createElement("div");
   wrap.id = "sheet";
   wrap.innerHTML = `<div class="sheet-backdrop"></div>
-    <div class="sheet ${wide ? "wide" : ""}" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheet ${wide ? "wide" : ""} ${cls}" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
       <div class="sheet-grip" aria-hidden="true"></div>
       <div class="sheet-head">
         <h2 id="sheetTitle">${title}</h2>
