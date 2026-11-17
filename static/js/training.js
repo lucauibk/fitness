@@ -1,11 +1,12 @@
 /** Laufende Einheit. Alles passiert zuerst im Geraetespeicher – ohne Netz, ohne Warten.
  *  Erst beim Beenden geht die komplette Einheit in einem Stueck an den Pi (bzw. in den
  *  Ausgang, wenn gerade keine Verbindung da ist). */
-import { $, $$, api, armDelete, closeSheet, empty, esc, reviewHtml, watchCoach, getProfile,
+import { $, $$, api, armDelete, closeSheet, empty, esc, heroNotesHtml, reviewHtml, watchCoach, getProfile,
   icon, openSheet, prefs, setsSummary, skeleton, toast, WEEKDAYS_LONG } from "./util.js";
+import { weekStrip } from "./erfolge.js";
 import * as outbox from "./outbox.js";
 import { openCoach } from "./coach.js";
-import { cachedExercise, figureHtml, loadExercise, openExercise } from "./uebungen.js";
+import { openExercise } from "./uebungen.js";
 import { nextLabel, nextSet, nextTraining } from "./naechster.js";
 
 let root;
@@ -78,7 +79,7 @@ const doneCount = (draft) => draft.exercises
 const totalCount = (draft) => draft.exercises.reduce((n, e) => n + e.sets.length, 0);
 
 // ------------------------------------------------------------ Anzeige
-function setRow(ex, exIndex, s, i) {
+function setRow(ex, exIndex, s, i, current = false) {
   // Aufwaermsaetze zaehlen nicht mit: nach "W" kommt Satz 1, nicht Satz 2.
   const no = ex.sets.slice(0, i + 1).filter((x) => !x.warmup).length;
   const name = s.warmup ? "Aufwärmsatz" : `Satz ${no}`;
@@ -89,7 +90,7 @@ function setRow(ex, exIndex, s, i) {
   const uniform = ex.last?.length > 1 && ex.last.every((x) => x.reps === ex.last[0].reps && x.weight === ex.last[0].weight);
   const hint = (prev, cur) => (!uniform && prev != null && prev !== cur
     ? `<small class="set-last">zuletzt ${String(prev).replace(".", ",")}</small>` : "");
-  return `<div class="set-row ${s.done ? "is-done" : ""}" data-ex="${exIndex}" data-set="${i}">
+  return `<div class="set-row ${s.done ? "is-done" : ""}${current ? " is-current" : ""}" data-ex="${exIndex}" data-set="${i}">
     <button type="button" class="set-no ${s.warmup ? "is-warmup" : ""}" data-warmup
             aria-label="${s.warmup ? "Aufwärmsatz – antippen für normalen Satz" : `Satz ${no} – antippen für Aufwärmsatz`}"
             aria-pressed="${Boolean(s.warmup)}">${s.warmup ? "W" : no}</button>
@@ -143,10 +144,11 @@ function focusIndex(draft) {
   return draft.exercises.findIndex((e) => e.sets.some((x) => !x.done));
 }
 
-function exerciseCard(ex, index, open) {
+function exerciseCard(ex, index, open, draft) {
   const range = ex.reps_min === ex.reps_max ? `${ex.reps_min}` : `${ex.reps_min}–${ex.reps_max}`;
   const done = ex.sets.filter((s) => s.done).length;
   const complete = done === ex.sets.length;
+  const current = open ? ex.sets.findIndex((x) => !x.done) : -1;   // der Satz, der als Nächstes dran ist
   const unitLabel = ex.unit === "koerper" ? "kg extra" : "kg";
   // Die Kopfzeile ist der Schalter. Zugeklappt reicht Name + Stand, Ziel und letztes Mal
   // braucht man nur bei der Uebung, an der man gerade ist.
@@ -164,37 +166,37 @@ function exerciseCard(ex, index, open) {
     </button>
     ${open ? `<div class="sets">
       <div class="set-head" aria-hidden="true"><span></span><span>Whd.</span><span>${unitLabel}</span><span></span></div>
-      ${ex.sets.map((s, i) => setRow(ex, index, s, i)).join("")}</div>
+      ${ex.sets.map((s, i) => setRow(ex, index, s, i, i === current)).join("")}</div>
+    ${stepsHtml(ex, index, current)}
     <div class="btn-row">
       <button type="button" class="btn small ghost" data-add-set="${index}">${icon("plus")} Satz</button>
       <span class="grow"></span>
-      <button type="button" class="btn small ghost" data-ex-menu="${index}" aria-label="Weitere Aktionen für ${esc(ex.name)}">⋯ Mehr</button>
-    </div>
-    ${guidePanel(ex)}` : ""}
+      <button type="button" class="btn small ghost" data-info="${index}" aria-label="Anleitung und Muskeln: ${esc(ex.name)}">${icon("dumbbell")} Anleitung</button>
+      <button type="button" class="icon-btn" data-ex-menu="${index}" aria-label="Weitere Aktionen für ${esc(ex.name)}">${icon("more")}</button>
+    </div>` : ""}
     ${ex.estimate && !ex.calibrated && done >= 1 && !complete ? calibRow(ex, index) : ""}
-    ${complete ? rpeRow(ex, index) : ""}
+    ${complete ? (open || draft?.rpeFor === index ? rpeRow(ex, index) : rpeSummary(ex)) : ""}
   </div>`;
 }
 
-/** Muskel-Grafik der aufgeklappten Uebung (kein Text) – immer sichtbar, solange sie ausgewaehlt ist.
- *  Aus dem Speicher, wenn schon geladen; sonst Platzhalter, den fillGuides() nach dem Laden fuellt,
- *  ohne die Seite neu zu bauen (das wuerde ein gerade bearbeitetes Feld den Fokus kosten). */
-function guidePanel(ex) {
-  if (!ex.exercise_id) return "";
-  const cached = cachedExercise(ex.exercise_id);
-  return `<section class="ex-guide" data-guide="${ex.exercise_id}" aria-label="Muskeln: ${esc(ex.name)}">${
-    cached ? figureHtml(cached) : `<p class="hint">Muskel-Grafik wird geladen …</p>`}</section>`;
+/** Kurz angeben, wie schwer die Übung war – bleibt nach dem Weiterklappen als kleine Zeile stehen. */
+function rpeSummary(ex) {
+  const s = lastWorkSet(ex);
+  return s?.rpe ? `<p class="hint rpe-sum">Anstrengung RPE ${s.rpe}</p>` : "";
 }
 
-/** Fehlende Grafiken der aufgeklappten Karten nachladen und einsetzen. */
-function fillGuides() {
-  for (const el of $$("[data-guide]", root)) {
-    const id = Number(el.dataset.guide);
-    if (cachedExercise(id)) continue;
-    const put = (html) => { for (const t of $$(`[data-guide="${id}"]`, root)) t.innerHTML = html; };
-    loadExercise(id).then((ex) => put(figureHtml(ex)))
-      .catch((e) => put(`<p class="hint">${e.offline ? "Die Muskel-Grafik ist offline noch nicht verfügbar." : esc(e.message)}</p>`));
-  }
+/** Plus/Minus für den aktuellen Satz: Wiederholungen ±1, Gewicht ±2,5 – ohne Tastatur. Nur Feld
+ *  und Entwurf werden gepatcht, nichts wird neu gezeichnet. */
+function stepsHtml(ex, exIndex, cur) {
+  const s = ex.sets[cur];
+  if (!s) return `<div class="set-steps" data-steps="${exIndex}"></div>`;
+  const kgLabel = ex.unit === "koerper" ? "kg extra" : "kg";
+  const btn = (field, delta, name, label) => `<button type="button" class="icon-btn tonal-icon" data-step-field="${field}"
+    data-delta="${delta}" data-ex="${exIndex}" data-set="${cur}" aria-label="${name}">${icon(label)}</button>`;
+  return `<div class="set-steps" data-steps="${exIndex}">
+    <div class="step-group" role="group" aria-label="Wiederholungen">${btn("reps", -1, "Eine Wiederholung weniger", "minus")}<span>Whd.</span>${btn("reps", 1, "Eine Wiederholung mehr", "plus")}</div>
+    <div class="step-group" role="group" aria-label="Gewicht">${btn("weight", -2.5, "2,5 Kilo weniger", "minus")}<span>${kgLabel}</span>${btn("weight", 2.5, "2,5 Kilo mehr", "plus")}</div>
+  </div>`;
 }
 
 /** Seltene Aktionen einer Uebung – vorher fuenf Knoepfe unter jeder Karte. */
@@ -211,9 +213,10 @@ function openExerciseMenu(index) {
     body: `<div class="menu-list">
       ${item("data-m-info", "dumbbell", "Anleitung")}
       ${item("data-m-warmup", "plus", "Aufwärmsatz vorne einfügen")}
+      ${ex.pattern ? item("data-m-swap", "swap", "Übung tauschen") : ""}
+      <p class="menu-sep">Weitere</p>
       ${ex.sets.length > 1 ? item("data-m-drop-set", "x", `Letzten Satz entfernen${last.done ? " (abgehakt)" : ""}`) : ""}
       ${ex.unit === "kg" ? item("data-m-plates", "weight", "Scheiben ausrechnen") : ""}
-      ${ex.pattern ? item("data-m-swap", "swap", "Übung tauschen") : ""}
       ${ex.pattern ? item("data-m-pain", "warn", "Schmerz bei dieser Übung") : ""}
       ${item("data-m-drop-ex", "trash", "Übung entfernen", "danger")}
     </div>`,
@@ -289,29 +292,29 @@ function openPlates(exIndex) {
   paintResult();
 }
 
+function blockHint(b) {
+  return b ? `Woche ${b.week}/${b.weeks} · ${b.deload ? "Entlastung" : `${b.rir} in Reserve`}` : "";
+}
+
 function renderDraft(draft) {
   const done = doneCount(draft);
   const total = totalCount(draft);
-  root.innerHTML = `<div class="page-head">
-      <h2 class="page-title">${esc(draft.title || "Einheit")}</h2>
-      ${draft.block ? `<p class="hint">Woche ${draft.block.week} von ${draft.block.weeks} · ${draft.block.deload
-        ? "Entlastung: leichter, nichts bis ans Limit" : `Ziel: ${draft.block.rir} Wiederholungen in Reserve`}</p>` : ""}
-      <p class="page-sub"><span data-elapsed>${elapsed(draft)}</span> · ${done}/${total} Sätze</p>
+  const focus = focusIndex(draft);
+  root.innerHTML = `<div class="run-head">
+      <button type="button" class="icon-btn" data-minimize aria-label="Zu Heute – die Einheit läuft weiter">${icon("left")}</button>
+      <div class="run-title"><b>${esc(draft.title || "Einheit")}</b>
+        <span class="page-sub"><span data-elapsed>${elapsed(draft)}</span> · ${done}/${total} Sätze${draft.block ? ` · ${esc(blockHint(draft.block))}` : ""}</span></div>
+      <button type="button" class="icon-btn" data-run-menu aria-label="Mehr zur Einheit">${icon("more")}</button>
     </div>
     <div class="progress lg"><i style="width:${total ? (done / total) * 100 : 0}%"></i></div>
-    ${draft.exercises.map((ex, i) => exerciseCard(ex, i, i === focusIndex(draft))).join("")}
+    ${draft.exercises.map((ex, i) => exerciseCard(ex, i, i === focus, draft)).join("")}
     <div class="btn-row wide">
       <button type="button" class="btn ghost" data-add-ex>${icon("plus")} Übung</button>
     </div>
-    <label class="field">Notiz<textarea name="notes" rows="2" data-notes
-      placeholder="optional, z. B. Rücken hat gezwickt">${esc(draft.notes || "")}</textarea></label>
     <div class="btn-row wide sticky-actions">
-      <button type="button" class="btn danger ghost" data-cancel>Verwerfen</button>
-      <span class="grow"></span>
       <button type="button" class="coach-fab" data-coach-session aria-label="Coach fragen" title="Coach fragen">${icon("chat")}</button>
-      <button type="button" class="btn primary" data-finish>${icon("check")} Einheit beenden</button>
+      <button type="button" class="btn primary grow" data-finish>${icon("check")} Einheit beenden</button>
     </div>`;
-  fillGuides();
   if (!timer) {
     timer = setInterval(() => {
       const el = $("[data-elapsed]", root);
@@ -319,20 +322,42 @@ function renderDraft(draft) {
       if (el && d) el.textContent = elapsed(d);
     }, 30000);
   }
-  // Einmal pro Aufbau registrieren, nicht im delegierten Klick-Handler – sonst haengt
-  // jeder Tipp einen weiteren Listener an denselben (neu gebauten) Knoten.
-  armDelete($("[data-cancel]", root), () => {
+  if (!prefs.get("hint.warmup") && draft.exercises.length) {
+    prefs.set("hint.warmup", true);
+    toast("Tipp: Satznummer antippen macht daraus einen Aufwärmsatz.", { duration: 6000 });
+  }
+}
+
+/** Notiz, Verwerfen: selten gebraucht, deshalb hinter dem "⋯" im Kopf statt als Leiste unten. */
+function openRunMenu() {
+  const item = (attrs, name, label, cls = "") =>
+    `<button type="button" class="menu-item ${cls}" ${attrs}>${icon(name)} ${label}</button>`;
+  const sheet = openSheet({ title: "Einheit", body: `<div class="menu-list">
+    ${item("data-m-notes", "edit", "Notiz zur Einheit")}
+    ${item("data-m-discard", "trash", "Einheit verwerfen", "danger")}</div>` });
+  const after = (fn) => () => { closeSheet(); fn(); };
+  sheet.querySelector("[data-m-notes]").addEventListener("click", after(openNotes));
+  armDelete(sheet.querySelector("[data-m-discard]"), after(() => {
     stopRest();
     clearDraft();
     today = null;
     toast("Einheit verworfen");
     window.dispatchEvent(new CustomEvent("outbox-changed"));
     load();
-  }, "Verwerfen", "Alles verwerfen?");
-  if (!prefs.get("hint.warmup") && draft.exercises.length) {
-    prefs.set("hint.warmup", true);
-    toast("Tipp: Satznummer antippen macht daraus einen Aufwärmsatz.", { duration: 6000 });
-  }
+  }), "Einheit verwerfen", "Alles verwerfen?");
+}
+
+function openNotes() {
+  const draft = getDraft();
+  if (!draft) return;
+  const sheet = openSheet({ title: "Notiz zur Einheit", body: `<label class="field">Notiz
+    <textarea name="notes" rows="4" maxlength="500" data-notes placeholder="optional, z. B. Rücken hat gezwickt">${esc(draft.notes || "")}</textarea></label>`,
+    footer: `<button type="button" class="btn primary" data-close>Fertig</button>` });
+  // Bei jedem Tastendruck in den Entwurf, wie die Zahlen in den Sätzen
+  $("[data-notes]", sheet).addEventListener("input", (ev) => {
+    const d = getDraft();
+    if (d) { d.notes = ev.target.value; saveDraft(d); }
+  });
 }
 
 function renderStart() {
@@ -345,16 +370,27 @@ function renderStart() {
   }
   const rec = t.day;
   const lvl = t.checkin?.level;
-  const others = t.days.filter((d) => d.id !== rec?.id);
+  const tw = t.today_workout;
   const nt = nextTraining(t);
-  root.innerHTML = `${lvl && lvl.key !== "voll" ? `<p class="callout">${icon("warn")} ${esc(lvl.title)} – die Vorgaben sind angepasst.</p>` : ""}
-    ${nt ? `<div class="card hero hero-main">
+  // Heute schon trainiert: das sagt die Karte, statt wieder "Einheit starten" anzubieten (wie auf Heute).
+  const others = t.days.filter((d) => tw || d.id !== rec?.id);
+  const hero = tw ? `<div class="card hero hero-main is-done">
+      <p class="eyebrow">${icon("check")} Heute erledigt</p>
+      <h3 class="hero-title">${esc(tw.day_label)}</h3>
+      <p class="hint">${esc(tw.headline)}</p>
+      <div class="btn-row hero-cta"><a class="btn tonal" href="#fortschritt/verlauf">Im Verlauf ansehen</a></div>
+    </div>`
+    : nt ? `<div class="card hero hero-main">
       <p class="eyebrow">${esc(nt.eyebrow)}</p>
       <h3 class="hero-title">${esc(nt.label)}</h3>
       <p class="meta-line">${nt.meta.map((m) => `<span>${esc(m)}</span>`).join("")}</p>
+      ${lvl && lvl.key !== "voll" ? `<p class="callout">${icon("warn")} ${esc(lvl.title)} – die Vorgaben sind angepasst.</p>` : ""}
+      ${heroNotesHtml(t)}
       <div class="btn-row hero-cta"><button type="button" class="btn primary" data-start="${nt.id}">${icon("play")} Einheit starten</button></div>
-    </div>` : ""}
-    <h3 class="section-title">Anderes Training</h3>
+    </div>` : "";
+  root.innerHTML = `${hero}
+    ${t.streak?.week ? `<div class="card week-card" aria-label="Diese Woche">${weekStrip(t.streak.week)}</div>` : ""}
+    <h3 class="section-title">${tw ? "Nochmal trainieren" : "Anderes Training"}</h3>
     <div class="list start-list">${others.map((d) => `<div class="row-item" role="button" tabindex="0" data-start="${d.id}">
         <div class="row-main"><div class="row-title">${esc(d.label)}</div>
           ${d.weekdays?.length ? `<div class="row-meta"><span>${d.weekdays.map((i) => WEEKDAYS_LONG[i]).join(", ")}</span></div>` : ""}</div>
@@ -414,6 +450,7 @@ function updateSet(exIndex, setIndex, fn) {
   const ex = draft.exercises[exIndex];
   const s = ex.sets[setIndex];
   fn(s, ex);
+  if (ex.sets.every((x) => x.done)) draft.rpeFor = exIndex;   // nur die zuletzt fertige Übung fragt nach der Anstrengung
   saveDraft(draft);
 
   const row = root.querySelector(`.set-row[data-ex="${exIndex}"][data-set="${setIndex}"]`);
@@ -422,12 +459,26 @@ function updateSet(exIndex, setIndex, fn) {
   const card = $$(".exercise-card", root)[exIndex];
   if (card) {
     const done = ex.sets.filter((x) => x.done).length;
-    card.classList.toggle("is-done", done === ex.sets.length);
+    const complete = done === ex.sets.length;
+    card.classList.toggle("is-done", complete);
     const pill = $(".pill", card);
     pill.textContent = `${done}/${ex.sets.length}`;
-    pill.classList.toggle("ok", done === ex.sets.length);
-    $(".rpe-row", card)?.remove();
-    if (done === ex.sets.length) card.insertAdjacentHTML("beforeend", rpeRow(ex, exIndex));
+    pill.classList.toggle("ok", complete);
+    // Nur die RPE-Zeile tauschen: die Kalibrierfrage ("war das Startgewicht okay?") traegt dieselbe
+    // Klasse rpe-row und wurde frueher beim naechsten Haken mit weggeraeumt, bevor man sie sah.
+    $(".rpe-row:not(.calib)", card)?.remove();
+    $(".rpe-sum", card)?.remove();
+    if (complete) {
+      $(".calib", card)?.remove();
+      card.insertAdjacentHTML("beforeend", rpeRow(ex, exIndex));
+    } else if (ex.estimate && !ex.calibrated && done >= 1) {
+      if (!$(".calib", card)) card.insertAdjacentHTML("beforeend", calibRow(ex, exIndex));
+    } else $(".calib", card)?.remove();
+    // Aktueller Satz und Plus/Minus ziehen mit
+    const cur = ex.sets.findIndex((x) => !x.done);
+    $$(".set-row", card).forEach((r, k) => r.classList.toggle("is-current", k === cur));
+    const steps = $(".set-steps", card);
+    if (steps) steps.outerHTML = stepsHtml(ex, exIndex, cur);
   }
 
   const done = doneCount(draft);
@@ -931,10 +982,34 @@ export async function mount(el) {
       if (res?.s.done && res.ex.sets.every((x) => x.done)) advanceFocus(i);
       return;
     }
+    if (t("[data-minimize]")) { location.hash = "heute"; return; }   // Einheit läuft weiter, Entwurf bleibt
+    if (t("[data-run-menu]")) return openRunMenu();
+    const info = t("[data-info]");
+    if (info) {
+      const e = getDraft()?.exercises[Number(info.dataset.info)];
+      if (e) openExercise(e.exercise_id, { session: true });
+      return;
+    }
+    const stepBtn = t("[data-step-field]");
+    if (stepBtn) {
+      const [i, j] = [Number(stepBtn.dataset.ex), Number(stepBtn.dataset.set)];
+      const field = stepBtn.dataset.stepField;
+      const input = root.querySelector(`.set-row[data-ex="${i}"][data-set="${j}"] [data-field="${field}"]`);
+      if (!input) return;
+      const old = input.value === "" ? null : Number(input.value);
+      const next = Math.max(0, Math.round(((old || 0) + Number(stepBtn.dataset.delta)) * 100) / 100);
+      input.value = next;
+      setValue(i, j, field, next);
+      fillFollowing(i, j, field, old, next);
+      return;
+    }
     const focus = t("[data-focus]");
     if (focus) {
       const i = Number(focus.dataset.focus);
-      return update((d) => { d.focus = focusIndex(d) === i ? -1 : i; });
+      update((d) => { d.focus = focusIndex(d) === i ? -1 : i; });
+      // Die aufgeklappte Karte immer ins Bild holen – sonst springt die Seite und man sucht sie
+      $$(".exercise-card", root)[i]?.scrollIntoView({ block: "start", behavior: "auto" });
+      return;
     }
     const calib = t("[data-calib]");
     if (calib) {

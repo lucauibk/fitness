@@ -1,7 +1,7 @@
 /** Heute: eine Hauptaktion (Training, mit dem Check-in als Zeile darin), darunter drei Kacheln
  *  (Kalorien, Wasser, Fasten), der Coach in einer Zeile und alles Weitere hinter "Mehr". */
 import { $, api, closeSheet, empty, entryDay, esc, reviewHtml, watchCoach, fmtWeight, getProfile, GROUPS, icon, openSheet,
-  patch, prefs, setsSummary, sheetClosed, skeleton, skeletonCards, toast, WEEKDAYS_LONG, busy } from "./util.js";
+  heroNotesHtml, patch, prefs, setsSummary, sheetClosed, skeleton, skeletonCards, toast, WEEKDAYS_LONG, busy } from "./util.js";
 import { startDraft, hasDraft, getDraft } from "./training.js";
 import { weekStrip } from "./erfolge.js";
 import * as outbox from "./outbox.js";
@@ -178,10 +178,7 @@ function workoutCard() {
       <p class="eyebrow">${esc(nt.eyebrow)}</p>
       <h3 class="hero-title">${esc(nt.label)}</h3>
       <p class="meta-line">${nt.meta.map((m) => `<span>${esc(m)}</span>`).join("")}</p>
-      ${d.block?.deload ? `<p class="callout">${icon("warn")} Entlastungswoche: leichter trainieren, nichts bis ans Limit – so erholen sich Muskeln und Gelenke.</p>` : ""}
-      ${d.sore_today?.length ? `<p class="callout">${icon("warn")} Muskelkater in ${esc(d.sore_today.map((g) => GROUPS[g]).join(", "))} –
-        die Sätze sind reduziert.${d.alternative ? ` Alternativ heute <button type="button" class="link-btn" data-start="${d.alternative.id}">${esc(d.alternative.label)} trainieren</button>.` : ""}</p>` : ""}
-      ${d.note === "erholung" ? `<p class="callout">${icon("warn")} Gestern waren dieselben Muskeln dran – lass sie heute ruhen oder wähle „Anderer Tag“.</p>` : ""}
+      ${heroNotesHtml(d)}
       ${running ? "" : checkinRow()}
       <div class="btn-row hero-cta">
         ${running

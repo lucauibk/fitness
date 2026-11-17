@@ -111,6 +111,20 @@ export function empty(title, text = "", action = null) {
   </div>`;
 }
 
+/** Hinweise unter dem "Als Nächstes"-Hero (Entlastung, Muskelkater, Erholung) – eine Quelle für Heute
+ *  und Training/Einheit. t = Antwort von /api/today. */
+export function heroNotesHtml(t) {
+  const out = [];
+  if (t.block?.deload) out.push("Entlastungswoche: leichter trainieren, nichts bis ans Limit – so erholen sich Muskeln und Gelenke.");
+  if (t.sore_today?.length) {
+    const alt = t.alternative
+      ? ` Alternativ heute <button type="button" class="link-btn" data-start="${t.alternative.id}">${esc(t.alternative.label)} trainieren</button>.` : "";
+    out.push(`Muskelkater in ${esc(t.sore_today.map((g) => GROUPS[g]).join(", "))} – die Sätze sind reduziert.${alt}`);
+  }
+  if (t.note === "erholung") out.push("Gestern waren dieselben Muskeln dran – lass sie heute ruhen oder wähle „Anderer Tag“.");
+  return out.map((x) => `<p class="callout">${icon("warn")} ${x}</p>`).join("");
+}
+
 export const skeleton = (rows = 3) => `<div class="skeleton">${
   Array.from({ length: rows }, () => '<div class="sk-row"><i></i><i></i></div>').join("")}</div>`;
 
