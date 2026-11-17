@@ -42,7 +42,7 @@
 .run-title .page-sub { margin: 0; font-size: var(--fs-sm); }
 
 /* Der Satz, der als Nächstes dran ist, hebt sich ab; erledigte treten zurück */
-.set-row.is-current { margin-inline: calc(var(--s2) * -1); padding-inline: var(--s2); border-radius: var(--r2); background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.set-row.is-current { padding-inline: var(--s1); border-radius: var(--r2); background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .set-steps { display: flex; justify-content: space-between; gap: var(--s3); margin-top: var(--s2); min-height: var(--tap); }
 .step-group { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: var(--s2); padding: 2px; border-radius: var(--r2); background: var(--surface-2); }
 .step-group span { color: var(--muted); font-size: var(--fs-sm); }

@@ -112,8 +112,8 @@ function render() {
   const visible = splits.filter((s) => !isPendingDelete(`splits/${s.id}`));
   const open = detail && visible.some((s) => s.id === detail.id) ? detail : null;
 
-  root.innerHTML = `<div class="btn-row wide page-actions"><button type="button" class="btn primary" data-wizard>${icon("spark")} Neuen Plan erstellen</button></div>
-    ${blockCard()}<div class="list split-list">${visible.map((s) => `
+  // Ein einziger Split: kein Listen-Kopf, der Name steht über den Tagen. Erst ab zwei Splits wird gewählt.
+  root.innerHTML = `${blockCard()}${visible.length > 1 ? `<div class="list split-list">${visible.map((s) => `
       <div class="row-item ${s.active ? "is-active" : ""}">
         <button type="button" class="row-main row-btn" data-open-split="${s.id}" aria-expanded="${open?.id === s.id}">
           <span class="row-title">${esc(s.name)}</span>
@@ -121,10 +121,9 @@ function render() {
             <span>${s.days.map((d) => esc(d.label)).join(" · ") || "noch leer"}</span></span>
         </button>
         ${s.active ? `<span class="pill ok">aktiv</span>` : `<button type="button" class="btn small tonal" data-activate="${s.id}">Wechseln</button>`}
-        <button type="button" class="icon-btn" data-delete-split="${s.id}" aria-label="„${esc(s.name)}“ löschen">${icon("trash")}</button>
-      </div>`).join("")}</div>
+      </div>`).join("")}</div>` : ""}
     ${open ? `<div class="plan-head">
-        <h3 class="group-title">Trainingstage <span class="count-muted">${open.days.length}</span></h3>
+        <h3 class="group-title">${visible.length > 1 ? "Trainingstage" : esc(open.name)} <span class="count-muted">${open.days.length}</span></h3>
         <button type="button" class="btn small ghost" data-plan-menu aria-label="Aktionen für den Plan">⋯ Plan</button>
       </div>
       ${open.days.filter((d) => !isPendingDelete(`split-days/${d.id}`)).map(dayCard).join("")}
@@ -212,25 +211,6 @@ function removePlan(split) {
   });
   splits = null;
   render();
-}
-
-/** Zweiter Tipp bestätigt – ein versehentliches Löschen soll nicht gehen. */
-let confirmDelete = null;
-function askDeletePlan(split, btn) {
-  if (confirmDelete?.id === split.id) {
-    clearTimeout(confirmDelete.timer);
-    confirmDelete = null;
-    return removePlan(split);
-  }
-  clearTimeout(confirmDelete?.timer);
-  btn.classList.add("armed");
-  btn.setAttribute("aria-label", `„${split.name}“ wirklich löschen – nochmal tippen`);
-  confirmDelete = { id: split.id, timer: setTimeout(() => {
-    confirmDelete = null;
-    btn.classList.remove("armed");
-    btn.setAttribute("aria-label", `„${split.name}“ löschen`);
-  }, 3500) };
-  toast(`Nochmal tippen, um „${split.name}“ zu löschen`);
 }
 
 function editDay(day, splitId) {
@@ -371,107 +351,6 @@ async function move(itemId, dir) {
     refocus = `[data-move="${itemId}"][data-dir="${dir}"]`;
     changed();
   } catch (e) { toast(e.message, { error: true }); } finally { moving = false; }
-}
-
-// ------------------------------------------------------- Übungs-Katalog
-async function manageExercises() {
-  const wait = openSheet({ title: "Übungen verwalten", body: skeleton(6) });
-  try { exercises = await api("exercises"); } catch (e) { closeSheet(); return toast(e.message, { error: true }); }
-  if (!wait.isConnected) return;
-  const labels = { brust: "Brust", ruecken: "Rücken", beine: "Beine", schultern: "Schultern",
-    arme: "Arme", rumpf: "Rumpf" };
-  const listHtml = (q = "") => {
-    const ms = exercises.filter((e) => !e.archived && e.name.toLowerCase().includes(q));
-    return ms.map((e) => `<div class="row-item" role="button" tabindex="0" data-ex="${e.id}">
-      <div class="row-main"><div class="row-title">${esc(e.name)}</div>
-        <div class="row-meta"><span>${labels[e.muscle_group] || "–"}</span>
-          ${e.unit === "koerper" ? `<span>ohne Zusatzgewicht</span>` : ""}</div>
-      </div>${icon("edit", "chev")}</div>`).join("")
-      || `<p class="hint pad">Keine Übung passt.</p>`;
-  };
-  const sheet = openSheet({
-    title: "Übungen",
-    body: `<label class="search">${icon("search")}<input type="search" data-q
-        placeholder="Übung suchen…" aria-label="Übung suchen"></label>
-      <div class="btn-row"><button type="button" class="btn small tonal" data-new-ex>${icon("plus")} Neue Übung</button></div>
-      <div class="list" data-list>${listHtml()}</div>`,
-    wide: true,
-  });
-  const q = $("[data-q]", sheet);
-  q.addEventListener("input", () => { $("[data-list]", sheet).innerHTML = listHtml(q.value.trim().toLowerCase()); });
-  sheet.addEventListener("click", (ev) => {
-    if (ev.target.closest("[data-new-ex]")) return editExercise(null);
-    const row = ev.target.closest("[data-ex]");
-    if (row) editExercise(exercises.find((e) => e.id === Number(row.dataset.ex)));
-  });
-}
-
-const textOf = (v) => (Array.isArray(v) ? v.join("\n") : v || "");
-
-export function editExercise(ex) {
-  const isNew = !ex;
-  const groups = { brust: "Brust", ruecken: "Rücken", beine: "Beine", schultern: "Schultern",
-    arme: "Arme", rumpf: "Rumpf" };
-  const sheet = openSheet({
-    title: isNew ? "Neue Übung" : "Übung",
-    body: `<form id="exForm" class="form">
-      <label class="field">Name<input name="name" maxlength="80" required autofocus
-        value="${esc(ex?.name || "")}"></label>
-      <fieldset class="field"><legend>Muskelgruppe</legend><div class="chips">
-        ${Object.entries(groups).map(([k, label]) => `<label class="chip">
-          <input type="radio" name="muscle_group" value="${k}" ${ex?.muscle_group === k ? "checked" : ""}>${label}</label>`).join("")}
-      </div></fieldset>
-      <details class="field-more"${ex?.pattern ? " open" : ""}>
-        <summary>Bewegungsmuster (für den Assistenten)</summary>
-        <label class="field">Muster
-          <select name="pattern">
-            <option value="">keines – der Assistent nutzt die Übung nicht</option>
-            ${Object.entries(PATTERNS).map(([k, l]) => `<option value="${k}"${ex?.pattern === k ? " selected" : ""}>${l}</option>`).join("")}
-          </select>
-        </label>
-      </details>
-      <details class="field-more"${ex?.instructions ? "" : ""}>
-        <summary>Anleitung (für die Übungsbibliothek)</summary>
-        <label class="field">Gerät<input name="equipment" maxlength="80" value="${esc(ex?.equipment || "")}"
-          placeholder="z. B. Kabelzug"></label>
-        <label class="field">Ausführung – ein Schritt pro Zeile
-          <textarea name="instructions" rows="4" maxlength="2000">${esc(textOf(ex?.instructions))}</textarea></label>
-        <label class="field">Typische Fehler – einer pro Zeile
-          <textarea name="mistakes" rows="3" maxlength="1000">${esc(textOf(ex?.mistakes))}</textarea></label>
-      </details>
-      <fieldset class="field"><legend>Gewicht</legend><div class="segmented">
-        <label><input type="radio" name="unit" value="kg" ${ex?.unit !== "koerper" ? "checked" : ""}><span>mit Gewicht</span></label>
-        <label><input type="radio" name="unit" value="koerper" ${ex?.unit === "koerper" ? "checked" : ""}><span>Körpergewicht</span></label>
-      </div></fieldset>
-    </form>`,
-    footer: footer("exForm", !isNew),
-  });
-  const form = $("#exForm", sheet);
-  submitOnce(form, async () => {
-    try {
-      const body = formData(form);
-      if (isNew) await api("exercises", { method: "POST", body });
-      else await api(`exercises/${ex.id}`, { method: "PATCH", body });
-      closeSheet();
-      exercises = null;
-      toast("Übung gespeichert");
-      changed();
-    } catch (e) { formError(form, e); }
-  });
-  if (!isNew) {
-    // Der Katalog ist fuer alle Profile gemeinsam – geloescht wird auch aus fremden Plaenen.
-    armDelete($("[data-delete]", sheet), async () => {
-      closeSheet();
-      try {
-        const res = await api(`exercises/${ex.id}`, { method: "DELETE" });
-        exercises = null;
-        toast(res.archived
-          ? "Übung ausgeblendet – deine bisherigen Sätze bleiben erhalten"
-          : "Übung gelöscht");
-        changed();
-      } catch (e) { toast(e.message, { error: true }); }
-    }, "Löschen", "Aus allen Plänen löschen?");
-  }
 }
 
 // -------------------------------------------------------- Plan verbessern
@@ -665,8 +544,6 @@ function openPlanMenu() {
       const profile = await api(`profiles/${getProfile()}`).catch(() => null);
       openWizard(profile);
     } },
-    { label: "Leeren Split anlegen", icon: "plus", run: () => editSplit(null) },
-    { label: "Übungskatalog bearbeiten", icon: "dumbbell", run: manageExercises },
   ]);
 }
 
@@ -726,10 +603,6 @@ export async function mount(el) {
     const move_ = t("[data-move]");
     if (move_) { ev.stopPropagation(); return move(Number(move_.dataset.move), Number(move_.dataset.dir)); }
     if (t("[data-add-split]")) return editSplit(null);
-    const editS = t("[data-edit-split]");
-    if (editS) return editSplit(splits.find((s) => s.id === Number(editS.dataset.editSplit)));
-    const delS = t("[data-delete-split]");
-    if (delS) return askDeletePlan(splits.find((x) => x.id === Number(delS.dataset.deleteSplit)), delS);
     const openS = t("[data-open-split]");
     if (openS) {
       try {
@@ -753,8 +626,6 @@ export async function mount(el) {
       if (item) return editItem(item);
     }
     if (t("[data-plan-menu]")) return openPlanMenu();
-    if (t("[data-exercises]")) return manageExercises();
-    if (t("[data-check]")) return improvePlan();
     if (t("[data-wizard]")) {
       const profile = await api(`profiles/${getProfile()}`).catch(() => null);
       return openWizard(profile);
