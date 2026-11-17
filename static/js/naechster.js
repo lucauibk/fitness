@@ -35,3 +35,18 @@ export function nextLabel(next) {
     : next.reps != null ? `${next.reps} Whd.` : weight;
   return [next.name, next.warmup ? "Aufwärmsatz" : `Satz ${next.no}`, load].filter(Boolean).join(" · ");
 }
+
+/** Darstellung von "Nächstes Training" – eine Quelle für Heute und Training/Einheit.
+ *  Nimmt die Antwort von /api/today, liefert Überschrift, Titel und Meta-Teile (ohne Markup). */
+export function nextTraining(t) {
+  const day = t?.day;
+  if (!day) return null;
+  const exercises = day.exercises || [];
+  const meta = [`${exercises.length} Übungen`, `${exercises.reduce((n, e) => n + e.target_sets, 0)} Sätze`];
+  if (t.position) meta.push(`Tag ${t.position} von ${t.day_count}`);
+  if (t.block) meta.push(`Woche ${t.block.week}/${t.block.weeks}${t.block.deload ? " (Entlastung)" : ` · ${t.block.rir} in Reserve`}`);
+  return {
+    eyebrow: t.fixed ? "Heute geplant" : t.note === "nachgeholt" ? "Nachholen · verschoben" : "Als Nächstes dran",
+    label: day.label, id: day.id, meta,
+  };
+}

@@ -1,0 +1,29 @@
+/* Profil – aus style.css hierher gezogen (unveraendert, ausser: .facts/.fact ersetzt durch .stats/.stat) */
+/* ============================================================ Profil */
+.profile-id { display: flex; align-items: center; gap: var(--s3); }
+.avatar {
+  flex: none; display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%;
+  background: color-mix(in srgb, var(--c) 22%, var(--surface-2)); color: var(--c);
+  font-size: var(--fs-lg); font-weight: 700; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--c) 55%, transparent);
+}
+.profile-name { margin: 0; font-size: var(--fs-lg); font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+.profile-head .btn-row { margin-top: var(--s3); }
+.goal-kcal { display: flex; align-items: baseline; gap: var(--s2); margin: var(--s2) 0 var(--s3); }
+.goal-kcal b { font-size: var(--fs-xl); font-weight: 700; letter-spacing: -0.01em; }
+.goal-kcal span { color: var(--muted); font-size: var(--fs-sm); }
+.goal-water { display: flex; align-items: center; gap: 6px; margin: var(--s3) 0 0; }
+.goal-water .icon { width: 16px; height: 16px; color: var(--accent); }
+.profil-settings { margin-top: var(--s3); border-top: 1px solid var(--line); padding-top: var(--s2); }
+.profil-settings > summary { color: var(--accent); }
+.profil-settings .form { margin-top: var(--s2); }
+.profil-settings .hint { margin: 0 0 var(--s3); }
+
+/* Einheitlicher Innenabstand: Karten s4, Listenzeilen s3/s4, Kennzahl-Kacheln s3 (.stat) */
+#view-profil .profil-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: var(--s4); }
+#view-profil a.stat { color: var(--text); text-decoration: none; min-height: var(--tap); }
+@media (hover: hover) { #view-profil a.stat:hover { background: var(--surface-3); } }
+#view-profil .stat { text-align: center; }
+#view-profil .profil-list .row-item { padding: var(--s3) var(--s4); }
+#view-profil .card-head { margin-bottom: var(--s3); }
+#view-profil .btn-row.wide { margin-top: var(--s3); }
+#view-profil .export-chips .btn { min-height: var(--tap); }

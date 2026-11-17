@@ -1,0 +1,60 @@
+/* ernaehrung: Hero-Ring, Makrozeilen, Wasser, Mahlzeiten, Wochenband.
+   Basis (.card, .card-head, .stat, .week-band, .empty, .section-title) kommt aus style.css. */
+
+/* Farbe je Naehrstoff: eine Variable, von Balken, Punkt und Legende gelesen */
+.is-protein { --bar: var(--c-protein); }
+.is-carbs { --bar: var(--c-carbs); }
+.is-fat { --bar: var(--c-fat); }
+.is-water { --bar: var(--accent); }
+
+/* Balken: <progress>, damit der Fuellstand ein Attribut ist und kein Inline-Style */
+.nutri-bar {
+  appearance: none; -webkit-appearance: none; display: block; width: 100%; height: var(--s2);
+  border: 0; border-radius: var(--r3); background: var(--surface-3); overflow: hidden;
+}
+.nutri-bar::-webkit-progress-bar { background: var(--surface-3); border-radius: var(--r3); }
+.nutri-bar::-webkit-progress-value { background: var(--bar, var(--ok)); border-radius: var(--r3); transition: width .4s; }
+.nutri-bar::-moz-progress-bar { background: var(--bar, var(--ok)); border-radius: var(--r3); }
+
+/* Hero */
+.nutri-hero { display: grid; justify-items: center; gap: var(--s4); }
+.nutri-ring .ring-track { stroke: var(--surface-3); }
+.nutri-stats { width: 100%; grid-template-columns: repeat(3, 1fr); }
+.nutri-stats .stat { justify-items: center; text-align: center; background: var(--surface-3); }
+.nutri-macros { width: 100%; display: grid; gap: var(--s3); }
+.nm { display: grid; grid-template-columns: 8.5em 1fr auto; align-items: center; gap: var(--s2); font-size: var(--fs-sm); }
+.nm-name { display: inline-flex; align-items: center; gap: var(--s2); color: var(--muted); }
+.nm-name i { flex: none; width: var(--s2); height: var(--s2); border-radius: 50%; background: var(--bar); }
+.nm-val { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nm-val b { color: var(--text); font-weight: 650; }
+.nm.lead { font-size: var(--fs); padding: var(--s3); border-radius: var(--r2); background: var(--surface-3); }
+.nm.lead .nm-name { color: var(--text); font-weight: 650; }
+.nm.lead .nutri-bar { height: var(--s3); background: var(--surface); }
+.nm.lead .nutri-bar::-webkit-progress-bar { background: var(--surface); }
+.nm.lead .nm-val b { font-size: var(--fs-md); }
+
+/* Naehrwerte im Detail: Zustandsfarbe des Balkens */
+.nutri-row .nutri-bar { height: calc(var(--s1) * 1.5); }
+.nutri-row.over { --bar: var(--soon); }
+.nutri-row.reached { --bar: var(--ok); }
+
+/* Donut-Legende */
+.donut-legend i { background: var(--bar); }
+
+/* Wasser */
+.water-body { display: flex; align-items: center; gap: var(--s4); }
+.water-side { flex: 1; min-width: 0; display: grid; gap: var(--s3); }
+.water-quick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+
+/* Mahlzeiten */
+.meal .card-head .aside { font-variant-numeric: tabular-nums; }
+.meal-empty { padding: var(--s1) 0 var(--s3); }
+.meal-empty p { margin: 0; }
+.meal-quick { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s1) var(--s4); margin-top: var(--s1); }
+.meal-quick .link-btn, .meal-save { min-height: var(--tap); }
+
+/* Wochenband */
+.nutri-week .week-band .d i .icon { width: var(--s4); height: var(--s4); }
+.nutri-week .week-band .d.miss i { box-shadow: inset 0 0 0 2px var(--soon); }
+.nutri-week .week-band .d .wk-dot { width: .5em; height: .5em; border-radius: 50%; background: var(--accent); }
+.nutri-week .hint { margin: var(--s3) 0 0; }

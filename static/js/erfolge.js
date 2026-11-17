@@ -1,5 +1,5 @@
 /** Erfolge: Tages- und Wochenserie, Abzeichen und die nächsten Ziele. */
-import { api, esc, icon, skeleton } from "./util.js";
+import { api, empty, esc, icon, skeleton } from "./util.js";
 
 let root;
 let data = null;
@@ -19,35 +19,36 @@ export function weekStrip(week) {
 function render() {
   const d = data;
   root.innerHTML = `<div class="card">
-      <div class="kpis compact">
-        <div><span class="big-number">${icon("flame")} ${d.daily_streak}</span><span>Tage in Folge</span></div>
-        <div><span class="big-number">${d.weekly_streak}</span><span>Wochen in Folge</span></div>
+      <div class="card-head">${icon("flame")}<span class="card-title">Serie</span></div>
+      <div class="stats">
+        <div class="stat lg"><b>${d.daily_streak}</b><span>Tage in Folge</span></div>
+        <div class="stat lg"><b>${d.weekly_streak}</b><span>Wochen in Folge</span></div>
       </div>
       ${weekStrip(d.week)}
       <p class="hint">Aktiv zählt: Einheit, Cardio oder Mobility. Geplante Ruhetage unterbrechen die Serie nicht.
         Bestwerte: ${d.best_daily} Tage · ${d.best_weekly} Wochen.</p>
     </div>
     <div class="card">
-      <p class="eyebrow">Insgesamt</p>
-      <div class="kpis compact four">
-        <div><span class="big-number">${d.totals.workouts}</span><span>Einheiten</span></div>
-        <div><span class="big-number">${String(d.totals.volume_t).replace(".", ",")}</span><span>Tonnen bewegt</span></div>
-        <div><span class="big-number">${d.totals.prs}</span><span>Bestleistungen</span></div>
-        <div><span class="big-number">${String(d.totals.cardio_km).replace(".", ",")}</span><span>km Cardio</span></div>
+      <div class="card-head">${icon("trophy")}<span class="card-title">Insgesamt</span></div>
+      <div class="stats four">
+        <div class="stat lg"><b>${d.totals.workouts}</b><span>Einheiten</span></div>
+        <div class="stat lg"><b>${String(d.totals.volume_t).replace(".", ",")}</b><span>Tonnen bewegt</span></div>
+        <div class="stat lg"><b>${d.totals.prs}</b><span>Bestleistungen</span></div>
+        <div class="stat lg"><b>${String(d.totals.cardio_km).replace(".", ",")}</b><span>km Cardio</span></div>
       </div>
     </div>
-    ${d.upcoming.length ? `<h3 class="group-title">Als Nächstes</h3>
-      <div class="list">${d.upcoming.map((m) => `<div class="row-item">
+    ${d.upcoming.length ? `<h3 class="section-title">Als Nächstes</h3>
+      <div class="list">${d.upcoming.map((m) => `<div class="row-item is-locked">
         <span class="row-icon">${metricIcon(m)}</span>
         <div class="row-main"><div class="row-title">${esc(m.title)}</div>
           <div class="row-meta"><span>${esc(m.desc)}</span></div>
           <div class="progress sm"><i style="width:${Math.round(m.progress * 100)}%"></i></div></div>
         <span class="row-aside">${String(m.value).replace(".", ",")} / ${m.threshold}</span>
       </div>`).join("")}</div>` : ""}
-    <h3 class="group-title">Abzeichen<span class="count-muted">${d.reached.length}</span></h3>
+    <h3 class="section-title">Abzeichen · ${d.reached.length} freigeschaltet</h3>
     ${d.reached.length ? `<div class="badges">${d.reached.map((m) => `<div class="badge m-${esc(m.metric || "")}">
-        <span class="badge-icon">${metricIcon(m)}</span><b>${esc(m.title)}</b><small>${esc(m.desc)}</small></div>`).join("")}</div>`
-      : `<p class="hint pad">Noch keine – die erste Einheit bringt das erste Abzeichen.</p>`}`;
+        <span class="badge-icon">${metricIcon(m)}<span class="badge-check">${icon("check")}</span></span><b>${esc(m.title)}</b><small>${esc(m.desc)}</small></div>`).join("")}</div>`
+      : empty("Noch keine Abzeichen", "Die erste Einheit bringt das erste Abzeichen.")}`;
 }
 
 export async function load() {

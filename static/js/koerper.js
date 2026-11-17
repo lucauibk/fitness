@@ -74,11 +74,12 @@ function tile(key) {
   const latest = data.latest[key];
   if (!latest) return "";
   const series = data.series[key] || [];
-  return `<div class="card body-tile">
-    <p class="eyebrow">${esc(data.labels[key])}${latest.estimated ? " · geschätzt" : ""}</p>
-    <div class="bw-head"><span class="big-number">${fmt(latest.value, key)}</span>
-      <span class="hint">${dm(latest.date)}${latest.source === "vicoach" ? " · ViCoach" : ""}${sinceLast(key)}</span></div>
-    ${series.length > 1 ? sparkline(series.map((p) => ({ value: p.value, date: p.date })), { height: 48 }) : ""}
+  const delta = sinceLast(key).replace(" · ", "");
+  return `<div class="stat body-tile">
+    <span class="eyebrow">${esc(data.labels[key])}${latest.estimated ? " · geschätzt" : ""}</span>
+    <b>${fmt(latest.value, key)}</b>
+    <span class="tile-date">${dm(latest.date)}${latest.source === "vicoach" ? " · ViCoach" : ""}${delta ? ` · ${delta}` : ""}</span>
+    ${series.length > 1 ? sparkline(series.map((p) => ({ value: p.value, date: p.date })), { height: 40 }) : ""}
   </div>`;
 }
 
@@ -86,20 +87,20 @@ function render() {
   const pend = outbox.pending("measurements");
   const hasAny = Object.keys(data.latest).length;
   const girths = GIRTHS.filter((k) => data.latest[k]);
-  root.innerHTML = `<div class="btn-row wide page-actions">
+  root.innerHTML = `<div class="page-actions">
       <button type="button" class="btn primary" data-new>${icon("plus")} Messung eintragen</button>
-      ${data.ai_available ? `<button type="button" class="btn tonal" data-scan>${icon("camera")} ViCoach-Screenshot</button>` : ""}
+      ${data.ai_available ? `<button type="button" class="link-btn" data-scan>${icon("camera")} Aus ViCoach-Screenshot einlesen</button>` : ""}
     </div>
     ${pend.length ? `<p class="callout">${pend.length} Messung(en) warten auf Verbindung.</p>` : ""}
     ${assessmentCard()}
     ${hasAny ? `<div class="body-grid">${MAIN.map(tile).join("")}</div>` : `<div class="card quiet"><p>
       Noch keine Messung. Trag Gewicht und Umfänge ein – oder lies das Ergebnis deiner
       Körperanalyse im Studio per Screenshot ein.</p></div>`}
-    ${girths.length ? `<h3 class="group-title">Umfänge</h3><div class="list">${girths.map((k) => `
+    ${girths.length ? `<h3 class="section-title">Umfänge</h3><div class="list">${girths.map((k) => `
       <div class="row-item"><div class="row-main"><div class="row-title">${esc(data.labels[k])}</div>
         <div class="row-meta"><span>${dm(data.latest[k].date)}</span></div></div>
         <span class="row-aside"><b>${fmt(data.latest[k].value, k)}</b></span></div>`).join("")}</div>` : ""}
-    ${data.entries.filter((e) => !isPendingDelete(`measurements/${e.id}`)).length ? `<details class="group-details"><summary class="group-title">Alle Messungen
+    ${data.entries.filter((e) => !isPendingDelete(`measurements/${e.id}`)).length ? `<details class="group-details"><summary class="section-title">Alle Messungen
         <span class="count-muted">${data.entries.filter((e) => !isPendingDelete(`measurements/${e.id}`)).length}</span>${icon("down", "chev")}</summary>
       <div class="list">${data.entries.filter((e) => !isPendingDelete(`measurements/${e.id}`)).map((e) => `<div class="row-item" role="button" tabindex="0" data-entry="${e.id}">
         <div class="row-main"><div class="row-title">${dm(e.date)}${e.source === "vicoach" ? " · ViCoach" : ""}</div>

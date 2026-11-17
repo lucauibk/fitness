@@ -3,6 +3,7 @@ import { $, api, closeSheet, esc, formData, formError, getProfile, icon, openShe
   submitOnce, toast, parseYmd } from "./util.js";
 import * as outbox from "./outbox.js";
 
+const WHO_MIN = 150;   // untere Grenze des WHO-Richtwerts (150–300 min/Woche)
 let root;
 let activities = null;
 let recent = null;
@@ -42,7 +43,12 @@ function render() {
         <div><span class="big-number">${String(w.km).replace(".", ",")}</span><span>km</span></div>
         <div><span class="big-number">${w.kcal}</span><span>kcal</span></div>
       </div>
-      <p class="hint">Richtwert der WHO: 150–300 Minuten moderate Bewegung pro Woche.</p>
+      <div class="who-progress">
+        <div class="who-head"><span>WHO-Richtwert</span><b>${w.minutes} / ${WHO_MIN} min</b></div>
+        <div class="progress sm" role="progressbar" aria-valuemin="0" aria-valuemax="${WHO_MIN}" aria-valuenow="${Math.min(w.minutes, WHO_MIN)}"
+          aria-label="Minuten bis zum WHO-Richtwert"><i style="width:${Math.min(100, Math.round((w.minutes / WHO_MIN) * 100))}%"></i></div>
+      </div>
+      <p class="hint">Mindestens 150, besser bis 300 Minuten moderate Bewegung pro Woche.</p>
     </div>
     <div class="btn-row wide page-actions">
       <button type="button" class="btn primary" data-new-cardio>${icon("plus")} Cardio eintragen</button>
@@ -51,7 +57,7 @@ function render() {
       <div class="row-item ${c.pending ? "is-pending" : ""}">
         <span class="row-icon">${icon("run")}</span>
         <div class="row-main"><div class="row-title">${esc(c.label || c.activity)}</div>
-          <div class="row-meta"><span>${parseYmd(c.date).toLocaleDateString("de-AT", { weekday: "short", day: "numeric", month: "short" })}</span>
+          <div class="row-meta meta-line"><span>${parseYmd(c.date).toLocaleDateString("de-AT", { weekday: "short", day: "numeric", month: "short" })}</span>
             <span>${Math.round(c.minutes)} min</span>
             ${c.distance_km ? `<span>${String(c.distance_km).replace(".", ",")} km</span>` : ""}
             ${c.kcal ? `<span>≈ ${Math.round(c.kcal)} kcal</span>` : ""}</div></div>

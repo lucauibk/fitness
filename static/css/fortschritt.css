@@ -1,0 +1,75 @@
+/* fortschritt: Übersicht, Körper, Erfolge, Verlauf. Nur Tokens; Bausteine (.stat, .card-head, .section-title, .empty) kommen aus style.css */
+#view-fortschritt .stats.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 479px) { #view-fortschritt .stats.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+#view-fortschritt .stat.lg span { line-height: 1.3; }
+#view-fortschritt .card-head .icon { flex: none; }
+
+/* ---- Übersicht: Kachelraster ruhiger und kürzer */
+#view-fortschritt .tiles { gap: var(--s2); }
+#view-fortschritt .tile { min-height: 0; padding: var(--s4); gap: var(--s3); }
+#view-fortschritt .tile.span { grid-column: 1 / -1; }
+#view-fortschritt .tile-in { min-height: 0; }
+#view-fortschritt .tile-body { min-height: 56px; }
+#view-fortschritt .tile-empty { color: var(--faint); font-size: var(--fs-sm); text-align: center; }
+/* Trainings-Raster: 30 Tage in drei Zeilen, Punkte gut sichtbar */
+#view-fortschritt .dotgrid { grid-template-columns: repeat(10, 1fr); gap: 6px; }
+#view-fortschritt .dotgrid i { border-radius: 50%; }
+#view-fortschritt .dotgrid i.on { box-shadow: 0 0 0 1px var(--c-train); }
+
+/* ---- Letzte 8 Wochen: höhere Balken, Zahl oben, Datum unten */
+#view-fortschritt .weekbars { height: auto; align-items: stretch; gap: var(--s2); margin-top: var(--s3); }
+#view-fortschritt .weekbar { height: auto; justify-content: flex-end; gap: 4px; }
+#view-fortschritt .weekbar .wb-bar { display: flex; align-items: flex-end; width: 100%; height: 88px; }
+#view-fortschritt .weekbar i { background: var(--surface-3); border-radius: 4px 4px 2px 2px; }
+#view-fortschritt .weekbar.now i { background: var(--accent); }
+#view-fortschritt .weekbar b { color: var(--text); font-size: var(--fs-sm); }
+#view-fortschritt .weekbar.now b { color: var(--accent); }
+#view-fortschritt .weekbar small { color: var(--muted); font-weight: 500; min-height: 1.2em; white-space: nowrap; }
+#view-fortschritt .weekbar.now small { color: var(--accent); font-weight: 650; }
+
+/* ---- Körper: eine Primäraktion, Sekundäres als Textlink */
+#view-fortschritt .page-actions { display: grid; gap: var(--s2); justify-items: stretch; margin-bottom: var(--s4); }
+#view-fortschritt .page-actions .btn { justify-content: center; }
+#view-fortschritt .page-actions .link-btn { justify-self: center; color: var(--muted); min-height: var(--tap); }
+#view-fortschritt .body-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); }
+#view-fortschritt .body-tile { align-content: start; gap: 2px; }
+#view-fortschritt .body-tile b { font-size: var(--fs-lg); font-weight: 750; }
+#view-fortschritt .body-tile .eyebrow { overflow-wrap: anywhere; }
+#view-fortschritt .body-tile .tile-date { color: var(--muted); font-size: var(--fs-xs); line-height: 1.3; }
+#view-fortschritt .body-tile .spark { height: 40px; margin: var(--s2) 0 0; opacity: .5; }
+#view-fortschritt .body-tile .spark path { stroke-width: 1.5; }
+#view-fortschritt .section-title:first-child { margin-top: var(--s2); }
+#view-fortschritt summary.section-title { display: flex; align-items: center; gap: var(--s2); min-height: var(--tap); margin-block: var(--s4) 0; cursor: pointer; }
+
+/* ---- Erfolge: einheitliche Kacheln, freigeschaltet vs. offen */
+#view-fortschritt .badges { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); grid-auto-rows: 1fr; }
+#view-fortschritt .badge { position: relative; justify-content: flex-start; min-height: 140px; padding: var(--s3) var(--s2);
+  background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--accent-soft); }
+#view-fortschritt .badge b { line-height: 1.25; }
+#view-fortschritt .badge small { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+#view-fortschritt .badge-icon { position: relative; }
+#view-fortschritt .badge-check { position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center;
+  width: 18px; height: 18px; border-radius: 50%; background: var(--ok); color: var(--on-ok); box-shadow: 0 0 0 2px var(--surface-2); }
+#view-fortschritt .badge-check .icon { width: 12px; height: 12px; }
+/* Offene Ziele: gedämpft, ohne Häkchen */
+#view-fortschritt .row-item.is-locked .row-icon { background: var(--surface-3); color: var(--faint); }
+#view-fortschritt .row-item.is-locked .progress > i { background: var(--accent); }
+#view-fortschritt .row-item.is-locked .row-title { color: var(--muted); }
+
+/* ---- Verlauf: Farbe trägt Information */
+#view-fortschritt .cal-grid small { color: var(--muted); }
+#view-fortschritt .cal-grid b { line-height: 36px; color: var(--text); }
+#view-fortschritt .cal-grid b.lift { position: relative; background: var(--c-train); color: var(--on-urgent); font-weight: 700; }
+#view-fortschritt .cal-grid b.cardio { background: color-mix(in srgb, var(--c-fat) 28%, transparent); box-shadow: inset 0 0 0 2px var(--c-fat); font-weight: 650; }
+#view-fortschritt .cal-grid b.lift.both::after { content: ""; position: absolute; left: 50%; bottom: 3px; width: 5px; height: 5px;
+  margin-left: -2.5px; border-radius: 50%; background: var(--c-fat); box-shadow: 0 0 0 1px var(--on-urgent); }
+#view-fortschritt .cal-grid b.today { outline: 2px solid var(--text); outline-offset: 1px; font-weight: 750; }
+#view-fortschritt .cal-grid b.today:not(.lift):not(.cardio) { background: var(--surface-3); }
+#view-fortschritt .cal-legend { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); margin-top: var(--s3); color: var(--muted); font-size: var(--fs-xs); }
+#view-fortschritt .cal-legend span { display: inline-flex; align-items: center; gap: 6px; }
+#view-fortschritt .cal-legend span::before { content: ""; width: 12px; height: 12px; border-radius: 50%; }
+#view-fortschritt .cal-legend .lift::before { background: var(--c-train); }
+#view-fortschritt .cal-legend .cardio::before { background: color-mix(in srgb, var(--c-fat) 28%, transparent); box-shadow: inset 0 0 0 2px var(--c-fat); }
+#view-fortschritt .cal-legend .today::before { box-shadow: 0 0 0 2px var(--text); width: 8px; height: 8px; margin: 2px; }
+#view-fortschritt .row-icon.lift { background: color-mix(in srgb, var(--c-train) 16%, transparent); color: var(--c-train); }
+#view-fortschritt .row-icon.cardio { background: color-mix(in srgb, var(--c-fat) 16%, transparent); color: var(--c-fat); }

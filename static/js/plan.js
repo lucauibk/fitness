@@ -91,11 +91,11 @@ function blockCard() {
     <div class="weekbars" role="img" aria-label="Sätze pro Woche im Block">${blockInfo.weeks.map((w) => `
       <span class="weekbar ${w.week === b.week ? "now" : ""}"><i style="height:${Math.max(8, (w.sets / maxSets) * 100)}%"></i>
         <b>${w.sets}</b><small>${w.week === b.weeks ? "Deload" : `W${w.week}`}</small></span>`).join("")}</div>
-    <details class="field-more"><summary>Diese Woche je Muskel</summary>
+    <details class="field-more"><summary>Diese Woche je Muskel ${icon("down", "chev")}</summary>
       <div class="bars">${vol.map((v) => `<div class="bar-row"><span class="bar-label">${esc(v.label)}</span>
         <span class="bar"><i style="width:${(v.done / top) * 100}%"></i></span>
         <span class="bar-value">${v.done}/${v.planned}</span></div>`).join("")}</div></details>
-    ${blockInfo.events.length ? `<details class="field-more"><summary>Was sich geändert hat</summary>
+    ${blockInfo.events.length ? `<details class="field-more"><summary>Was sich geändert hat ${icon("down", "chev")}</summary>
       <div class="list flush">${blockInfo.events.map((e) => `<div class="row-item"><div class="row-main">
         <div class="row-title">${esc(e.text)}</div><div class="row-meta"><span>${esc(e.date)}</span></div></div></div>`).join("")}</div></details>` : ""}
   </div>`;
@@ -112,9 +112,9 @@ function render() {
   const visible = splits.filter((s) => !isPendingDelete(`splits/${s.id}`));
   const open = detail && visible.some((s) => s.id === detail.id) ? detail : null;
 
-  root.innerHTML = `<div class="btn-row"><button type="button" class="btn primary" data-wizard>${icon("spark")} Neuen Plan erstellen</button></div>
-    ${blockCard()}<div class="list">${visible.map((s) => `
-      <div class="row-item">
+  root.innerHTML = `<div class="btn-row wide page-actions"><button type="button" class="btn primary" data-wizard>${icon("spark")} Neuen Plan erstellen</button></div>
+    ${blockCard()}<div class="list split-list">${visible.map((s) => `
+      <div class="row-item ${s.active ? "is-active" : ""}">
         <button type="button" class="row-main row-btn" data-open-split="${s.id}" aria-expanded="${open?.id === s.id}">
           <span class="row-title">${esc(s.name)}</span>
           <span class="row-meta"><span>${s.days.length} Tage</span>
@@ -124,7 +124,7 @@ function render() {
         <button type="button" class="icon-btn" data-delete-split="${s.id}" aria-label="„${esc(s.name)}“ löschen">${icon("trash")}</button>
       </div>`).join("")}</div>
     ${open ? `<div class="plan-head">
-        <h3 class="group-title">${esc(open.name)}</h3>
+        <h3 class="group-title">Trainingstage <span class="count-muted">${open.days.length}</span></h3>
         <button type="button" class="btn small ghost" data-plan-menu aria-label="Aktionen für den Plan">⋯ Plan</button>
       </div>
       ${open.days.filter((d) => !isPendingDelete(`split-days/${d.id}`)).map(dayCard).join("")}

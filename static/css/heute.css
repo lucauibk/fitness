@@ -1,0 +1,44 @@
+/* heute */
+
+/* Ein Primaerfokus: .hero-main (Training). Alles andere ist .quiet-card – flach, ohne Verlauf, kleiner. */
+.quiet-card { padding: var(--s3) var(--s4); box-shadow: none; border: 1px solid var(--line); }
+.quiet-card .eyebrow { font-size: var(--fs-xs); }
+.hero-main { padding: var(--s5) var(--s4); border: 1px solid var(--line-strong); }
+.hero-cta { margin-top: var(--s4); }
+.hero-cta .btn { flex: 1; justify-content: center; }
+.hero-cta .btn.primary { flex: 2; }
+.hero-main .callout { margin-top: var(--s3); }
+
+/* Meta-Zeile mit Punkt-Trenner (auch Training/Cardio) */
+.meta-line { display: flex; flex-wrap: wrap; gap: 2px 0; margin: 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
+.meta-line > span + span::before { content: "·"; margin: 0 var(--s2); color: var(--faint); }
+
+/* Streak + Woche in einer Karte, mit Legende */
+.week-card { padding: var(--s3) var(--s4) var(--s3); margin-bottom: var(--s3); border-radius: var(--r3); background: var(--surface); border: 1px solid var(--line); }
+.week-card .streak-head { margin-bottom: var(--s3); }
+.week-card .week-strip { margin-bottom: var(--s2); }
+.week-card .wday.today b { color: var(--accent); font-weight: 750; }
+.week-card .wday.today i { box-shadow: 0 0 0 2px var(--accent); }
+.week-card .wday.planned:not(.active) i { background: var(--accent-soft); }
+.week-legend { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s4); margin: 0; padding-top: var(--s2); border-top: 1px solid var(--line); color: var(--muted); font-size: var(--fs-xs); }
+.week-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.week-legend span::before { content: ""; width: 10px; height: 10px; border-radius: 50%; box-sizing: border-box; }
+.week-legend .lg-done::before { background: var(--ok); }
+.week-legend .lg-planned::before { border: 1.5px solid var(--accent); background: var(--accent-soft); }
+.week-legend .lg-today::before { box-shadow: 0 0 0 2px var(--accent); }
+
+/* Coach: Text gekuerzt, damit er nicht vor dem Training dominiert */
+.coach-card { gap: var(--s3); }
+.coach-card .coach-last { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--fs-sm); }
+.coach-card .btn { flex: none; align-self: center; }
+
+/* Check-in kompakter: Karte mit Kopf, engere Zeilen, sichtbarer Gespeichert-Zustand */
+.checkin .card-head .aside { padding: 2px var(--s2); border-radius: 999px; background: var(--surface-2); font-size: var(--fs-xs); }
+.checkin .scale { margin: var(--s1) 0; }
+.checkin .scale-dots { gap: var(--s1); }
+.saved-pill { margin-left: var(--s2); text-transform: none; letter-spacing: 0; }
+.saved-pill .icon { width: 12px; height: 12px; }
+.readiness .link-btn { margin-top: var(--s1); }
+.quiet-events .eyebrow { display: flex; align-items: center; gap: var(--s1); }
+.quiet-events .hint + .hint { margin-top: var(--s1); }
+.nutri-mini .water-line { padding-top: var(--s2); }

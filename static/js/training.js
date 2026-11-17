@@ -2,11 +2,11 @@
  *  Erst beim Beenden geht die komplette Einheit in einem Stueck an den Pi (bzw. in den
  *  Ausgang, wenn gerade keine Verbindung da ist). */
 import { $, $$, api, armDelete, closeSheet, empty, esc, reviewHtml, watchCoach, getProfile,
-  icon, openSheet, prefs, setsSummary, skeleton, toast } from "./util.js";
+  icon, openSheet, prefs, setsSummary, skeleton, toast, WEEKDAYS_LONG } from "./util.js";
 import * as outbox from "./outbox.js";
 import { openCoach } from "./coach.js";
 import { cachedExercise, figureHtml, loadExercise, openExercise } from "./uebungen.js";
-import { nextLabel, nextSet } from "./naechster.js";
+import { nextLabel, nextSet, nextTraining } from "./naechster.js";
 
 let root;
 let today = null;     // /api/today fuer den Startbildschirm
@@ -346,17 +346,24 @@ function renderStart() {
   const rec = t.day;
   const lvl = t.checkin?.level;
   const others = t.days.filter((d) => d.id !== rec?.id);
+  const nt = nextTraining(t);
   root.innerHTML = `${lvl && lvl.key !== "voll" ? `<p class="callout">${icon("warn")} ${esc(lvl.title)} – die Vorgaben sind angepasst.</p>` : ""}
-    ${rec ? `<div class="card hero">
-      <p class="eyebrow">${t.fixed ? "Heute geplant" : "Als Nächstes dran"}</p>
-      <h3 class="hero-title">${esc(rec.label)}</h3>
-      <p class="hint">${rec.exercises.length} Übungen · ${rec.exercises.reduce((n, e) => n + e.target_sets, 0)} Sätze</p>
-      <div class="btn-row"><button type="button" class="btn primary" data-start="${rec.id}">${icon("play")} Einheit starten</button></div>
+    ${nt ? `<div class="card hero hero-main">
+      <p class="eyebrow">${esc(nt.eyebrow)}</p>
+      <h3 class="hero-title">${esc(nt.label)}</h3>
+      <p class="meta-line">${nt.meta.map((m) => `<span>${esc(m)}</span>`).join("")}</p>
+      <div class="btn-row hero-cta"><button type="button" class="btn primary" data-start="${nt.id}">${icon("play")} Einheit starten</button></div>
     </div>` : ""}
-    ${others.length ? `<h3 class="group-title">Anderer Tag</h3>
-      <div class="list">${others.map((d) => `<div class="row-item" role="button" tabindex="0" data-start="${d.id}">
-        <div class="row-main"><div class="row-title">${esc(d.label)}</div></div>${icon("right", "chev")}</div>`).join("")}</div>` : ""}
-    <div class="btn-row"><button type="button" class="btn ghost" data-free>${icon("plus")} Freies Training</button></div>`;
+    <h3 class="section-title">Anderes Training</h3>
+    <div class="list start-list">${others.map((d) => `<div class="row-item" role="button" tabindex="0" data-start="${d.id}">
+        <div class="row-main"><div class="row-title">${esc(d.label)}</div>
+          ${d.weekdays?.length ? `<div class="row-meta"><span>${d.weekdays.map((i) => WEEKDAYS_LONG[i]).join(", ")}</span></div>` : ""}</div>
+        ${icon("right", "chev")}</div>`).join("")}
+      <div class="row-item" role="button" tabindex="0" data-free>
+        <span class="row-icon">${icon("plus")}</span>
+        <div class="row-main"><div class="row-title">Freies Training</div>
+          <div class="row-meta"><span>ohne Plan, Übungen selbst wählen</span></div></div>
+        ${icon("right", "chev")}</div></div>`;
 }
 
 export async function load() {

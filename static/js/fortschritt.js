@@ -38,7 +38,7 @@ function readySection() {
   const ready = data.ready || [];
   if (!ready.length) return "";
   return `<div class="card">
-    <p class="eyebrow">Gewicht erhöhen</p>
+    <div class="card-head">${icon("up")}<span class="card-title">Gewicht erhöhen</span></div>
     <div class="list flush">${ready.map((r) => `
       <div class="row-item">
         <span class="row-icon up">${icon("up")}</span>
@@ -60,12 +60,12 @@ function frequencySection() {
   const weeks = f.weeks.slice(-8);
   const maxCount = Math.max(1, ...weeks.map((w) => w.count));
   return `<div class="card">
-    <p class="eyebrow">Diese Woche</p>
-    <div class="kpis compact four">
-      <div><span class="big-number">${f.this_week}</span><span>Einheiten</span></div>
-      <div><span class="big-number">${vol.sets}</span><span>Sätze</span></div>
-      <div><span class="big-number">${nf(vol.kg)}</span><span>kg bewegt</span></div>
-      <div><span class="big-number">${f.streak}</span><span>${f.streak === 1 ? "Woche" : "Wochen"} in Folge</span></div>
+    <div class="card-head"><span class="card-title">Diese Woche</span></div>
+    <div class="stats four">
+      <div class="stat lg"><b>${f.this_week}</b><span>Einheiten</span></div>
+      <div class="stat lg"><b>${vol.sets}</b><span>Sätze</span></div>
+      <div class="stat lg"><b>${nf(vol.kg)}</b><span>kg bewegt</span></div>
+      <div class="stat lg"><b>${f.streak}</b><span>${f.streak === 1 ? "Woche" : "Wochen"} in Folge</span></div>
     </div>
     ${vol.groups.length ? `<details class="field-more"><summary>Sätze je Muskelgruppe</summary>
       <div class="bars">${vol.groups.map((g) => `
@@ -76,9 +76,10 @@ function frequencySection() {
     <h4 class="form-section">Letzte 8 Wochen</h4>
     <div class="weekbars">${weeks.map((w, i) => {
       const now = i === weeks.length - 1;   // laufende Woche immer beschriften, auch mit 0
+      const label = now ? "jetzt" : (weeks.length - 1 - i) % 2 === 0 ? dm(w.week) : "";   // jede zweite Woche, sonst zu eng
       return `<span class="weekbar ${now ? "now" : ""}" role="img" aria-label="${now ? "Diese Woche" : `Woche ab ${dm(w.week)}`}: ${w.count} Einheiten">
-        <i style="height:${Math.max(4, (w.count / maxCount) * 100)}%"></i>
-        <b>${now ? w.count : w.count || ""}</b>${now ? "<small>jetzt</small>" : ""}</span>`;
+        <b>${w.count}</b><span class="wb-bar"><i style="height:${Math.max(4, (w.count / maxCount) * 100)}%"></i></span>
+        <small>${label}</small></span>`;
     }).join("")}</div>
   </div>`;
 }
@@ -101,41 +102,24 @@ function bestRow(b) {
 function bestSection() {
   const best = [...(data.best || [])].sort((a, b) => String(b.date).localeCompare(String(a.date)));
   if (!best.length) {
-    return `<div class="card"><p class="eyebrow">Bestleistungen</p>
+    return `<div class="card"><div class="card-head">${icon("trophy")}<span class="card-title">Bestleistungen</span></div>
       <p class="hint">Sobald du die erste Einheit gespeichert hast, stehen hier deine Bestwerte.</p></div>`;
   }
   const [top, rest] = [best.slice(0, 5), best.slice(5)];
   return `<div class="card">
-    <p class="eyebrow">Bestleistungen · zuletzt verbessert</p>
+    <div class="card-head">${icon("trophy")}<span class="card-title">Bestleistungen</span><span class="aside">zuletzt verbessert</span></div>
     <div class="list flush">${top.map(bestRow).join("")}</div>
     ${rest.length ? `<details class="field-more"><summary>Alle ${best.length} anzeigen</summary>
       <div class="list flush">${rest.map(bestRow).join("")}</div></details>` : ""}
   </div>`;
 }
 
-/** Nur Zahl und Trend – Verlauf und Eintragen gibt es unter Koerper. */
-function bodyweightSection() {
-  const bw = data.bodyweight || [];
-  const last = bw[bw.length - 1];
-  const first = bw[0];
-  if (!last) return "";
-  const diff = first && bw.length > 1 ? (last.kg - first.kg) : null;
-  return `<a class="card mini-card" href="#fortschritt/koerper">
-    <span class="row-icon">${icon("weight")}</span>
-    <div class="grow"><p class="eyebrow">Körpergewicht</p>
-      <div class="card-title">${String(last.kg).replace(".", ",")} kg</div>
-      ${diff !== null ? `<p class="hint">${diff >= 0 ? "+" : "−"}${String(Math.abs(Math.round(diff * 10) / 10)).replace(".", ",")} kg seit ${dm(first.date)}</p>` : ""}
-    </div>
-    ${icon("right", "chev")}
-  </a>`;
-}
-
 // ----------------------------------------------- Kachelraster (MCI-Stil)
 const pad = (n) => String(n).padStart(2, "0");
 const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
-function tile(href, title, sub, body, foot) {
-  return `<a class="tile" href="${href}"><div><p class="tile-title">${title}</p><p class="tile-sub">${sub}</p></div>
+function tile(href, title, sub, body, foot, cls = "") {
+  return `<a class="tile${cls ? ` ${cls}` : ""}" href="${href}"><div><p class="tile-title">${title}</p><p class="tile-sub">${sub}</p></div>
     <div class="tile-body">${body}</div><div class="tile-foot">${foot}${icon("right", "chev")}</div></a>`;
 }
 
@@ -160,15 +144,19 @@ function tilesSection() {
   const tiles = [];
   if (n) tiles.push(tile("#ernaehrung", "Kalorien", "Heute", ring(kcal, n.goals.kcal, { size: 96 }),
     `<b>${kcal}</b>${n.goals.kcal ? ` / ${n.goals.kcal}` : ""}`));
-  tiles.push(tile("#fortschritt/verlauf", "Trainings", "Letzte 30 Tage", dotGrid(), `<b>${f.this_week}</b> diese Woche`));
+  tiles.push(tile("#fortschritt/verlauf", "Trainings", "Letzte 30 Tage", dotGrid(), `<b>${f.this_week}</b> diese Woche`, "span"));
   if (lastBw) tiles.push(`<div class="tile wide">${tile("#fortschritt/koerper", "Körpergewicht", "Letzte Einträge",
     sparkline(bw.slice(-7).map((b) => ({ value: b.kg })), { height: 56 }),
     `<b>${String(lastBw.kg).replace(".", ",")}</b> kg`).replace('<a class="tile"', '<a class="tile-in"')}</div>`);
   if (n) {
     const p = Math.round(n.totals.protein || 0);
     const c = Math.round(n.totals.carbs || 0);
-    tiles.push(tile("#ernaehrung", "Protein", "Heute", bar(p, n.goals.protein, "var(--c-protein)"), `<b>${p}</b> g`));
-    tiles.push(tile("#ernaehrung", "Carbs", "Heute", bar(c, n.goals.carbs, "var(--c-carbs)"), `<b>${c}</b> g`));
+    // Ohne Eintrag zeigt ein leerer Balken nur Grau – dann lieber ein Satz.
+    const macro = (name, v, goal, color) => tile("#ernaehrung", name, "Heute",
+      v ? bar(v, goal, color) : `<span class="tile-empty">Noch nichts erfasst</span>`,
+      `<b>${v}</b>${goal ? ` / ${goal}` : ""} g`);
+    tiles.push(macro("Protein", p, n.goals.protein, "var(--c-protein)"));
+    tiles.push(macro("Carbs", c, n.goals.carbs, "var(--c-carbs)"));
   }
   for (const cv of extra.curves) {
     tiles.push(tile("#fortschritt", esc(cv.name), "Letzte Einheiten",
@@ -184,8 +172,7 @@ function render() {
     ${nothing ? "" : tilesSection()}
     ${readySection()}
     ${data.frequency.total ? frequencySection() : ""}
-    ${nothing ? "" : bestSection()}
-    ${bodyweightSection()}`;
+    ${nothing ? "" : bestSection()}`;
 }
 
 export async function load() {

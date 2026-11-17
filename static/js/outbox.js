@@ -37,7 +37,8 @@ export function queue(entry) {
 }
 
 /** 5xx (Pi startet gerade neu, tailscale serve liefert 502) und 429 sind voruebergehend –
- *  so ein Eintrag bleibt liegen wie bei fehlendem Netz. */
+ *  so ein Eintrag bleibt liegen wie bei fehlendem Netz. Alles andere ist endgueltig, auch 409
+ *  (z. B. Fasten-Sperre beim Start): send() wirft, flush() legt den Eintrag beiseite und meldet es. */
 const temporary = (e) => e.offline || e.status === 429 || (e.status >= 500);
 
 /**

@@ -798,26 +798,18 @@ button.chip { border: 0; font-family: inherit; }
 /* ========================================================= Ernährung */
 .date-switch { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s3); }
 .date-switch b { font-size: var(--fs-md); }
-.nutri-side { flex: 1; min-width: 180px; }
 .ring-svg { flex: none; }
 .ring-track { fill: none; stroke: var(--surface-2); stroke-width: 10; }
 .ring-fill { fill: none; stroke: var(--ok); stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray .4s; }
 .ring-fill.over { stroke: var(--urgent); }
 .ring-value { font-size: 22px; font-weight: 700; fill: var(--text); font-variant-numeric: tabular-nums; }
 .ring-label { font-size: var(--fs-xs); fill: var(--muted); }
-.macro { display: grid; grid-template-columns: 96px 1fr auto; align-items: center; gap: var(--s2); margin: 6px 0; font-size: var(--fs-sm); }
-.macro .bar { height: 6px; }
 .macro-val { color: var(--muted); font-variant-numeric: tabular-nums; }
 .meal { padding-bottom: var(--s2); }
 .tonal-icon { background: var(--accent-soft); color: var(--accent); border-radius: 50%; }
 
-.water-card { display: flex; flex-direction: column; align-items: center; gap: var(--s2); }
-.water-card .card-title { align-self: flex-start; display: flex; align-items: center; gap: 6px; }
-.water-card .card-title .icon { width: 18px; height: 18px; color: var(--accent); }
-.water-row { display: flex; align-items: center; gap: var(--s4); }
 .glass-outline { fill: none; stroke: var(--muted); stroke-width: 2; opacity: .5; }
 .glass-fill { fill: var(--accent); opacity: .85; transition: y .35s ease, height .35s ease; }
-.water-total { font-weight: 650; font-variant-numeric: tabular-nums; }
 [data-calc] { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin: var(--s3) 0; }
 
 .scanner { position: fixed; inset: 0; z-index: 100; background: #000; display: flex; flex-direction: column; }
@@ -935,7 +927,6 @@ body.training-fullscreen.resting .content { padding-bottom: calc(var(--rest-h) +
 
 /* Ernaehrung: Trefferliste und Mengeneingabe */
 .food-row mark { background: var(--accent-soft); color: inherit; border-radius: 3px; padding: 0 1px; }
-.meal .copy-meal { margin-top: var(--s2); font-size: var(--fs-sm); }
 .food-kcal { display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; line-height: 1.2; }
 .food-kcal b { color: var(--text); font-weight: 650; white-space: nowrap; }
 .food-kcal small { font-size: var(--fs-xs); }
@@ -1003,10 +994,6 @@ h1, h2, .page-title, .group-title { font-weight: 800; letter-spacing: 0.01em; }
 .tbar i { display: block; height: 100%; border-radius: 4px; }
 
 /* ------------------------------------------- Ernaehrung (MCI-Stil) */
-.nutri-head { display: flex; align-items: center; justify-content: space-around; gap: var(--s3); }
-.nutri-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.nutri-stat b { font-size: var(--fs-lg); font-weight: 800; }
-.nutri-stat span { color: var(--muted); font-size: var(--fs-sm); }
 .donut-row { display: flex; align-items: center; gap: var(--s4); }
 .donut-legend { list-style: none; margin: 0; padding: 0; flex: 1; display: grid; gap: var(--s3); }
 .donut-legend li { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: var(--s2); }
@@ -1028,12 +1015,9 @@ h1, h2, .page-title, .group-title { font-weight: 800; letter-spacing: 0.01em; }
 .nutri-row { display: grid; grid-template-columns: 8.2em 1fr 9.5em; align-items: center; gap: var(--s2);
   min-height: 30px; font-size: var(--fs-sm); }
 .nutri-row.sub > span:first-child { padding-left: var(--s3); color: var(--muted); }
-.nutri-row .bar { height: 6px; }
 .nutri-row .macro-val { text-align: right; white-space: nowrap; }
 .nutri-row .macro-val small { color: var(--faint); }
-.nutri-row.over .bar i { background: var(--soon); }
 .nutri-row.over .macro-val { color: var(--soon); }
-.nutri-row.reached .bar i { background: var(--ok); }
 
 /* ------------------------------------------- Plan-Block */
 .block-card { margin-bottom: var(--s3); }
@@ -1103,20 +1087,43 @@ h1, h2, .page-title, .group-title { font-weight: 800; letter-spacing: 0.01em; }
 .nutri-line { margin: calc(var(--s2) * -1) 0 var(--s3); text-align: center; }
 .nutri-line.warn { color: var(--urgent); }
 .nutri-week { margin-top: var(--s3); }
-.wk-chart { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--s2); margin: var(--s3) 0; }
-.wk-day { display: grid; gap: 4px; text-align: center; font-size: var(--fs-xs); color: var(--muted); }
-.wk-bar { position: relative; height: 72px; display: flex; align-items: flex-end; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
-.wk-bar b { display: block; width: 100%; background: var(--accent); border-radius: 6px 6px 0 0; }
-.wk-day.is-open .wk-bar b { opacity: .45; }
-.wk-day.is-empty .wk-bar b { background: transparent; }
-.wk-goal { position: absolute; left: 0; right: 0; height: 0; border-top: 2px dashed var(--muted); opacity: .7; }
-.fast-card .card-title { display: flex; align-items: center; gap: 6px; }
-.fast-card .card-title .icon { width: 18px; height: 18px; color: var(--accent); }
-.fast-card .count-muted { margin-left: auto; }
-.fast-main { display: flex; align-items: center; gap: var(--s4); }
-.fast-info { display: grid; gap: 2px; }
-.fast-info span { color: var(--muted); font-size: var(--fs-sm); }
-.fast-hist { grid-template-columns: repeat(auto-fit, minmax(18px, 1fr)); }
 .wk-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
 .again-btn { flex: none; margin-left: var(--s2); }
 .again-btn.done { color: var(--accent); }
+
+
+/* ============================================================ Design-System (gemeinsame Bausteine)
+   Eine Familie fuer alle Tabs: Kartenkopf, Kennzahl-Kachel, Abschnittstitel, Leerzustand,
+   Wochenband. Bereichs-CSS darf diese Klassen ergaenzen, nicht neu erfinden. */
+.card-head { display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s3); min-height: 28px; }
+.card-head .icon { width: 18px; height: 18px; color: var(--accent); }
+.card-head .card-title { flex: 1; min-width: 0; }
+.card-head .aside { margin-left: auto; color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
+.card.hero { padding: var(--s5) var(--s4); background: linear-gradient(180deg, var(--surface-2), var(--surface)); }
+.section-title { margin: var(--s5) 0 var(--s2); font-size: var(--fs-sm); font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.stat, .fact {
+  display: grid; gap: 2px; align-content: center; min-width: 0; padding: var(--s3);
+  border-radius: var(--r2); background: var(--surface-2); text-align: left;
+}
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: var(--s2); }
+.stat b, .fact b { font-size: var(--fs-md); font-weight: 650; line-height: 1.2; }
+.stat small, .stat span { color: var(--muted); font-size: var(--fs-xs); }
+.stat.lg b { font-size: var(--fs-lg); font-weight: 750; }
+/* Wochenband: sieben Tage als Punkte/Balken, ein Muster fuer Fasten, Training, Wasser */
+.week-band { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--s1); text-align: center; }
+.week-band .d { display: grid; gap: 6px; justify-items: center; font-size: var(--fs-xs); color: var(--muted); }
+.week-band .d i { width: 28px; height: 28px; border-radius: 50%; background: var(--surface-3); display: grid; place-items: center; font-style: normal; color: var(--on-accent); font-weight: 700; }
+.week-band .d.hit i { background: var(--accent); }
+.week-band .d.today { color: var(--text); font-weight: 650; }
+.week-band .d.today i:not(:empty), .week-band .d.today:not(.hit) i { box-shadow: 0 0 0 2px var(--accent); }
+/* Beschriftete Auswahlchips (Protokolle, Ziele, Tempo) */
+.choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--s2); }
+.choice {
+  display: grid; gap: 2px; padding: var(--s3); border: 1.5px solid var(--line-strong); border-radius: var(--r2);
+  background: transparent; color: var(--text); text-align: left; min-height: var(--tap);
+}
+.choice b { font-size: var(--fs-md); font-weight: 650; }
+.choice small { color: var(--muted); font-size: var(--fs-xs); line-height: 1.3; }
+.choice[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.choice:disabled { opacity: .45; }
+@media (pointer: coarse) { .btn.small { min-height: var(--tap); } }

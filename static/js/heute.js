@@ -8,6 +8,7 @@ import { ring } from "./ernaehrung.js";
 import * as outbox from "./outbox.js";
 import { openTopf, topfCard } from "./topf.js";
 import { openCoach, prose } from "./coach.js";
+import { nextTraining } from "./naechster.js";
 
 let root;
 let data = null;
@@ -31,8 +32,9 @@ function checkinForm(c) {
   const mark = c ? "on" : "pre";
   const sore = c?.soreness || {};
   const anySore = Object.values(sore).some(Boolean);
-  return `<div class="card checkin" data-checkin-form>
-    <p class="eyebrow">${c ? "Check-in ändern" : "Wie geht's dir heute?"}</p>
+  return `<div class="card quiet-card checkin" data-checkin-form>
+    <div class="card-head">${icon("check")}<h3 class="card-title">${c ? "Check-in ändern" : "Wie geht's dir heute?"}</h3>
+      <span class="aside">${c ? "gespeichert" : "noch offen"}</span></div>
     ${Object.entries(SCALES).map(([k, [label, words]]) => `
       <div class="scale" data-scale="${k}">
         <span class="scale-label">${label}</span>
@@ -58,10 +60,10 @@ function readinessCard(c) {
   const lvl = c.level;
   const tone = { voll: "ok", leichter: "soon", erholung: "urgent" }[lvl.key];
   const sore = Object.entries(c.soreness || {}).filter(([, v]) => v >= 2).map(([g]) => GROUPS[g]);
-  return `<div class="card readiness ${tone}">
+  return `<div class="card quiet-card readiness ${tone}">
     <div class="readiness-ring" style="--p:${c.readiness}"><b>${c.readiness}</b><small>Readiness</small></div>
     <div class="grow">
-      <p class="eyebrow">Check-in</p>
+      <p class="eyebrow">Check-in <span class="pill ok saved-pill">${icon("check")} gespeichert</span></p>
       <h3 class="card-title">${esc(lvl.title)}</h3>
       <p class="hint">${esc(lvl.text)}</p>
       ${sore.length ? `<p class="hint">Muskelkater: ${esc(sore.join(", "))}</p>` : ""}
@@ -77,7 +79,7 @@ function coachCard() {
   const imp = c.impulse || {};
   const label = { impuls: "Dein Coach für heute", hallo: "Dein Coach", tipp: "Tipp des Tages",
     erledigt: "Heute erledigt" }[imp.kind] || "Coach";
-  return `<div class="card mini-card coach-card" role="button" tabindex="0" data-coach>
+  return `<div class="card quiet-card mini-card coach-card" role="button" tabindex="0" data-coach>
     <span class="row-icon">${icon("chat")}</span>
     <div class="grow"><p class="eyebrow">${label}</p>
       ${imp.text ? `<div class="coach-last">${prose(imp.text)}</div>` : ""}
@@ -121,28 +123,26 @@ function workoutCard() {
   const tw = d.today_workout;
   // Heute schon trainiert: die Karte sagt das, statt weiter "Einheit starten" anzubieten.
   if (tw && !running) {
-    return `<div class="card hero is-done">
+    return `<div class="card hero hero-main is-done">
       <p class="eyebrow">${icon("check")} Heute erledigt</p>
       <h3 class="hero-title">${esc(tw.day_label)}</h3>
       <p class="hint">${esc(tw.headline)}</p>
-      <div class="btn-row">
+      <div class="btn-row hero-cta">
         <button type="button" class="btn tonal" data-show-workout="${tw.id}">Ansehen</button>
         <button type="button" class="btn ghost" data-pick>Nochmal trainieren</button>
       </div>
     </div>`;
   }
-  return `<div class="card hero">
-      <p class="eyebrow">${d.fixed ? `${esc(weekday)} · Training`
-        : d.note === "nachgeholt" ? "Nachholen · verschoben" : "Als Nächstes dran"}</p>
-      <h3 class="hero-title">${esc(day.label)}</h3>
-      <p class="hint">${day.exercises.length} Übungen · ${day.exercises.reduce((n, e) => n + e.target_sets, 0)} Sätze
-        ${d.position ? ` · Tag ${d.position} von ${d.day_count}` : ""}
-        ${d.block ? ` · Woche ${d.block.week}/${d.block.weeks}${d.block.deload ? " (Entlastung)" : ` · ${d.block.rir} in Reserve`}` : ""}</p>
+  const nt = nextTraining(d);
+  return `<div class="card hero hero-main">
+      <p class="eyebrow">${esc(nt.eyebrow)}</p>
+      <h3 class="hero-title">${esc(nt.label)}</h3>
+      <p class="meta-line">${nt.meta.map((m) => `<span>${esc(m)}</span>`).join("")}</p>
       ${d.block?.deload ? `<p class="callout">${icon("warn")} Entlastungswoche: leichter trainieren, nichts bis ans Limit – so erholen sich Muskeln und Gelenke.</p>` : ""}
       ${d.sore_today?.length ? `<p class="callout">${icon("warn")} Muskelkater in ${esc(d.sore_today.map((g) => GROUPS[g]).join(", "))} –
         die Sätze sind reduziert.${d.alternative ? ` Alternativ heute <button type="button" class="link-btn" data-start="${d.alternative.id}">${esc(d.alternative.label)} trainieren</button>.` : ""}</p>` : ""}
       ${d.note === "erholung" ? `<p class="callout">${icon("warn")} Gestern waren dieselben Muskeln dran – lass sie heute ruhen oder wähle „Anderer Tag“.</p>` : ""}
-      <div class="btn-row">
+      <div class="btn-row hero-cta">
         ${running
           ? `<a class="btn primary" href="#training/einheit">${icon("play")} Einheit fortsetzen</a>`
           : `<button type="button" class="btn primary" data-start="${day.id}">${icon("play")} Einheit starten</button>`}
@@ -158,7 +158,7 @@ function workoutCard() {
 
 function mobilityCard() {
   const m = data.mobility;
-  return `<div class="card mini-card" role="button" tabindex="0" data-mobility="${m.key}">
+  return `<div class="card quiet-card mini-card" role="button" tabindex="0" data-mobility="${m.key}">
     <span class="row-icon">${icon("stretch")}</span>
     <div class="grow"><p class="eyebrow">Mobility · ${m.minutes} min</p>
       <div class="card-title">${esc(m.title)}</div><p class="hint">${esc(m.text)}</p></div>
@@ -171,7 +171,7 @@ function nutritionCard() {
   const pend = outbox.pending("food-log").filter((e) => !e.date || e.date === data.date)
     .reduce((s, e) => s + (e.preview?.kcal || 0), 0);
   const eaten = n.totals.kcal + pend;
-  return `<div class="card nutri-mini">
+  return `<div class="card quiet-card nutri-mini">
     <a class="mini-card" href="#ernaehrung">
       ${ring(eaten, n.goals.kcal ? n.goals.kcal + (n.burned_kcal || 0) : n.goals.kcal, { size: 72 })}
       <div class="grow"><p class="eyebrow">Ernährung</p>
@@ -204,11 +204,14 @@ function render() {
   const showForm = !d.checkin || editingCheckin;
   // Reihenfolge nach Wichtigkeit: das Training zuerst, der Check-in darunter – er passt
   // die Saetze an, ist aber nicht die Hauptsache des Tages.
-  root.innerHTML = `<div class="streak-head">
-      <span class="streak-count">${icon("flame")} <b>${d.streak.daily}</b> ${d.streak.daily === 1 ? "Tag" : "Tage"} in Folge</span>
+  root.innerHTML = `<div class="week-card">
+      <div class="streak-head">
+        <span class="streak-count">${icon("flame")} <b>${d.streak.daily}</b> ${d.streak.daily === 1 ? "Tag" : "Tage"} in Folge</span>
+      </div>
+      ${weekStrip(d.streak.week)}
+      <p class="week-legend" aria-hidden="true"><span class="lg-done">aktiv</span><span class="lg-planned">geplant</span><span class="lg-today">heute</span></p>
     </div>
-    ${weekStrip(d.streak.week)}
-    ${d.profile_missing?.length ? `<a class="card mini-card" href="#profil">
+    ${d.profile_missing?.length ? `<a class="card quiet-card mini-card" href="#profil">
       <span class="row-icon">${icon("user")}</span>
       <div class="grow"><p class="eyebrow">Profil vervollständigen</p>
         <p class="hint">Für Kalorien- und Trinkziel fehlen noch: ${esc(d.profile_missing.join(", "))}.</p></div>
@@ -216,7 +219,7 @@ function render() {
     ${coachCard()}
     ${workoutCard()}
     ${topfCard(d.rewards)}
-    ${(d.plan_events || []).length ? `<div class="card quiet-events"><p class="eyebrow">${icon("spark")} Dein Plan passt sich an</p>
+    ${(d.plan_events || []).length ? `<div class="card quiet-card quiet-events"><p class="eyebrow">${icon("spark")} Dein Plan passt sich an</p>
       ${d.plan_events.map((e) => `<p class="hint">${esc(e.text)}</p>`).join("")}</div>` : ""}
     ${showForm ? checkinForm(d.checkin) : readinessCard(d.checkin)}
     ${mobilityCard()}
