@@ -896,6 +896,7 @@ async function openSavedMeals(meal) {
 
 export async function load() {
   const when = day || todayIso();
+  view = prefs.get("nutriView", "essen") === "fasten" ? "fasten" : "essen";   // z. B. von der Fasten-Kachel auf Heute gesetzt
   if (!data) root.innerHTML = skeletonCards([76, 200, 150, 150, 150]);   // grobe Geometrie der echten Seite
   else root.classList.add("is-loading");   // Tageswechsel/Neuladen: alten Stand dimmen statt Skeleton
   try {

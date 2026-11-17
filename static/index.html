@@ -75,9 +75,14 @@
   <div class="content">
     <header class="topbar">
       <h1 id="pageTitle" tabindex="-1">Heute</h1>
-      <button type="button" id="profileBtn" class="profile-btn" aria-label="Profil wechseln">
-        <span class="dot" id="profileDot" style="--c:var(--accent)"></span><span id="profileName">…</span>
-      </button>
+      <div class="topbar-actions">
+        <button type="button" id="coachBtn" class="icon-btn coach-top" aria-label="Coach fragen">
+          <svg class="icon" aria-hidden="true"><use href="#i-chat"/></svg><b class="coach-dot" id="coachDot" hidden></b>
+        </button>
+        <button type="button" id="profileBtn" class="profile-btn" aria-label="Profil wechseln">
+          <span class="dot" id="profileDot" style="--c:var(--accent)"></span><span id="profileName">…</span>
+        </button>
+      </div>
     </header>
     <div id="banner" class="banner" hidden>
       <svg class="icon" aria-hidden="true"><use href="#i-cloud"/></svg>

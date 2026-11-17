@@ -29,7 +29,7 @@
 
 /* Coach: Text gekuerzt, damit er nicht vor dem Training dominiert */
 .coach-card { gap: var(--s3); }
-.coach-card .coach-last { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--fs-sm); }
+.coach-card .coach-last { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--fs-sm); }
 .coach-card .btn { flex: none; align-self: center; }
 
 /* Check-in kompakter: Karte mit Kopf, engere Zeilen, sichtbarer Gespeichert-Zustand */
@@ -42,3 +42,35 @@
 .quiet-events .eyebrow { display: flex; align-items: center; gap: var(--s1); }
 .quiet-events .hint + .hint { margin-top: var(--s1); }
 .nutri-mini .water-line { padding-top: var(--s2); }
+
+/* ====================================================== Umbau: eine Hauptaktion */
+/* Streak als schmale Statuszeile (keine Legende) */
+.week-card { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s2) var(--s4); cursor: pointer; }
+.week-card .week-strip { margin: 0; flex: 0 1 auto; }
+.streak-count { display: inline-flex; align-items: center; gap: var(--s1); white-space: nowrap; font-size: var(--fs-sm); }
+.streak-count .icon { width: 18px; height: 18px; color: var(--soon); }
+
+/* Check-in als Zeile im Hero */
+.checkin-row { display: flex; align-items: center; gap: var(--s3); width: 100%; margin-top: var(--s3); padding: var(--s3); border: 1px solid var(--line); border-radius: var(--r2);
+  background: var(--surface-3); color: var(--text); font: inherit; text-align: left; min-height: 56px; }
+.checkin-row > span:not(.pill) { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.checkin-row small { color: var(--muted); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checkin-row > .icon:first-child { width: 22px; height: 22px; color: var(--accent); }
+.checkin-row .chev { color: var(--faint); }
+.checkin-row .pill { min-width: 36px; justify-content: center; font-size: var(--fs-md); font-weight: var(--fw-bold); }
+
+/* Drei Tageskacheln */
+.today-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: var(--s2); margin-bottom: var(--s3); }
+.tile-card { display: grid; align-content: start; gap: var(--s1); padding: var(--s3); border-radius: var(--r2); background: var(--surface); border: 1px solid var(--line);
+  color: var(--text); min-width: 0; min-height: 132px; }
+.tile-card b { font-size: var(--fs-lg); font-weight: var(--fw-bold); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile-card small { color: var(--muted); font-size: var(--fs-xs); line-height: 1.3; }
+.tile-label { display: inline-flex; align-items: center; gap: var(--s1); color: var(--muted); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.tile-label .icon { width: 16px; height: 16px; }
+.tile-card .nutri-bar { margin: var(--s1) 0; height: 6px; }
+.tile-card .btn { margin-top: auto; }
+.nutri-bar.is-over { --bar: var(--soon); }
+
+/* "Mehr": alles Seltene hinter einem Tipp */
+.more-details { margin-top: var(--s2); }
+.more-details > .card, .more-details > a.card { margin-top: var(--s2); }

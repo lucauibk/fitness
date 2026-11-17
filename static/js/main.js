@@ -14,6 +14,7 @@ import * as koerper from "./koerper.js";
 import * as erfolge from "./erfolge.js";
 import * as verlauf from "./verlauf.js";
 import * as profil from "./profil.js";
+import { openCoach } from "./coach.js";
 
 const training = subTabs("training", {
   einheit: ["Einheit", einheit], plan: ["Plan", plan],
@@ -105,6 +106,7 @@ async function reload() {
       try {
         await VIEWS[current][1].load();
         updateBadge();
+        refreshCoachDot();
       } catch (e) {
         const el = $(`#view-${current}`);
         if (el.querySelector(".skeleton, .skeleton-card")) el.innerHTML = errorState(e);
@@ -123,6 +125,14 @@ function reloadSoon() {
   const typing = document.activeElement?.matches("input, textarea") && einheit.hasDraft();
   if (!typing) return reload();
   document.addEventListener("focusout", () => setTimeout(reloadSoon, 300), { once: true });
+}
+
+/** Punkt am Coach-Knopf: eine kleine Abfrage, nur die Zahl (jeder Tab hat den Knopf). */
+async function refreshCoachDot() {
+  try {
+    const { unread } = await api("coach/unread");
+    $("#coachDot").hidden = !unread;
+  } catch { /* offline: Punkt bleibt, wie er war */ }
 }
 
 function updateBadge() {
@@ -323,6 +333,8 @@ window.addEventListener("profile-changed", (e) => {
   applyProfile(e.detail.id);
 });
 $("#profileBtn").addEventListener("click", openProfiles);
+$("#coachBtn").addEventListener("click", () => openCoach({ tab: current }));
+window.addEventListener("coach-seen", refreshCoachDot);
 document.addEventListener("click", (e) => { if (e.target.closest("[data-retry]")) retry(); });
 document.addEventListener("keydown", (e) => {
   const typing = e.target.closest?.("input, textarea, select, [contenteditable]");

@@ -4,6 +4,12 @@ import { $, api, esc, getProfile, icon, openSheet, toast } from "./util.js";
 
 const STARTERS = ["Wie lief meine letzte Einheit?", "Was soll ich heute essen?",
   "Ich möchte eine Übung tauschen"];
+// Je Tab passende Einstiegsfragen: der Coach-Knopf in der oberen Leiste gibt es auf jeder Seite.
+const TAB_STARTERS = {
+  ernaehrung: ["Was soll ich heute essen?", "Passt meine Kalorienbilanz heute?", "Was fehlt mir noch an Eiweiß?"],
+  fortschritt: ["Wie läuft mein Fortschritt?", "Wo stagniere ich?", "Was sollte ich als Nächstes steigern?"],
+  training: ["Wie lief meine letzte Einheit?", "Ich möchte eine Übung tauschen", "Passt mein Plan noch?"],
+};
 const SESSION_STARTERS = ["Ist das Gewicht zu schwer?", "Gerät besetzt – Alternative?", "Wie viele Sätze noch?"];
 const SOURCE = { daily: "Morgen-Check", chat: "", session: "Training" };
 
@@ -15,6 +21,7 @@ let list = null;
 let oldest = null;
 let more = false;
 let sending = false;
+let starters = STARTERS;
 
 const time = (iso) => new Date(iso).toLocaleString("de-AT", { weekday: "short", hour: "2-digit", minute: "2-digit" });
 /** Kleines Markdown fuer Coach-Antworten: Absaetze, **fett** und "- "/"1. "-Listen.
@@ -124,7 +131,7 @@ function emptyState() {
       deine Einheiten und deine Check-ins. Jeden Morgen meldet er sich hier, wenn es etwas Neues gibt.`;
   return `<div class="chat-empty" data-empty>
     <p class="hint">${intro}</p>
-    <div class="chips">${(session ? SESSION_STARTERS : STARTERS).map((s) => `<button type="button" class="chip" data-starter>${esc(s)}</button>`).join("")}</div>
+    <div class="chips">${(session ? SESSION_STARTERS : starters).map((s) => `<button type="button" class="chip" data-starter>${esc(s)}</button>`).join("")}</div>
   </div>`;
 }
 
@@ -222,6 +229,7 @@ async function send(text) {
  *  gezeigt werden die Nachrichten seit Beginn der Einheit (aeltere per Hochscrollen). */
 export async function openCoach(opts = {}) {
   session = opts.session || null;
+  starters = TAB_STARTERS[opts.tab] || STARTERS;
   known.clear();
   sheet = openSheet({
     title: `${icon("chat")} Coach${session ? " · Training" : ""}`,

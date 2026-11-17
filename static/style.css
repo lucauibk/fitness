@@ -100,6 +100,9 @@ main {
   backdrop-filter: saturate(1.4) blur(14px); -webkit-backdrop-filter: saturate(1.4) blur(14px);
 }
 .topbar h1 { font-size: var(--fs-md); font-weight: 650; }
+.topbar-actions { display: flex; align-items: center; gap: var(--s2); }
+.coach-top { position: relative; }
+.coach-dot { position: absolute; top: 8px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: var(--urgent); box-shadow: 0 0 0 2px var(--bg); }
 
 .sync {
   display: inline-flex; align-items: center; gap: 6px; min-height: 36px;
