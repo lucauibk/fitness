@@ -123,3 +123,6 @@
 .amount-head { display: flex; align-items: center; gap: var(--s2); }
 .amount-head h3 { flex: 1; min-width: 0; }
 .amount-links { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3); }
+.nutri-top .nm.lead .nutri-bar::-webkit-progress-bar { background: var(--surface-3); }
+.food-row .row-main { flex: 1 1 40%; min-width: 0; }
+.food-row .food-kcal { flex: 0 1 50%; text-align: right; }

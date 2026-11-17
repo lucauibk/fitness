@@ -311,7 +311,7 @@ function fastCard() {
         <div class="btn-row"><button type="button" class="btn primary" data-fast-assist>Angaben prüfen</button></div></div>`;
     }
     return `<div class="card quiet fast-card fast-entry" data-fast-card>
-      <span>${icon("clock")} Intervallfasten ausprobieren?</span>
+      <span>${icon("clock")} Intervallfasten ausprobieren? Der Assistent fragt kurz nach und schlägt eine Fastenart vor, die zu dir passt.</span>
       <span class="fast-entry-actions"><button type="button" class="btn tonal" data-fast-assist>Fastenart finden</button></span></div>`;
   }
   const target = run?.target_hours || fast.target_hours || 16;
