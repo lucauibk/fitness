@@ -10,7 +10,7 @@ sichtbar, Einträge werden lokal gesammelt und nachgesendet, sobald wieder Netz 
 |---|---|
 | Heute | Tages-Serie, Check-in (Schlaf, Energie, Stress, Muskelkater) → Readiness, an die Erholung angepasstes Training, Mobility-Routine, Kalorien |
 | Training | Einheit (mit Pausen-Timer, der den nächsten Satz zeigt, Bildschirm bleibt an, Bewertung beim Beenden) · Plan (Splits, Assistent, Plan-Check) · Übungen (Anleitung, Muskel-Grafik, Video-Suche) · Cardio |
-| Ernährung | Kalorien/Makros gegen das Ziel (Trainings- und Ruhetag getrennt), Rückmeldung zum Tag (was noch fehlt) und zur Woche, Mahlzeiten, Wiedereintragen mit einem Tipp, Suche und Barcode über Open Food Facts, eigene Lebensmittel, Intervallfasten-Timer (14:10, 16:8, 18:6 oder eigene Stundenzahl; im Profil einschalten, der Coach sieht keine Fastendaten) |
+| Ernährung | Kalorien/Makros gegen das Ziel (Trainings- und Ruhetag getrennt; Ziel per Schritt-Assistent im Profil mit offenem Rechenweg, Tempo sanft/standard/zügig bei Abnehmen und Aufbau, im Defizit nie unter 1.200 kcal bzw. 1.500 kcal bei Männern), Rückmeldung zum Tag (was noch fehlt) und zur Woche, Mahlzeiten, Wiedereintragen mit einem Tipp, Suche und Barcode über Open Food Facts, eigene Lebensmittel, Intervallfasten-Timer (12:12, 14:10, 16:8, 18:6, 20:4, OMAD oder eigene Stundenzahl; Fastenart per Assistent „Welche Fastenart passt zu mir?“ wählen; der Coach-Chat und der tägliche Coach sehen keine Fastendaten) mit Fasten-Berater (regelbasierte Empfehlung mit Sperren, optional KI-Erklärung auf Knopfdruck) |
 | Fortschritt | Übersicht (Bestleistungen, Volumen) · Körper (Gewicht, Körperfett, Maße, ViCoach) · Erfolge (Serien, Abzeichen) · Verlauf |
 | Profil | Daten, Ernährungsziel, Plan-Assistent |
 
@@ -78,6 +78,11 @@ Alle Werte sind Schätzungen. Nach 2 bis 3 Wochen am Gewichtsverlauf prüfen und
   (Plan + Eckdaten ohne Namen) und der ViCoach-Screenshot.
 - An **Anthropic** über Claude Code (`claude -p`, ohne API-Schlüssel, nur auf Knopfdruck): die Körper-Einordnung
   (Ziel, Geschlecht, Größe und die Trend-Zahlen aus den Messungen, ohne Namen und ohne einzelne Messtage).
+- An **Anthropic** über Claude Code (nur auf Knopfdruck im Fasten-Berater): die Regelausgabe (empfohlene
+  Fastenart, Gründe, Warnungen) plus Ziel, Alter, BMI-Klasse, Erfolgsquote der letzten Fasten und
+  Essensfenster-Wunsch – ohne Namen, ohne einzelne Tage, ohne Selbstauskunft zu Gesundheit
+  (Schwangerschaft, Essstörung, Diabetes) und ohne Gewicht. Bei einer Sperre wird nichts verschickt.
+  Der Coach-Chat und der tägliche Coach bekommen weiterhin keine Fastendaten.
 - An **Anthropic** über Claude Code (nur wenn der Coach-Timer eingerichtet ist, täglich): aktiver Plan,
   Block-Stand, Trainings der letzten sechs Wochen, Check-ins (Schlaf, Stress, Muskelkater), Ziele und
   eingetragene Beschwerden und der zusammengefasste Körper-Trend (Urteil zum Ziel, kg pro Woche,

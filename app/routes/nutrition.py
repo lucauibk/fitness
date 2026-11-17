@@ -10,7 +10,7 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from .. import db, fasting, food_ai, food_catalog, nutrition, portions, recipes
+from .. import claude_cli, db, fasting, fasting_advice, food_ai, food_catalog, nutrition, portions, recipes
 from ..common import FIELD_NAMES, _found, current_profile, insert_once, owned
 from .daily import _day
 
@@ -36,6 +36,15 @@ def get_goals(profile_id: int = Depends(current_profile)):
     out = nutrition.goals(profile)
     out["water"] = nutrition.water_goals(profile)
     return out
+
+
+@router.get("/nutrition/goals/preview")
+def preview_goals(profile_id: int = Depends(current_profile),
+                  goal: Optional[Literal["aufbau", "kraft", "abnehmen", "fitness"]] = None,
+                  activity_level: Optional[Literal["niedrig", "mittel", "hoch"]] = None,
+                  pace: Optional[Literal[nutrition.PACES]] = None):  # type: ignore[valid-type]
+    """Ziele mit probeweise geaenderten Angaben, ohne zu speichern (Ernaehrungsziel-Assistent)."""
+    return nutrition.preview(_profile(profile_id), goal, activity_level, pace)
 
 
 @router.get("/nutrition/day")
@@ -113,6 +122,39 @@ def get_fasting(profile_id: int = Depends(current_profile)):
     return fasting.overview(profile_id, _profile(profile_id))
 
 
+@router.get("/fasting/recommendation")
+def fasting_recommendation(profile_id: int = Depends(current_profile)):
+    """Regelbasierte Empfehlung (ohne KI) plus Quote, gewaehlte Fastenart und alle Protokolle."""
+    rec = fasting_advice.evaluate(profile_id)
+    return {**rec, "quota": fasting_advice.quota(fasting.history(profile_id)),
+            "current_kind": _profile(profile_id)["fasting_kind"],
+            "protocols": fasting_advice.protocols(), "disclaimer": fasting_advice.DISCLAIMER}
+
+
+@router.get("/fasting/tips")
+def fasting_tips(kind: Optional[str] = Query(None, max_length=20)):
+    """Feste Tipps je Fastenart (offline nutzbar, ohne KI). Unbekannte Art: nur allgemeine Tipps."""
+    return fasting_advice.phase_tips(kind)
+
+
+@router.post("/fasting/advice")
+def fasting_advice_ai(profile_id: int = Depends(current_profile)):
+    """Erklaerung und Tipps zur Regelentscheidung ueber Claude Code – nur auf Knopfdruck.
+    Die KI aendert die Entscheidung nicht; bei einer Sperre wird sie nicht aufgerufen."""
+    rec = fasting_advice.evaluate(profile_id)
+    if not rec["allowed"]:
+        return fasting_advice.blocked_answer(rec)
+    if not claude_cli.available():
+        raise HTTPException(400, "Für Tipps braucht es Claude Code auf dem Server (claude).")
+    try:
+        res = fasting_advice.advise(profile_id, rec)
+    except fasting_advice.Busy as e:
+        raise HTTPException(429, "Die Tipps werden gerade schon erstellt – einen Moment.") from e
+    if "error" in res:
+        raise HTTPException(422, res["error"])
+    return res
+
+
 @router.post("/fasting/start")
 def start_fast(body: FastStart):
     profile_id = current_profile(body.profile_id)
@@ -125,6 +167,10 @@ def start_fast(body: FastStart):
     target = fasting.target_hours(_profile(profile_id))
     if not target:
         raise HTTPException(400, "Intervallfasten ist im Profil nicht eingeschaltet.")
+    blocked = fasting_advice.start_blockers(profile_id)
+    if blocked:      # Selbstauskunft, Alter, BMI: serverseitig, nicht nur im Formular
+        raise HTTPException(409, "Intervallfasten wird für dich nicht empfohlen: "
+                            + " ".join(b["text"] for b in blocked))
     now = datetime.now(timezone.utc)
     started = _ts(body.started_at, "Startzeit") if body.started_at else now
     if now - started > fasting.MAX_PAST:

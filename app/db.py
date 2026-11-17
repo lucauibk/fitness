@@ -250,6 +250,14 @@ CREATE TABLE IF NOT EXISTS workout_reviews (
     model TEXT,
     updated_at TEXT NOT NULL
 );
+-- Fasten-Berater (app/fasting_advice.py): KI-Text je Profil und Eingabe-Hash, 24 h gueltig
+CREATE TABLE IF NOT EXISTS fasting_advice (
+    profile_id INTEGER NOT NULL,
+    input_hash TEXT NOT NULL,
+    body TEXT NOT NULL,                  -- JSON {"erklaerung", "tipps"}
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (profile_id, input_hash)
+);
 CREATE INDEX IF NOT EXISTS idx_coach_messages_profile ON coach_messages(profile_id, id);
 CREATE INDEX IF NOT EXISTS idx_coach_notes_profile ON coach_notes(profile_id, status);
 CREATE INDEX IF NOT EXISTS idx_food_log_day ON food_log(profile_id, date);
@@ -295,7 +303,12 @@ MIGRATIONS = {
                  # Freitext "was mich motiviert" – liest nur der Coach (Chat und Morgen-Coach)
                  "motivation": "TEXT",
                  # Intervallfasten: NULL = aus; fasting_hours nur bei "custom"
-                 "fasting_kind": "TEXT", "fasting_hours": "REAL"},
+                 "fasting_kind": "TEXT", "fasting_hours": "REAL",
+                 # Fasten-Berater: Selbstauskunft (kommagetrennt, siehe FASTING_FLAGS) und
+                 # gewuenschtes Essensfenster (morgens | abends | egal; NULL = keine Angabe)
+                 "fasting_flags": "TEXT", "eating_window_pref": "TEXT",
+                 # Tempo des Ziels bei Abnehmen/Aufbau (sanft | standard | zuegig; NULL = standard)
+                 "nutrition_pace": "TEXT"},
     # Empfohlene Satzpause je Uebung
     "split_exercises": {"rest_seconds": "INTEGER", "base_sets": "INTEGER",
                         # Obergrenze der Blockwochen (Zeitbudget der Einheit); NULL = keine
@@ -387,14 +400,31 @@ def parse_focus(value):
     return [f for f in str(value or "").split(",") if f in FOCUS]
 
 
+# Selbstauskunft, bei der Fasten nicht empfohlen wird (Reihenfolge = Speicherreihenfolge)
+FASTING_FLAGS = ("pregnant", "eating_disorder", "diabetes_meds")
+EATING_WINDOWS = ("morgens", "abends", "egal")
+
+
+def parse_flags(value):
+    """"eating_disorder,pregnant" -> Liste in fester Reihenfolge; Unbekanntes faellt weg."""
+    have = set(str(value or "").split(","))
+    return [f for f in FASTING_FLAGS if f in have]
+
+
+def format_flags(flags):
+    """Liste -> Text fuer die DB (doppelte und unbekannte raus, feste Reihenfolge); leer -> None."""
+    return ",".join(parse_flags(",".join(flags or []))) or None
+
+
 def profile_out(row):
-    """Profil fuer die API: Wochentage und Fokus als Listen."""
+    """Profil fuer die API: Wochentage, Fokus und Fasten-Flags als Listen."""
     if row is None:
         return None
     row = dict(row)
     row["train_weekdays"] = parse_weekdays(row.get("train_weekdays"))
     row["available_weekdays"] = parse_weekdays(row.get("available_weekdays"))
     row["focus"] = parse_focus(row.get("focus"))
+    row["fasting_flags"] = parse_flags(row.get("fasting_flags"))
     return row
 
 
@@ -605,7 +635,8 @@ WRITABLE = {
     "profiles": ("name", "color", "birth_year", "sex", "height_cm", "goal", "experience", "experience_auto", "available_weekdays",
                  "days_per_week", "session_minutes", "limitations", "train_weekdays", "focus",
                  "activity_level", "kcal_goal", "protein_goal", "carbs_goal", "fat_goal",
-                 "nutrition_auto", "water_goal_ml", "motivation", "fasting_kind", "fasting_hours"),
+                 "nutrition_auto", "water_goal_ml", "motivation", "fasting_kind", "fasting_hours",
+                 "fasting_flags", "eating_window_pref", "nutrition_pace"),
     "exercises": ("name", "muscle_group", "unit", "archived", "pattern", "kind",
                   "instructions", "mistakes", "muscles_primary", "muscles_secondary",
                   "equipment", "video_query"),

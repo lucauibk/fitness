@@ -261,9 +261,10 @@ def test_migration_ergaenzt_spalten_in_alter_db(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", old)
     db.init()
     cols = {r["name"] for r in db.rows("PRAGMA table_info(profiles)")}
-    assert {"fasting_kind", "fasting_hours"} <= cols
+    assert {"fasting_kind", "fasting_hours", "fasting_flags", "eating_window_pref"} <= cols
     assert db.one("SELECT name, fasting_kind FROM profiles")["name"] == "Alt"
     assert db.one("SELECT COUNT(*) AS n FROM fasts")["n"] == 0
+    assert db.one("SELECT COUNT(*) AS n FROM fasting_advice")["n"] == 0
 
 
 def test_coach_kontext_enthaelt_kein_fasten(profile_id):
