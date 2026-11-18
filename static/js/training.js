@@ -8,6 +8,7 @@ import * as outbox from "./outbox.js";
 import { openCoach } from "./coach.js";
 import { openExercise } from "./uebungen.js";
 import { nextLabel, nextSet, nextTraining } from "./naechster.js";
+import { rememberRest, restFor, restNote } from "./pause.js";
 
 let root;
 let today = null;     // /api/today fuer den Startbildschirm
@@ -778,8 +779,13 @@ async function finish() {
 }
 
 // ---------------------------------------------------------- Pausen-Timer
-const REST = { compound: 120, isolation: 75 };
 let restTick = null;
+
+// Gemerkte Pausenlänge je Übung (pause.js) – je Profil, nur auf diesem Gerät
+const restLenKey = () => `restlen.${getProfile()}`;
+const savedRests = () => prefs.get(restLenKey(), {}) || {};
+const restExercise = (r) => (Number.isInteger(r?.from) ? getDraft()?.exercises?.[r.from] : null);
+let restToast = null;   // nur eine Rückmeldung, auch wenn man mehrmals tippt
 
 function restBar() {
   let bar = document.getElementById("restBar");
@@ -789,8 +795,8 @@ function restBar() {
     bar.className = "rest-bar";
     bar.setAttribute("role", "timer");
     bar.innerHTML = `<span class="rest-label">Pause</span><b data-rest-time></b>
-      <button type="button" class="btn small ghost" data-rest="-15">−15 s</button>
-      <button type="button" class="btn small ghost" data-rest="15">+15 s</button>
+      <button type="button" class="btn small ghost" data-rest="-15" aria-label="15 Sekunden kürzer, für diese Übung merken">−15 s</button>
+      <button type="button" class="btn small ghost" data-rest="15" aria-label="15 Sekunden länger, für diese Übung merken">+15 s</button>
       <button type="button" class="btn small tonal" data-rest="skip">Weiter</button>
       <small class="rest-next" data-rest-next hidden></small>`;
     bar.addEventListener("click", (ev) => {
@@ -798,7 +804,19 @@ function restBar() {
       if (!b) return;
       if (b.dataset.rest === "skip") return stopRest();
       const r = prefs.get("rest");
-      if (r) { r.until += Number(b.dataset.rest) * 1000; prefs.set("rest", r); tick(); }
+      if (!r) return;
+      const delta = Number(b.dataset.rest);
+      r.until += delta * 1000;
+      prefs.set("rest", r);
+      // Die Änderung gilt auch für die nächsten Pausen dieser Übung
+      const ex = restExercise(r);
+      if (ex) {
+        const { saved, seconds } = rememberRest(savedRests(), ex, delta);
+        prefs.set(restLenKey(), saved);
+        restToast?.remove();
+        restToast = toast(restNote(ex, seconds));
+      }
+      tick();
     });
     document.body.appendChild(bar);
   }
@@ -973,8 +991,7 @@ export async function mount(el) {
       const d = getDraft();
       const allDone = d && doneCount(d) === totalCount(d);
       if (res?.s.done && !allDone) {
-        const rest = res.ex.rest || (res.ex.kind === "compound" ? REST.compound : REST.isolation);
-        startRest(rest, i);
+        startRest(restFor(res.ex, savedRests()), i);
       } else if (allDone) {
         stopRest();   // die Pause vom vorletzten Satz lief sonst weiter
       }
