@@ -573,7 +573,8 @@ if (window.visualViewport) {
 // ------------------------------------------------------------ Toast
 /** toast("Erledigt", { action: "Rückgängig", onAction: fn, error: false, sticky: false })
  *  Fehler bleiben laenger und lassen sich wegtippen; sticky bleibt, bis man es wegtippt –
- *  fuer Meldungen, bei denen etwas nicht gespeichert wurde. */
+ *  fuer Meldungen, bei denen etwas nicht gespeichert wurde. Gibt das Element zurueck, damit
+ *  eine Ansicht ihre eigene Meldung ersetzen kann. */
 export function toast(message, { action, onAction, error = false, duration, sticky = false } = {}) {
   const box = document.getElementById("toasts");
   const t = document.createElement("div");
@@ -598,6 +599,7 @@ export function toast(message, { action, onAction, error = false, duration, stic
     remove();
     try { await onAction?.(); } catch (e) { toast(e.message, { error: true }); }
   });
+  return t;
 }
 
 // --------------------------------------------------- Loeschen mit Rueckgaengig
