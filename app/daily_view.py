@@ -11,8 +11,8 @@ EVENT_DAYS = 3
 log = logging.getLogger(__name__)
 
 
-def adjusted_day(profile_id, day, checkin):
-    plan = stats.day_plan(profile_id, day)
+def adjusted_day(profile_id, day, checkin, split=None):
+    plan = stats.day_plan(profile_id, day, split)
     plan["exercises"] = readiness.adjust(plan["exercises"], checkin)
     return plan
 
@@ -46,17 +46,16 @@ def build(profile_id):
         block_info = autoregulate.review(profile_id)
     except Exception:   # noqa: BLE001 – die Startseite darf daran nicht haengen
         log.exception("Wochen-Check fehlgeschlagen")
-    base = stats.today_view(profile_id)
+    # Einmal laden, nachdem der Wochen-Check den Plan evtl. angepasst hat – alles danach liest nur.
+    split = db.active_split(profile_id)
+    base = stats.today_view(profile_id, split)
     day_iso = stats.today().isoformat()
     checkin = readiness.get(profile_id, day_iso)
     level_key = checkin["level"]["key"] if checkin else None
 
-    split = db.active_split(profile_id) if base.get("split") else None
-    raw_day = None
-    if split and base.get("day"):
-        raw_day = next((d for d in split["days"] if d["id"] == base["day"]["id"]), None)
+    raw_day = base.get("day")
     if raw_day:
-        base["day"] = adjusted_day(profile_id, raw_day, checkin)
+        base["day"] = adjusted_day(profile_id, raw_day, checkin, split)
 
     # Muskelkater in Gruppen von heute -> anderen Tag ohne diese Gruppen anbieten
     sore = readiness.sore_groups_in(raw_day, checkin)
