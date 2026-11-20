@@ -351,10 +351,11 @@ def rotation_day(profile_id, split):
     return days[(ids.index(last["split_day_id"]) + 1) % len(days)]
 
 
-def day_plan(profile_id, day):
-    """Ein Trainingstag mit letzten Werten und Vorschlägen je Übung – nach Blockwoche."""
+def day_plan(profile_id, day, split=None):
+    """Ein Trainingstag mit letzten Werten und Vorschlägen je Übung – nach Blockwoche.
+    `split`: schon geladener aktiver Split, spart das erneute Laden in blocks.ensure."""
     from .planner import blocks, progression
-    block = blocks.ensure(profile_id)
+    block = blocks.ensure(profile_id, split)
     st = blocks.state(block) if block else None
     ctx = progression.context(profile_id, [i["exercise_id"] for i in day["exercises"]])
     items = []
@@ -382,8 +383,11 @@ def day_plan(profile_id, day):
             "exercises": items, "block": st}
 
 
-def today_view(profile_id):
-    split = db.active_split(profile_id)
+def today_view(profile_id, split=None):
+    """Grundgeruest fuer "Heute": welcher Tag dran ist und die letzte Einheit. `day` ist der rohe
+    Split-Tag – die Vorschlaege rechnet daily_view.build einmal, gleich mit dem Check-in.
+    `split`: schon geladener aktiver Split (sonst wird er hier geladen)."""
+    split = split or db.active_split(profile_id)
     if not split:
         return {"split": None, "day": None, "fixed": False, "days": [],
                 "last_workout": None}
@@ -394,7 +398,7 @@ def today_view(profile_id):
                    " WHERE w.profile_id=? ORDER BY at DESC, w.id DESC LIMIT 1", (profile_id,))
     return {
         "split": {"id": split["id"], "name": split["name"]},
-        "day": day_plan(profile_id, day) if day else None,
+        "day": day,
         "fixed": fixed,
         "note": note,
         "position": next((i + 1 for i, d in enumerate(split["days"]) if day and d["id"] == day["id"]), None),
