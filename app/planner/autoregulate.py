@@ -63,6 +63,7 @@ MAX_BLOCK_WEEKS = 8
 FATIGUE_TAU_DAYS = 5          # harte Saetze klingen mit etwa 5 Tagen Zeitkonstante ab
 FATIGUE_HIGH = 1.3            # 30 % ueber dem eigenen Schnitt der Vorwochen
 FATIGUE_BASELINE_DAYS = 28
+SORENESS_WINDOW_DAYS = 7      # „anhaltender Muskelkater“: drei Check-ins innerhalb dieser Tage
 
 
 def fatigue(profile_id, on_date=None):
@@ -112,7 +113,12 @@ def deload_signals(profile_id, split, on_date=None):
     stuck = [e["name"] for e in rows if progression.is_plateau(hist[e["exercise_id"]])]
     if len(stuck) >= 2:
         signals.append(f"Stillstand bei mehreren Übungen ({', '.join(stuck[:3])})")
-    recent = db.rows("SELECT soreness FROM checkins WHERE profile_id=? ORDER BY date DESC LIMIT 3", (profile_id,))
+    # Nur Check-ins der letzten Tage bis zum Pruef-Tag: drei alte Eintraege mit Muskelkater (seither
+    # keiner mehr) sind kein *anhaltender* Muskelkater.
+    day = on_date or stats.today()
+    recent = db.rows("SELECT soreness FROM checkins WHERE profile_id=? AND date BETWEEN ? AND ?"
+                     " ORDER BY date DESC LIMIT 3",
+                     (profile_id, (day - timedelta(days=SORENESS_WINDOW_DAYS - 1)).isoformat(), day.isoformat()))
     sore = sum(1 for r in recent if max((json.loads(r["soreness"] or "{}") or {"x": 0}).values()) >= 2)
     if len(recent) >= 3 and sore >= 3:
         signals.append("Muskelkater hält dauerhaft an")
