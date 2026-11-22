@@ -1,0 +1,10 @@
+[Unit]
+Description=Fitness: neuen Stand von GitHub holen und neu starten (deploy/pi-pull.sh)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/fitness
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash %h/fitness/deploy/pi-pull.sh
+TimeoutStartSec=900

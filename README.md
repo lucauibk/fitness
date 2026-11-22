@@ -110,9 +110,25 @@ Laeuft gegen eine eigene, temporaere SQLite-Datei – `fitness.db` bleibt unange
 
 ## Deploy auf den Pi
 
+**Automatisch von GitHub:** Der Pi schaut alle 5 Minuten, ob es auf `main` einen neuen Commit gibt,
+holt ihn und startet neu (`deploy/pi-pull.sh`, Timer `fitness-update.timer`). Startet der neue Stand
+nicht, geht es zurück auf den alten, und dieser Commit wird nicht erneut probiert. Einmalig auf dem Pi:
+
+```
+curl -fsSL https://raw.githubusercontent.com/lucauibk/fitness/main/deploy/pi-pull.sh | bash
+```
+
+Sofort statt in bis zu 5 Minuten: `systemctl --user start fitness-update` (Log:
+`journalctl --user -u fitness-update -n 20`). `~/fitness/deploy/pi-pull.sh --force` startet auch ohne
+neuen Commit neu.
+
+**Vom Mac (lokaler Stand, auch ungepusht):**
+
 ```
 ./deploy/pi-deploy.sh
 ```
+
+Das bleibt auf dem Pi, bis der nächste Commit auf `main` kommt.
 
 Danach `tailscale serve --bg --https=8443 http://127.0.0.1:8001` einmalig einrichten
 (Bestand prüfen mit `tailscale serve status`) → erreichbar unter
