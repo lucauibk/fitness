@@ -1,0 +1,9 @@
+[Unit]
+Description=Fitness: alle 5 Minuten auf neuen Stand bei GitHub pruefen
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
