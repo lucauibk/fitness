@@ -1,9 +1,12 @@
 /** Körper: Gewicht, Körperfett, Muskelmasse, Umfänge – manuell oder aus einem
- *  Screenshot der Studio-Körperanalyse (ViCoach), den die KI ausliest. */
+ *  Screenshot der Studio-Körperanalyse (ViCoach), den die KI ausliest. Der QR-Code am
+ *  mescan-Gerät verknüpft die Messung (keine doppelten Importe, siehe vicoach.js). */
 import { $, api, armDelete, closeSheet, deleteLater, esc, formData, formError, getProfile,
   icon, isPendingDelete, openSheet, skeletonCards, submitOnce, toast, parseYmd, prefs } from "./util.js";
 import * as outbox from "./outbox.js";
 import { sparkline } from "./fortschritt.js";
+import { scanQr } from "./scanner.js";
+import { parseVicoachLink, vicoachClientId } from "./vicoach.js";
 
 let root;
 let data = null;
@@ -20,6 +23,10 @@ const RANGES = [[4, "4 Wochen"], [12, "12 Wochen"], [0, "Alles"]];
 let range = prefs.get("bodyRange", 12);
 const GIRTHS = ["waist_cm", "hip_cm", "chest_cm", "arm_cm", "thigh_cm", "neck_cm"];
 const fmt = (v, key) => `${Number(v).toLocaleString("de-AT", { maximumFractionDigits: 1 })}${UNITS[key] ? ` ${UNITS[key]}` : ""}`;
+const todayIso = () => {
+  const t = new Date();
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+};
 const dm = (d) => parseYmd(d).toLocaleDateString("de-AT", { day: "numeric", month: "short" });
 
 const signed = (v, key) => `${v > 0 ? "+" : "−"}${fmt(Math.abs(v), key)}`;
@@ -114,8 +121,11 @@ function render() {
   const girths = GIRTHS.filter((k) => data.latest[k]);
   root.innerHTML = `<div class="page-actions">
       <button type="button" class="btn primary" data-new>${icon("plus")} Messung eintragen</button>
+      <button type="button" class="link-btn" data-qr>${icon("camera")} Studio-QR scannen</button>
       ${data.ai_available ? `<button type="button" class="link-btn" data-scan>${icon("camera")} Aus ViCoach-Screenshot einlesen</button>` : ""}
     </div>
+    ${openQr() ? `<p class="callout">Studio-Messung vom ${dm(openQr().date)} gescannt, die Werte fehlen noch.
+      <button type="button" class="link-btn" data-qr-continue>Weiter</button></p>` : ""}
     ${pend.length ? `<p class="callout">${pend.length} Messung(en) warten auf Verbindung.</p>` : ""}
     ${hasAny ? `${weightHero()}
       ${COMPOSITION.some((k) => data.latest[k]) ? `<div class="body-grid three">${COMPOSITION.map(tile).join("")}</div>` : ""}
@@ -151,10 +161,9 @@ function field(key, value) {
     <input name="${key}" type="number" inputmode="decimal" step="0.1" min="0" value="${value ?? ""}"></label>`;
 }
 
-function openForm({ values = {}, date = null, source = "manuell", dropped = [] } = {}) {
-  const today = new Date();
-  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const scanned = source === "vicoach";
+function openForm({ values = {}, date = null, source = "manuell", dropped = [], clientId = null, byHand = false } = {}) {
+  const iso = todayIso();
+  const scanned = source === "vicoach" && !byHand;
   const pairs = (keys) => keys.reduce((out, k, i) => (i % 2 ? out : [...out, keys.slice(i, i + 2)]), [])
     .map((pair) => `<div class="field-row">${pair.map((k) => field(k, values[k])).join("")}</div>`).join("");
   const sheet = openSheet({
@@ -170,7 +179,7 @@ function openForm({ values = {}, date = null, source = "manuell", dropped = [] }
         ${pairs(GIRTHS)}
         <p class="hint">Taille auf Nabelhöhe, Hals unter dem Kehlkopf, Hüfte an der breitesten Stelle.</p>
       </details>
-      <input type="hidden" name="source" value="${source}">
+      <input type="hidden" name="source" value="${esc(source)}">
     </form>`,
     footer: `<span class="grow"></span>
       <button type="button" class="btn ghost" data-close>Abbrechen</button>
@@ -179,8 +188,9 @@ function openForm({ values = {}, date = null, source = "manuell", dropped = [] }
   const form = $("#measureForm", sheet);
   submitOnce(form, async () => {
     try {
-      const body = { ...formData(form), profile_id: getProfile(), client_id: outbox.uuid() };
+      const body = { ...formData(form), profile_id: getProfile(), client_id: clientId || outbox.uuid() };
       const res = await outbox.send({ path: "measurements", body });
+      if (clientId && openQr() && vicoachClientId(openQr().measurementId) === clientId) prefs.set("vicoachQr", null);
       closeSheet();
       toast(res.queued ? "Gespeichert – wird gesendet, sobald wieder Verbindung da ist" : "Messung gespeichert");
       window.dispatchEvent(new CustomEvent("data-changed"));
@@ -207,7 +217,7 @@ function shrink(file) {
   });
 }
 
-function openScan() {
+function openScan(qr = null) {
   const sheet = openSheet({
     title: "ViCoach-Screenshot einlesen",
     body: `<p class="hint">Mach in der ViCoach-App einen Screenshot vom Messergebnis (mescan/bodyscan)
@@ -229,13 +239,68 @@ function openScan() {
       const image = await shrink(file);
       const res = await api("measurements/scan", { method: "POST", body: { image, media_type: "image/jpeg" }, timeout: 65000 });
       closeSheet(false, { replacing: true });
-      openForm({ values: res.values, date: res.date, source: "vicoach", dropped: res.dropped });
+      openForm({ values: res.values, date: res.date || qr?.date, source: "vicoach", dropped: res.dropped,
+        clientId: qr ? vicoachClientId(qr.measurementId) : null });
     } catch (e) {
       status.textContent = e.offline ? "Zum Einlesen braucht es eine Verbindung." : e.message;
       label.classList.remove("disabled");
       input.value = "";
     }
   });
+}
+
+// ------------------------------------------------------------- Studio-QR (mescan)
+/** Gescannte, noch nicht gespeicherte Studio-Messung des aktuellen Profils. Bleibt über einen
+ *  Abstecher in die ViCoach-App (oder einen Neustart der App) erhalten. */
+function openQr() {
+  const qr = prefs.get("vicoachQr");
+  if (!qr || qr.profile !== getProfile()) return null;
+  const cid = vicoachClientId(qr.measurementId);
+  if (data?.entries.some((e) => e.client_id === cid)) return null;
+  return qr;
+}
+
+function alreadySaved(cid) {
+  return data.entries.some((e) => e.client_id === cid)
+    || outbox.pending("measurements").some((e) => e.client_id === cid);
+}
+
+async function scanStudioQr() {
+  const code = await scanQr();
+  if (!code) return;
+  const link = parseVicoachLink(code);
+  if (!link) return toast("Das ist kein QR-Code vom mescan/ViCoach.", { error: true });
+  if (alreadySaved(vicoachClientId(link.measurementId))) return toast("Diese Messung ist schon gespeichert.");
+  const prev = prefs.get("vicoachQr");
+  const qr = prev?.measurementId === link.measurementId && prev.profile === getProfile() ? prev
+    : { measurementId: link.measurementId, url: link.url, date: todayIso(), profile: getProfile() };
+  prefs.set("vicoachQr", qr);
+  render();
+  openQrSheet(qr);
+}
+
+function openQrSheet(qr) {
+  const sheet = openSheet({
+    title: "Studio-Messung",
+    body: `<p class="callout">${icon("check")} Messung vom ${dm(qr.date)} erkannt.</p>
+      <ol class="hint">
+        <li>In ViCoach übernehmen, damit die Messung in deinem ViCoach-Konto landet.</li>
+        <li>Dort das Ergebnis öffnen, einen Screenshot machen und hier einlesen.</li>
+      </ol>
+      ${qr.url ? `<a class="btn ghost" href="${esc(qr.url)}" target="_blank" rel="noopener noreferrer">In ViCoach öffnen</a>` : ""}
+      <p class="hint">ViCoach hat keine Schnittstelle, darum kommen die Werte über den Screenshot.
+        Der QR-Code sorgt dafür, dass dieselbe Messung nicht doppelt gespeichert wird.</p>`,
+    footer: `<button type="button" class="btn danger ghost" data-qr-drop>Verwerfen</button>
+      <span class="grow"></span>
+      ${data.ai_available ? `<button type="button" class="btn primary" data-qr-scan>${icon("camera")} Screenshot einlesen</button>`
+        : `<button type="button" class="btn primary" data-qr-hand>Werte eintragen</button>`}`,
+  });
+  $("[data-qr-scan]", sheet)?.addEventListener("click", () => { closeSheet(false, { replacing: true }); openScan(qr); });
+  $("[data-qr-hand]", sheet)?.addEventListener("click", () => {
+    closeSheet(false, { replacing: true });
+    openForm({ date: qr.date, source: "vicoach", byHand: true, clientId: vicoachClientId(qr.measurementId) });
+  });
+  $("[data-qr-drop]", sheet).addEventListener("click", () => { prefs.set("vicoachQr", null); closeSheet(); render(); });
 }
 
 function openEntry(id) {
@@ -262,6 +327,8 @@ export async function mount(el) {
   el.addEventListener("click", (ev) => {
     if (ev.target.closest("[data-new]")) return openForm();
     if (ev.target.closest("[data-scan]")) return openScan();
+    if (ev.target.closest("[data-qr]")) return scanStudioQr();
+    if (ev.target.closest("[data-qr-continue]")) { const qr = openQr(); return qr && openQrSheet(qr); }
     if (ev.target.closest("[data-tips]")) return fetchTips();
     const r = ev.target.closest("[data-range]");
     if (r) { range = Number(r.dataset.range); prefs.set("bodyRange", range); return render(); }

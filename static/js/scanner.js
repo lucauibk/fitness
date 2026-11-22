@@ -1,6 +1,6 @@
-/** Barcode-Scanner über die Handykamera.
+/** Barcode- und QR-Scanner über die Handykamera.
  *  Nutzt BarcodeDetector, wo der Browser ihn hat (Android Chrome), sonst die mitgelieferte
- *  ZXing-Bibliothek (iPhone/Safari). Man kann den Code immer auch von Hand eintippen.
+ *  ZXing-Bibliothek (iPhone/Safari). Einen Barcode kann man immer auch von Hand eintippen.
  *  Liefert den Code oder null (abgebrochen). */
 import { icon } from "./util.js";
 
@@ -18,24 +18,32 @@ function loadZxing() {
   return zxingLoading;
 }
 
-const FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e"];
+const BARCODE = {
+  formats: ["ean_13", "ean_8", "upc_a", "upc_e"],
+  zxing: ["EAN_13", "EAN_8", "UPC_A", "UPC_E"],
+  label: "Barcode", manual: true,
+};
+const QR = { formats: ["qr_code"], zxing: ["QR_CODE"], label: "QR-Code", manual: false };
 
-export function scanBarcode() {
+export const scanBarcode = () => scan(BARCODE);
+export const scanQr = () => scan(QR);
+
+function scan(mode) {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     overlay.className = "scanner";
     overlay.setAttribute("role", "dialog");
     overlay.setAttribute("aria-modal", "true");
-    overlay.setAttribute("aria-label", "Barcode scannen");
+    overlay.setAttribute("aria-label", `${mode.label} scannen`);
     const lastFocus = document.activeElement;
     overlay.innerHTML = `<video playsinline muted></video>
-      <div class="scanner-frame" aria-hidden="true"></div>
+      <div class="scanner-frame${mode.manual ? "" : " square"}" aria-hidden="true"></div>
       <div class="scanner-bar">
         <p data-msg>Kamera wird gestartet …</p>
-        <form class="scanner-manual">
+        ${mode.manual ? `<form class="scanner-manual">
           <input inputmode="numeric" pattern="[0-9]{6,14}" placeholder="Barcode eintippen" aria-label="Barcode eintippen">
           <button type="submit" class="btn small">OK</button>
-        </form>
+        </form>` : ""}
         <button type="button" class="btn ghost" data-cancel>${icon("x")} Abbrechen</button>
       </div>`;
     document.body.appendChild(overlay);
@@ -76,28 +84,29 @@ export function scanBarcode() {
     overlay.querySelector("[data-cancel]").focus({ preventScroll: true });
 
     overlay.querySelector("[data-cancel]").addEventListener("click", () => finish(null));
-    overlay.querySelector("form").addEventListener("submit", (ev) => {
+    overlay.querySelector("form")?.addEventListener("submit", (ev) => {
       ev.preventDefault();
       const v = ev.target.querySelector("input").value.trim();
       if (/^\d{6,14}$/.test(v)) finish(v);
       else msg.textContent = "Bitte 6 bis 14 Ziffern eingeben.";
     });
 
+    const typeIt = mode.manual ? " – bitte den Code eintippen" : "";
     (async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
-        msg.textContent = "Kamera ist hier nicht verfügbar – bitte den Code eintippen.";
+        msg.textContent = `Kamera ist hier nicht verfügbar${typeIt}.`;
         return;
       }
       try {
         if ("BarcodeDetector" in window) {
-          const supported = await window.BarcodeDetector.getSupportedFormats?.() || FORMATS;
-          const detector = new window.BarcodeDetector({ formats: FORMATS.filter((f) => supported.includes(f)) });
+          const supported = await window.BarcodeDetector.getSupportedFormats?.() || mode.formats;
+          const detector = new window.BarcodeDetector({ formats: mode.formats.filter((f) => supported.includes(f)) });
           stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
           // Abgebrochen, waehrend die Kamera noch startete: sofort wieder aus (Kamera-LED).
           if (done) { stream.getTracks().forEach((t) => t.stop()); return; }
           video.srcObject = stream;
           await video.play();
-          msg.textContent = "Barcode in den Rahmen halten.";
+          msg.textContent = `${mode.label} in den Rahmen halten.`;
           const loop = async () => {
             if (done) return;
             try {
@@ -111,17 +120,17 @@ export function scanBarcode() {
           const ZXing = await loadZxing();
           if (done) return;
           const hints = new Map([[ZXing.DecodeHintType.POSSIBLE_FORMATS,
-            [ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8, ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E]]]);
+            mode.zxing.map((f) => ZXing.BarcodeFormat[f])]]);
           reader = new ZXing.BrowserMultiFormatReader(hints);
-          msg.textContent = "Barcode in den Rahmen halten.";
+          msg.textContent = `${mode.label} in den Rahmen halten.`;
           await reader.decodeFromConstraints({ video: { facingMode: "environment" } }, video, (result) => {
             if (result) finish(result.getText());
           });
         }
       } catch (e) {
         msg.textContent = e?.name === "NotAllowedError"
-          ? "Kein Zugriff auf die Kamera – bitte erlauben oder den Code eintippen."
-          : `Kamera-Fehler: ${e?.message || e} – bitte den Code eintippen.`;
+          ? `Kein Zugriff auf die Kamera – bitte erlauben${mode.manual ? " oder den Code eintippen" : ""}.`
+          : `Kamera-Fehler: ${e?.message || e}${typeIt}.`;
       }
     })();
   });

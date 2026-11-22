@@ -794,6 +794,7 @@ button.chip { border: 0; font-family: inherit; }
 .scanner video { flex: 1; width: 100%; min-height: 0; object-fit: cover; }
 .scanner-frame { position: absolute; left: 12%; right: 12%; top: 30%; height: 22%;
   border: 3px solid rgb(255 255 255 / .9); border-radius: 16px; box-shadow: 0 0 0 100vmax rgb(0 0 0 / .35); pointer-events: none; }
+.scanner-frame.square { left: 50%; right: auto; top: 22%; width: min(70vw, 50vh); height: auto; aspect-ratio: 1; transform: translateX(-50%); }
 .scanner-bar { position: relative; background: var(--surface); padding: var(--s3) var(--s4) calc(var(--s3) + env(safe-area-inset-bottom));
   display: grid; gap: var(--s2); }
 .scanner-bar p { margin: 0; color: var(--muted); font-size: var(--fs-sm); }

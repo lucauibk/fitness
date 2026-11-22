@@ -1,6 +1,7 @@
 """Koerpermessungen inkl. Einlesen einer Studio-Koerperanalyse per Screenshot."""
 import base64
 import binascii
+import re
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,6 +17,8 @@ FIELD_NAMES.update({"image": "Bild", "media_type": "Bildformat"})
 
 Num = Field(None, allow_inf_nan=False)
 MAX_IMAGE_B64 = 6_000_000
+# Studio-QR (mescan): client_id = "vicoach:" + measurementId aus dem QR-Code (static/js/vicoach.js)
+VICOACH_ID = re.compile(r"vicoach:[0-9a-f]{24}")
 
 
 class MeasurementIn(BaseModel):
@@ -57,6 +60,12 @@ def list_measurements(profile_id: int = Depends(current_profile)):
 @router.post("/measurements")
 def add_measurement(data: MeasurementIn):
     profile_id = current_profile(data.profile_id)
+    if data.client_id and data.client_id.startswith("vicoach:"):
+        if not VICOACH_ID.fullmatch(data.client_id) or data.source != "vicoach":
+            raise HTTPException(400, "Studio-Messung: ungültige Kennung.")
+        other = db.one("SELECT profile_id FROM body_measurements WHERE client_id=?", (data.client_id,))
+        if other and other["profile_id"] != profile_id:
+            raise HTTPException(409, "Diese Studio-Messung gehört schon zu einem anderen Profil.")
     payload = data.model_dump()
     payload["date"] = _day(data.date)
     values, dropped = body.clean(payload)
