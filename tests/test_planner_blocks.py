@@ -257,3 +257,30 @@ def test_today_shows_only_fresh_plan_events():
     from app import daily_view
     events = [{"date": "2026-10-13", "text": "neu"}, {"date": "2026-10-08", "text": "alt"}]
     assert [e["text"] for e in daily_view.recent_events(events, date(2026, 10, 14))] == ["neu"]
+
+
+def _sore_checkin(profile_id, day):
+    with db.connect() as c:
+        c.execute("INSERT INTO checkins (profile_id, date, sleep, stress, energy, soreness, readiness)"
+                  " VALUES (?,?,3,3,3,?,50)", (profile_id, day.isoformat(), '{"brust": 3}'))
+
+
+def test_soreness_signal_only_counts_recent_checkins(profile_id):
+    """„Muskelkater hält dauerhaft an“ heißt: in den letzten Tagen. Drei Check-ins mit Muskelkater von vor
+    einem Monat, seither keine mehr, dürfen kein Ermüdungssignal mehr liefern."""
+    _setup(profile_id)
+    split = db.active_split(profile_id)
+    for k in range(3):
+        _sore_checkin(profile_id, MONDAY + timedelta(days=k))
+    assert any("Muskelkater" in s for s in autoregulate.deload_signals(profile_id, split, MONDAY + timedelta(days=2)))
+    month_later = MONDAY + timedelta(days=32)
+    assert not any("Muskelkater" in s for s in autoregulate.deload_signals(profile_id, split, month_later))
+
+
+def test_soreness_signal_ignores_checkins_after_the_review_day(profile_id):
+    """Der Wochen-Check für einen Tag sieht nur Check-ins bis zu diesem Tag."""
+    _setup(profile_id)
+    split = db.active_split(profile_id)
+    for k in range(3):
+        _sore_checkin(profile_id, MONDAY + timedelta(days=10 + k))
+    assert not any("Muskelkater" in s for s in autoregulate.deload_signals(profile_id, split, MONDAY))
